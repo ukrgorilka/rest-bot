@@ -673,5 +673,5 @@ def callback_inline(call):
 restore_timers()
 keep_alive()  # Запускаємо веб-сервер для пингу
 
-print('Бот запущен...)
+print('Бот запущен...')
 bot.infinity_polling()
