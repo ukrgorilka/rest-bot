@@ -30,7 +30,7 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАЛАШТУВАННЯ БОТА
 # ---------------------------------------------------------
-TOKEN = os.environ.get('BOT_TOKEN', 'ТВОЙ_ТОКЕН_БОТА')
+TOKEN = '8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g'
 bot = telebot.TeleBot(TOKEN)
 
 DATA_FILE = 'rests_data.json'
