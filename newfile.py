@@ -28,11 +28,13 @@ def keep_alive():
     t.start()
 
 # ---------------------------------------------------------
-# НАЛАШТУВАННЯ БОТА
+# НАЛАШТУВАННЯ БОТА ТА БАЗИ ДАНИХ
 # ---------------------------------------------------------
 TOKEN = '8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g'
 bot = telebot.TeleBot(TOKEN)
 
+# ID вашого приватного каналу для авто-бекапів
+DB_CHANNEL_ID = int(os.environ.get('DB_CHANNEL_ID', -1004334874700))
 DATA_FILE = 'rests_data.json'
 
 MONTHS = {
@@ -54,23 +56,57 @@ pending_requests = {}
 req_counter = 0
 
 # ---------------------------------------------------------
-# БЛОК РОБОТИ З ДАНИМИ (JSON)
+# БЛОК РОБОТИ З ДАНИМИ (JSON + TELEGRAM BACKUP)
 # ---------------------------------------------------------
 def load_data():
+    """Завантажує найновіший бекап із Telegram-каналу, якщо локального файлу немає або він застарів"""
+    data = {'rests': {}, 'history': {}, 'settings': {}}
+    
+    # Спроба отримати останній бекап-файл з Telegram-каналу при старті Render
+    try:
+        if DB_CHANNEL_ID:
+            chat = bot.get_chat(DB_CHANNEL_ID)
+            if chat and chat.pinned_message and chat.pinned_message.document:
+                file_info = bot.get_file(chat.pinned_message.document.file_id)
+                downloaded_file = bot.download_file(file_info.file_path)
+                with open(DATA_FILE, 'wb') as new_file:
+                    new_file.write(downloaded_file)
+                print("Успішно завантажено бекап з закрепу в Telegram-каналі!")
+    except Exception as e:
+        print(f"Інфо: Завантаження з Telegram пропущено або виникла помилка: {e}")
+
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if 'settings' not in data:
                     data['settings'] = {}
+                if 'rests' not in data:
+                    data['rests'] = {}
+                if 'history' not in data:
+                    data['history'] = {}
                 return data
         except Exception as e:
             print(f'Ошибка чтения файла: {e}')
-    return {'rests': {}, 'history': {}, 'settings': {}}
+
+    return data
 
 def save_data():
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(db, f, ensure_ascii=False, indent=4)
+    """Зберігає JSON локально та надсилає + закріплює оновлений файл у каналі-базі"""
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(db, f, ensure_ascii=False, indent=4)
+        
+        # Відправка та закреплення в Telegram-каналі
+        if DB_CHANNEL_ID:
+            with open(DATA_FILE, 'rb') as f:
+                msg = bot.send_document(DB_CHANNEL_ID, f, caption="💾 Auto-backup rests_data.json")
+                try:
+                    bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"Помилка при збереженні бекапу в Telegram: {e}")
 
 db = load_data()
 
