@@ -128,8 +128,6 @@ BAD_WORDS_PATTERNS = {
     ]
 }
 
-}
-
 pending_requests = {}
 req_counter = 0
 
