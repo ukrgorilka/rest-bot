@@ -227,7 +227,6 @@ BAD_WORDS_PATTERNS = {
     ]
 }
 
-
 pending_requests = {}
 req_counter = 0
 
@@ -305,6 +304,7 @@ def clean_tag(user_str):
     return user_str.replace('@', '')
 
 def make_link(user_name, user_id=None):
+    """Генерує клікабельне посилання на профіль користувача"""
     name = clean_tag(user_name)
     if user_id:
         return f'<a href="tg://user?id={user_id}">{name}</a>'
@@ -463,17 +463,113 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
         schedule_rest_timers(chat_id, clean_user, end_time, target_user_id)
 
 # ---------------------------------------------------------
-# ОБРОБНИКИ КОМАНД
+# ПРИВІТАННЯ ТА ПРОЩАННЯ (БАН ПРИ ВИХОДІ)
+# ---------------------------------------------------------
+@bot.message_handler(content_types=['new_chat_members'])
+def welcome_new_member(message):
+    for new_user in message.new_chat_members:
+        user_link = make_link(new_user.first_name, new_user.id)
+        bot.send_message(
+            message.chat.id,
+            f'👋 Добро пожаловать в чат, {user_link}! Рады тебя видеть! 🌸✨',
+            parse_mode='HTML'
+        )
+
+@bot.message_handler(content_types=['left_chat_member'])
+def goodbye_and_ban_member(message):
+    left_user = message.left_chat_member
+    user_link = make_link(left_user.first_name, left_user.id)
+    
+    # Спроба забанити користувача, який вийшов
+    try:
+        bot.ban_chat_member(message.chat.id, left_user.id)
+        bot.send_message(
+            message.chat.id,
+            f'👋 Пользователь {user_link} покинул чат и был забанен за выход! 🛑🔨',
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        bot.send_message(
+            message.chat.id,
+            f'👋 Пользователь {user_link} покинул чат.\n⚠️ Не удалось забанить (проверьте права бота).',
+            parse_mode='HTML'
+        )
+
+# ---------------------------------------------------------
+# ОБРОБНИКИ КОМАНД БАНУ ТА РОЗБАНУ
+# ---------------------------------------------------------
+@bot.message_handler(commands=['unban'])
+def unban_user_cmd(message):
+    chat_id = message.chat.id
+    if not is_admin(chat_id, message.from_user.id):
+        bot.reply_to(message, '❌ Эта команда доступна только администраторам!')
+        return
+
+    target_user_id = None
+    target_user_name = "Пользователь"
+
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_user_name = target_user.first_name
+    else:
+        args = message.text.split()
+        if len(args) > 1 and args[1].isdigit():
+            target_user_id = int(args[1])
+
+    if target_user_id:
+        try:
+            bot.unban_chat_member(chat_id, target_user_id, only_if_banned=True)
+            user_link = make_link(target_user_name, target_user_id)
+            bot.reply_to(message, f'✅ Пользователь {user_link} успешно разбанен!', parse_mode='HTML')
+        except Exception as e:
+            bot.reply_to(message, f'❌ Ошибка при разбане: {e}')
+    else:
+        bot.reply_to(message, '❌ Использование: ответьте на сообщение пользователя или введите `ответом на сообщение /unban` или `/unban <USER_ID>`', parse_mode='HTML')
+
+@bot.message_handler(commands=['ban'])
+def ban_user_cmd(message):
+    chat_id = message.chat.id
+    if not is_admin(chat_id, message.from_user.id):
+        bot.reply_to(message, '❌ Эта команда доступна только администраторам!')
+        return
+
+    target_user_id = None
+    target_user_name = "Пользователь"
+
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
+        target_user_id = target_user.id
+        target_user_name = target_user.first_name
+    else:
+        args = message.text.split()
+        if len(args) > 1 and args[1].isdigit():
+            target_user_id = int(args[1])
+
+    if target_user_id:
+        try:
+            bot.ban_chat_member(chat_id, target_user_id)
+            user_link = make_link(target_user_name, target_user_id)
+            bot.reply_to(message, f'🔨 Пользователь {user_link} забанен!', parse_mode='HTML')
+        except Exception as e:
+            bot.reply_to(message, f'❌ Ошибка при бане: {e}')
+    else:
+        bot.reply_to(message, '❌ Ответьте на сообщение пользователя командой `/ban` или укажите ID: `/ban <USER_ID>`', parse_mode='HTML')
+
+# ---------------------------------------------------------
+# ОСНОВНІ КОМАНДИ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     help_text = (
-        '🌴 <b>Бот для учета рестов готов к работе!</b>\n\n'
+        '🌴 <b>Бот для учета рестов и модерации готов к работе!</b>\n\n'
         '👑 <b>Админ-команды:</b>\n'
         '• <code>+рест на 3 д | отпуск</code> — выдать рест\n'
         '• <code>-рест</code> — снять рест\n'
         '• <code>+продлить на 2 д</code> — продлить рест\n'
         '• <code>причина новая причина</code> — изменить причину\n'
+        '• <code>/ban</code> — забанить пользователя (ответом или ID)\n'
+        '• <code>/unban</code> — разбанить пользователя (ответом или ID)\n'
         '• <code>/settings</code> — настройки чата\n'
         '• <code>/export</code> — выгрузить CSV-файл истории\n'
         '• <code>отчет</code> — аналитический отчет\n'
@@ -551,7 +647,7 @@ def handle_messages(message):
     for pattern, responses in BAD_WORDS_PATTERNS.items():
         if re.search(pattern, text_lower, re.IGNORECASE):
             bot.reply_to(message, random.choice(responses))
-            break  # Відповідаємо тільки один раз на повідомлення
+            break
 
     sett = get_chat_settings(chat_id)
     if sett.get('delete_rest_msg', False) and str_chat in db['rests']:
