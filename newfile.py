@@ -56,21 +56,29 @@ MONTHS = {
     'декабря': 12, 'декабрь': 12,
 }
 
-# Доступные значки в магазине с разнообразными ценами
+# Доступные значки в магазине (расширенный список)
 BADGES = {
     'badge_star': {'name': 'Звездочка', 'emoji': '🌟', 'price': 100},
+    'badge_dango': {'name': 'Данго', 'emoji': '🍡', 'price': 150},
     'badge_paw': {'name': 'Лапка Котика', 'emoji': '🐾', 'price': 200},
     'badge_heart': {'name': 'Сердечко', 'emoji': '💖', 'price': 200},
+    'badge_fire': {'name': 'Огонек', 'emoji': '🔥', 'price': 250},
     'badge_lightning': {'name': 'Молния', 'emoji': '⚡️', 'price': 300},
     'badge_crown': {'name': 'Корона', 'emoji': '👑', 'price': 300},
+    'badge_clover': {'name': 'Клевер', 'emoji': '🍀', 'price': 350},
+    'badge_sakura': {'name': 'Сакура', 'emoji': '🌸', 'price': 400},
     'badge_diamond': {'name': 'Бриллиант', 'emoji': '💎', 'price': 500},
+    'badge_skull': {'name': 'Череп', 'emoji': '💀', 'price': 600},
     'badge_rocket': {'name': 'Ракета', 'emoji': '🚀', 'price': 700},
+    'badge_fox': {'name': 'Лисичка', 'emoji': '🦊', 'price': 800},
+    'badge_alien': {'name': 'Инопланетянин', 'emoji': '👽', 'price': 900},
     'badge_unicorn': {'name': 'Единорог', 'emoji': '🦄', 'price': 1000},
+    'badge_dragon': {'name': 'Дракон', 'emoji': '🐉', 'price': 1500},
+    'badge_ghost': {'name': 'Призрак', 'emoji': '👻', 'price': 2000},
 }
 
 # --- ВСЕГДА АКТИВНЫЕ ТРИГГЕРЫ (Работают даже с Ня-Пассом) ---
 ALWAYS_ACTIVE_PATTERNS = {
-    # --- УПОМИНАНИЕ МАМЫ (ПОЗИТИВНЫЙ ОТВЕТ) ---
     r'\b(твоя\s+мамка|твоя\s+мама|твою\s+маму|твоя\s+мать|мамулька|маман)\b': [
         'Твоя мама самая лучшая и прекрасная! 🌸💖',
         'Мама — это святое! Давай только с любовью и уважением ✨🥰',
@@ -78,8 +86,6 @@ ALWAYS_ACTIVE_PATTERNS = {
         'Мамочке привет и самого доброго дня! 🥞☕️',
         'Передай маме, что она замечательная! 🥐🌷'
     ],
-
-    # --- ОХАЁ / ПРИВЕТСТВИЯ ---
     r'\b(охае|охаё|охайо|охаешечки|охаёшечки|охайоо|охаее)\b': [
         'Охаё! Анимешники в чате! 🎌🌸',
         'Охаёшечки! Доброго утречка/днечка! ☀️🍵',
@@ -87,8 +93,6 @@ ALWAYS_ACTIVE_PATTERNS = {
         'Охаё-о-о! Свеж и готов к работе? 🥪😊',
         'Охаё! Не забудь позавтракать! 🥞🥐'
     ],
-
-    # --- АНИМЕ ФРАЗЫ И СЛОВА ---
     r'\b(даттебайо|даттебае|даттебаё)\b': [
         'Наруто, ты ли это?! 🍥🦊',
         'Даттебаё! Мой путь ниндзя — следить за рестами! 🥷✨',
@@ -135,7 +139,6 @@ ALWAYS_ACTIVE_PATTERNS = {
 
 # --- МАТЫ И СЛОВО КОЧ (Отключаются у тех, у кого активен Ня-Пасс) ---
 MUTABLE_BAD_WORDS_PATTERNS = {
-    # --- СЛОВО КОЧ ---
     r'\b(коч|кочч)\b': [
         'Это плохо! 🛑',
         'Давай без таких слов! 🤫',
@@ -143,8 +146,6 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Давай лучше о чем-то хорошем! 🌸',
         'Не стоит такое писать 🛑'
     ],
-    
-    # --- РАСШИРЕННЫЙ СПИСОК МАТОВ И ОСКОРБЛЕНИЙ ---
     r'\b(долбоеб|долбаеб|долбаёб|далбоеб|далбаеб|далбаёб|долбоёб|долбоеб|долбоящер|долбень|еблан|ебланище|ебланчик)\b': [
         'Давай без личных оскорблений, дружище! 🤝⚠️',
         'А вот обижать людей нельзя! 🥺🚫',
@@ -309,12 +310,27 @@ def get_user_econ(chat_id, user_tag):
     if clean_u not in db['economy'][str_chat]:
         db['economy'][str_chat][clean_u] = {
             'balance': 50,           # Стартовый баланс
+            'smeh': 0,               # Очки смехуятинки
+            'iq': 100,               # Уровень IQ
             'last_hourly': 0,        # Timestamp последнего часового сбора
             'nya_pass_until': 0,     # Timestamp окончания действия Ня-Пасса
-            'badge': None            # Купленный смайлик/значок
+            'nya_pass_enabled': True,# Включен ли Ня-Пасс владельцем
+            'badge': None,           # Активный значок
+            'inventory': []          # Список купленных значков
         }
         save_data()
-    return db['economy'][str_chat][clean_u]
+    
+    u_data = db['economy'][str_chat][clean_u]
+    if 'inventory' not in u_data:
+        u_data['inventory'] = []
+    if 'nya_pass_enabled' not in u_data:
+        u_data['nya_pass_enabled'] = True
+    if 'smeh' not in u_data:
+        u_data['smeh'] = 0
+    if 'iq' not in u_data:
+        u_data['iq'] = 100
+
+    return u_data
 
 def add_coins(chat_id, user_tag, amount):
     str_chat = str(chat_id)
@@ -325,10 +341,10 @@ def add_coins(chat_id, user_tag, amount):
     return user_data['balance']
 
 def is_nya_pass_active(chat_id, user_tag):
-    """Проверяет, активен ли у пользователя Ня-Пасс от мата"""
     user_data = get_user_econ(chat_id, user_tag)
     until = user_data.get('nya_pass_until', 0)
-    return time.time() < until
+    enabled = user_data.get('nya_pass_enabled', True)
+    return enabled and (time.time() < until)
 
 # ---------------------------------------------------------
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ПАРСИНГА И ВСЕХ ПОЛЬЗОВАТЕЛЕЙ
@@ -339,7 +355,6 @@ def clean_tag(user_str):
     return user_str.replace('@', '').strip()
 
 def make_link(chat_id, user_name, user_id=None):
-    """Генерирует ссылку на юзера с учетом купленных кастомных смайлов"""
     name = clean_tag(user_name)
     badge_str = ""
     if chat_id:
@@ -366,7 +381,6 @@ def parse_target_and_args(message, cmd_prefix):
     target_user_id = None
     raw_args = ''
 
-    # Вариант 1: Ответ на сообщение (Reply)
     if message.reply_to_message:
         u = message.reply_to_message.from_user
         target_user = clean_tag(u.username or u.first_name)
@@ -382,14 +396,12 @@ def parse_target_and_args(message, cmd_prefix):
 
     body = m_body.group(1).strip()
 
-    # Вариант 2: Юзернейм через @
     m_tag = re.search(r'@(\w+)', body)
     if m_tag:
         target_user = clean_tag(m_tag.group(1))
         raw_args = body.replace(m_tag.group(0), '').strip()
         return target_user, None, raw_args
 
-    # Вариант 3: Имя через |
     if '|' in body:
         parts = body.split('|')
         possible_name = parts[-1].strip()
@@ -545,10 +557,7 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
         'user_id': target_user_id,
     }
     add_to_history(str_chat, clean_user, duration_text, reason, target_user_id)
-    
-    # Награждаем 150 Ня-коинами за взятие реста
     add_coins(chat_id, clean_user, 150)
-    
     save_data()
     if end_time:
         schedule_rest_timers(chat_id, clean_user, end_time, target_user_id)
@@ -560,8 +569,6 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
 def welcome_new_members(message):
     for member in message.new_chat_members:
         user_link = make_link(message.chat.id, member.username or member.first_name, member.id)
-        
-        # Начисляем приветственный бонус
         add_coins(message.chat.id, member.username or member.first_name, 50)
         
         welcome_text = (
@@ -576,7 +583,6 @@ def welcome_new_members(message):
 def goodbye_left_member(message):
     member = message.left_chat_member
     user_link = make_link(message.chat.id, member.username or member.first_name, member.id)
-    
     farewell_text = f"👋 <b>{user_link}</b> покинул(а) наш чат. Пожелаем удачи! 🌸"
     bot.send_message(message.chat.id, farewell_text, parse_mode='HTML')
 
@@ -588,39 +594,35 @@ def send_welcome(message):
     help_text = (
         '🤖 <b>ПОЛНОЕ РУКОВОДСТВО И ВОЗМОЖНОСТИ БОТА</b>\n\n'
         '🌴 <b>1. СИСТЕМА УЧЕТА РЕСТОВ (ОТПУСКОВ):</b>\n'
-        '• <code>+рест [срок] | [причина] [юзер]</code> — выдать рест пользователю (например: <code>+рест на 3 д | отпуск vorthon</code> или ответом на сообщение).\n'
-        '• <code>-рест [юзер]</code> — снять рест с участника.\n'
-        '• <code>+продлить [срок] [юзер]</code> — продлить действующий рест.\n'
-        '• <code>причина [юзер] [новая причина]</code> — изменить причину реста.\n'
-        '• <code>запрос рест [срок] | [причина]</code> — отправить запрос на рест администраторам чата.\n'
-        '• <code>ресты</code> — список всех людей, находящихся в ресте сейчас.\n'
-        '• <code>мой рест</code> — проверить оставшееся время своего реста.\n'
-        '• <code>топ</code> / <code>статистика</code> — статистика чата по количеству рестов.\n'
-        '• <code>отчет</code> / <code>логи</code> — подробный аналитический отчет и история.\n\n'
+        '• <code>+рест [срок] | [причина] [юзер]</code> — выдать рест пользователю.\n'
+        '• <code>-рест [юзер]</code> — снять рест.\n'
+        '• <code>+продлить [срок] [юзер]</code> — продлить рест.\n'
+        '• <code>причина [юзер] [причина]</code> — изменить причину.\n'
+        '• <code>запрос рест [срок] | [причина]</code> — запрос на рест.\n'
+        '• <code>ресты</code> — список рестов.\n'
+        '• <code>мой рест</code> — ваше время.\n'
+        '• <code>топ</code> / <code>статистика</code> — топ рестов.\n\n'
         
-        '🪙 <b>2. ВНУТРЕННЯЯ ВАЛЮТА (НЯ-КОИНЫ):</b>\n'
-        '• <code>бонус</code> / <code>/bonus</code> / <code>коин</code> — получать от 1 до 100 Ня-коинов КАЖДЫЙ ЧАС.\n'
-        '• <code>баланс</code> / <code>/balance</code> — узнать свой баланс и статус.\n'
-        '• <code>перевод @username [сумма]</code> — перевести коины другу.\n'
-        '• <code>промокод [код]</code> — ввести секретный промокод.\n'
-        '• <code>богачи</code> / <code>топ коинов</code> — рейтинг самых богатых участников.\n'
-        '• <i>Награда за рест:</i> За каждый оформленный рест бот автоматический начисляeт <b>+150 Ня-коинов</b>!\n\n'
+        '🪙 <b>2. ВАЛЮТА И ПРОФИЛЬ:</b>\n'
+        '• <code>бонус</code> / <code>/bonus</code> — получать от 1 до 100 коинов каждый час.\n'
+        '• <code>баланс</code> / <code>/balance</code> — ваш кошелек.\n'
+        '• <code>инвентарь</code> / <code>профиль</code> — просмотр баланса, смехуятинки, IQ, выбор значков и вкл/выкл Ня-Пасса.\n'
+        '• <code>+смехуятинка</code> — ответить на сообщение, чтобы начислить +1 очко смехуятинки.\n'
+        '• <code>айкью</code> / <code>iq</code> — симулятор изменения IQ.\n'
+        '• <code>перевод @username [сумма]</code> — перевод коинов.\n'
+        '• <code>промокод [код]</code> — секретный промокод.\n\n'
 
-        '🏪 <b>3. ЛАВКА, СМАЙЛИКИ И НЯ-ПАСС:</b>\n'
-        '• <code>магазин</code> / <code>лавка</code> — открыть магазин.\n'
-        '• 🎟 <b>Ня-Пасс от мата (500 🪙)</b> — покупается на 7 дней. Бот перестает реагировать на ваши матерные слова и слово "коч".\n'
-        '• 👑 <b>Пассы на Смайлики и Значки (100-1000 🪙)</b> — украшают ваше имя значками в списке рестов и топах!\n\n'
+        '🏪 <b>3. ЛАВКА И СМАЙЛИКИ:</b>\n'
+        '• <code>магазин</code> — открыть лавку.\n'
+        '• 🎟 <b>Ня-Пасс от мата (500 🪙)</b> — игнор мата и слова "коч".\n'
+        '• 👑 <b>Большой выбор значков (100-2000 🪙)</b> — украшай свое имя!\n\n'
 
         '💬 <b>4. ИНТЕРАКТИВ И АВТО-ОТВЕТЧИК:</b>\n'
-        '• <b>Приветствия и прощания:</b> Бот автоматически встречает новых участников бонусом и провожает ушедших.\n'
-        '• <b>Реакции на слова:</b>\n'
-        '  — При упоминании мамы ("твоя мама", "твоя мамка") бот отвечает добрыми комплиментами!\n'
-        '  — Реакция на аниме фразы ("охаё", "ня", "кавай", "даттебаё", "аригато", "ямете", "десу").\n'
-        '  — Фильтр мата и оскорблений (залупа, даун, блять и др.).\n\n'
+        '• Приветствия, прощания, комплименты про маму и фильтр мата.\n\n'
 
-        '⚙️ <b>5. НАСТРОЙКИ ЧАТА (для Админов):</b>\n'
-        '• <code>/settings</code> — меню ограничений, лимитов дней и авто-удаления сообщений от участников в ресте.\n'
-        '• <code>/export</code> — выгрузка всей истории рестов в файле CSV.'
+        '⚙️ <b>5. НАСТРОЙКИ (для Админов):</b>\n'
+        '• <code>/settings</code> — меню ограничений чата.\n'
+        '• <code>/export</code> — экспорт CSV.'
     )
     bot.reply_to(message, help_text, parse_mode='HTML')
 
@@ -676,6 +678,58 @@ def export_csv(message):
     if os.path.exists(file_path):
         os.remove(file_path)
 
+# --- МЕНЮ ПРОФИЛЯ, ИНВЕНТАРЯ И НАСТРОЕК ---
+def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
+    econ = get_user_econ(chat_id, user_tag)
+    
+    pass_enabled = econ.get('nya_pass_enabled', True)
+    pass_status_text = "❌ Отсутствует"
+    if time.time() < econ.get('nya_pass_until', 0):
+        rem_sec = int(econ['nya_pass_until'] - time.time())
+        days = rem_sec // 86400
+        hours = (rem_sec % 86400) // 3600
+        time_left = f"{days}д {hours}ч"
+        if pass_enabled:
+            pass_status_text = f"✅ Активен (Осталось: {time_left})"
+        else:
+            pass_status_text = f"⏸ Отключен вручную (Осталось: {time_left})"
+
+    current_badge = econ.get('badge') or "Отсутствует"
+    inv = econ.get('inventory', [])
+    inv_str = " ".join(inv) if inv else "Пусто (купите значки в магазине)"
+
+    text = (
+        f"👤 <b>Профиль пользователя {make_link(chat_id, user_tag, user_id)}</b>\n\n"
+        f"🪙 Баланс: <b>{econ['balance']} Ня-коинов</b>\n"
+        f"😂 Смехуятинка: <b>{econ.get('smeh', 0)} балл(ов)</b>\n"
+        f"🧠 Айкью (IQ): <b>{econ.get('iq', 100)}</b>\n"
+        f"🏷 Активный значок: <b>{current_badge}</b>\n"
+        f"🎒 Инвентарь значков: {inv_str}\n"
+        f"🎟 Ня-Пасс от мата: <b>{pass_status_text}</b>"
+    )
+
+    markup = InlineKeyboardMarkup()
+    
+    if inv:
+        row = []
+        for emoji in inv:
+            row.append(InlineKeyboardButton(f"Надеть {emoji}", callback_data=f"set_badge_{emoji}"))
+            if len(row) == 3:
+                markup.add(*row)
+                row = []
+        if row:
+            markup.add(*row)
+        markup.add(InlineKeyboardButton("❌ Снять значок", callback_data="remove_badge"))
+
+    if time.time() < econ.get('nya_pass_until', 0):
+        btn_text = "⏸ Выключить Ня-Пасс" if pass_enabled else "▶️ Включить Ня-Пасс"
+        markup.add(InlineKeyboardButton(btn_text, callback_data="toggle_nya_pass"))
+
+    if message_to_reply:
+        bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
+    else:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     global req_counter
@@ -715,31 +769,53 @@ def handle_messages(message):
             except Exception:
                 pass
 
-    # --- БЛОК НЯ-КОИНОВ И ЛАВКИ ---
+    # --- КОМАНДА СМЕХУЯТИНКА ---
+    if text_lower in ['+смехуятинка', 'смехуятинка']:
+        if message.reply_to_message:
+            target_u = message.reply_to_message.from_user
+            target_tag = clean_tag(target_u.username or target_u.first_name)
+            target_id = target_u.id
+            
+            econ = get_user_econ(chat_id, target_tag)
+            econ['smeh'] = econ.get('smeh', 0) + 1
+            save_data()
+            
+            u_link = make_link(chat_id, target_tag, target_id)
+            bot.reply_to(message, f"😂 Пользователю {u_link} начислено +1 очко <b>Смехуятинки</b>!\nВсего очков: <b>{econ['smeh']}</b>", parse_mode='HTML')
+        else:
+            bot.reply_to(message, "❌ Ответьте этой командой на сообщение человека, которому хотите начислить смехуятинку!")
+        return
+
+    # --- СИМУЛЯТОР АЙКЬЮ ---
+    elif text_lower in ['айкью', 'iq', 'iqи', 'айкю']:
+        econ = get_user_econ(chat_id, user_tag)
+        # Случайный прирост или изменение IQ от -5 до +15
+        change = random.randint(-5, 15)
+        econ['iq'] = max(0, econ.get('iq', 100) + change)
+        save_data()
+        
+        sign = "+" if change >= 0 else ""
+        bot.reply_to(message, f"🧠 {make_link(chat_id, user_tag, user_id)}, ваш тест на IQ завершен!\nИзменение: <b>{sign}{change} IQ</b>\nТекущий уровень интеллекта: <b>{econ['iq']} IQ 📊</b>", parse_mode='HTML')
+        return
+
+    # --- БЛОК НЯ-КОИНОВ И ИНВЕНТАРЯ ---
     if text_lower in ['баланс', '/balance', 'коины', 'ня-коины']:
         econ = get_user_econ(chat_id, user_tag)
-        
-        pass_str = ""
-        if is_nya_pass_active(chat_id, user_tag):
-            rem_sec = int(econ['nya_pass_until'] - time.time())
-            days = rem_sec // 86400
-            hours = (rem_sec % 86400) // 3600
-            pass_str = f"\n🎟 <b>Ня-Пасс (Игнор мата):</b> Активен еще {days}д {hours}ч"
-        
-        badge_str = f"\n🏷 Значок профиля: {econ['badge']}" if econ.get('badge') else "\n🏷 Значок профиля: Отсутствует"
-
         bot.reply_to(
             message,
             f"🪙 <b>Кошелек пользователя {make_link(chat_id, user_tag, user_id)}:</b>\n"
-            f"• Баланс: <b>{econ['balance']} Ня-коинов 🪙</b>{pass_str}{badge_str}",
+            f"• Баланс: <b>{econ['balance']} Ня-коинов 🪙</b>",
             parse_mode='HTML'
         )
+        return
+
+    elif text_lower in ['инвентарь', 'профиль', '/profile', 'мои значки']:
+        send_user_profile(chat_id, user_tag, user_id, message)
         return
 
     elif text_lower in ['бонус', '/bonus', 'коин', 'собрать']:
         econ = get_user_econ(chat_id, user_tag)
         now_ts = time.time()
-        # 1 час = 3600 секунд
         if now_ts - econ.get('last_hourly', 0) >= 3600:
             reward = random.randint(1, 100)
             econ['balance'] += reward
@@ -753,7 +829,7 @@ def handle_messages(message):
             bot.reply_to(message, f"⏳ Можно собирать коины каждый час! Следующий сбор через: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
         return
 
-    # --- СЕКРЕТНЫЙ ПРОМОКОД ДЛЯ РАЗРАБОТЧИКА ---
+    # --- СЕКРЕТНЫЙ ПРОМОКОД ---
     elif text_lower.startswith('промокод') or text_lower.startswith('/promo'):
         match = re.search(r'(?:промокод|/promo)\s+(.+)', text, re.IGNORECASE)
         if match:
@@ -799,19 +875,38 @@ def handle_messages(message):
         )
         markup.add(
             InlineKeyboardButton('🌟 Звезда (100 🪙)', callback_data='buy_badge_badge_star'),
+            InlineKeyboardButton('🍡 Данго (150 🪙)', callback_data='buy_badge_badge_dango')
+        )
+        markup.add(
             InlineKeyboardButton('🐾 Лапка (200 🪙)', callback_data='buy_badge_badge_paw'),
             InlineKeyboardButton('💖 Сердце (200 🪙)', callback_data='buy_badge_badge_heart')
         )
         markup.add(
-            InlineKeyboardButton('⚡️ Молния (300 🪙)', callback_data='buy_badge_badge_lightning'),
-            InlineKeyboardButton('👑 Корона (300 🪙)', callback_data='buy_badge_badge_crown')
+            InlineKeyboardButton('🔥 Огонек (250 🪙)', callback_data='buy_badge_badge_fire'),
+            InlineKeyboardButton('⚡️ Молния (300 🪙)', callback_data='buy_badge_badge_lightning')
         )
         markup.add(
-            InlineKeyboardButton('💎 Бриллиант (500 🪙)', callback_data='buy_badge_badge_diamond'),
+            InlineKeyboardButton('👑 Корона (300 🪙)', callback_data='buy_badge_badge_crown'),
+            InlineKeyboardButton('🍀 Клевер (350 🪙)', callback_data='buy_badge_badge_clover')
+        )
+        markup.add(
+            InlineKeyboardButton('🌸 Сакура (400 🪙)', callback_data='buy_badge_badge_sakura'),
+            InlineKeyboardButton('💎 Бриллиант (500 🪙)', callback_data='buy_badge_badge_diamond')
+        )
+        markup.add(
+            InlineKeyboardButton('💀 Череп (600 🪙)', callback_data='buy_badge_badge_skull'),
             InlineKeyboardButton('🚀 Ракета (700 🪙)', callback_data='buy_badge_badge_rocket')
         )
         markup.add(
-            InlineKeyboardButton('🦄 Единорог (1000 🪙)', callback_data='buy_badge_badge_unicorn')
+            InlineKeyboardButton('🦊 Лисичка (800 🪙)', callback_data='buy_badge_badge_fox'),
+            InlineKeyboardButton('👽 Инопланетянин (900 🪙)', callback_data='buy_badge_badge_alien')
+        )
+        markup.add(
+            InlineKeyboardButton('🦄 Единорог (1000 🪙)', callback_data='buy_badge_badge_unicorn'),
+            InlineKeyboardButton('🐉 Дракон (1500 🪙)', callback_data='buy_badge_badge_dragon')
+        )
+        markup.add(
+            InlineKeyboardButton('👻 Призрак (2000 🪙)', callback_data='buy_badge_badge_ghost')
         )
         
         pass_status = "❌ Не куплен"
@@ -823,15 +918,16 @@ def handle_messages(message):
             "🏪 <b>Лавка Ня-коинов и Значков:</b>\n\n"
             "🎟 <b>Ня-Пасс от мата (на 1 неделю) — 500 🪙</b>\n"
             f"• Статус пасса: <b>{pass_status}</b>\n\n"
-            "✨ <b>Значки и смайлы в топ и список рестов:</b>\n"
-            "• 🌟 <b>Звезда</b> — 100 🪙\n"
-            "• 🐾 <b>Лапка</b> — 200 🪙\n"
-            "• 💖 <b>Сердечко</b> — 200 🪙\n"
-            "• ⚡️ <b>Молния</b> — 300 🪙\n"
-            "• 👑 <b>Корона</b> — 300 🪙\n"
-            "• 💎 <b>Бриллиант</b> — 500 🪙\n"
-            "• 🚀 <b>Ракета</b> — 700 🪙\n"
-            "• 🦄 <b>Единорог</b> — 1000 🪙\n\n"
+            "✨ <b>Значки и смайлы для профиля и топов:</b>\n"
+            "• 🌟 Звезда — 100 🪙 | 🍡 Данго — 150 🪙\n"
+            "• 🐾 Лапка — 200 🪙 | 💖 Сердечко — 200 🪙\n"
+            "• 🔥 Огонек — 250 🪙 | ⚡️ Молния — 300 🪙\n"
+            "• 👑 Корона — 300 🪙 | 🍀 Клевер — 350 🪙\n"
+            "• 🌸 Сакура — 400 🪙 | 💎 Бриллиант — 500 🪙\n"
+            "• 💀 Череп — 600 🪙 | 🚀 Ракета — 700 🪙\n"
+            "• 🦊 Лисичка — 800 🪙 | 👽 Инопланетянин — 900 🪙\n"
+            "• 🦄 Единорог — 1000 🪙 | 🐉 Дракон — 1500 🪙\n"
+            "• 👻 Призрак — 2000 🪙\n\n"
             "Выбери товар кнопкой ниже:",
             reply_markup=markup,
             parse_mode='HTML'
@@ -1085,6 +1181,7 @@ def callback_inline(call):
         current_time = time.time()
         base_time = max(current_time, econ.get('nya_pass_until', 0))
         econ['nya_pass_until'] = base_time + 604800  # 7 дней
+        econ['nya_pass_enabled'] = True
         save_data()
         
         bot.answer_callback_query(call.id, '🎉 Вы успешно купили Ня-Пасс от мата на 1 неделю!', show_alert=True)
@@ -1101,20 +1198,64 @@ def callback_inline(call):
             item = BADGES[badge_key]
             econ = get_user_econ(chat_id, user_tag)
             
+            if item['emoji'] in econ.get('inventory', []):
+                bot.answer_callback_query(call.id, f"У вас уже есть значок {item['emoji']}! Вы можете надеть его в профиле.", show_alert=True)
+                return
+
             if econ['balance'] < item['price']:
                 bot.answer_callback_query(call.id, f"❌ Недостаточно Ня-коинов! Нужно {item['price']} 🪙", show_alert=True)
                 return
 
             econ['balance'] -= item['price']
+            if item['emoji'] not in econ['inventory']:
+                econ['inventory'].append(item['emoji'])
             econ['badge'] = item['emoji']
             save_data()
 
-            bot.answer_callback_query(call.id, f"🎉 Вы купили значок {item['emoji']}! Теперь он отображается возле вашего имени.", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы купили значок {item['emoji']}! Он добавлен в ваш инвентарь.", show_alert=True)
             bot.send_message(
                 chat_id,
                 f"✨ Пользователь {make_link(chat_id, user_tag, user_id)} приобрел кастомный значок <b>{item['emoji']}</b> в магазине!",
                 parse_mode='HTML'
             )
+
+    # --- СМЕНА И УПРАВЛЕНИЕ ЗНАЧКАМИ В ИНВЕНТАРЕ ---
+    elif call.data.startswith('set_badge_'):
+        selected_emoji = call.data.replace('set_badge_', '')
+        econ = get_user_econ(chat_id, user_tag)
+        if selected_emoji in econ.get('inventory', []):
+            econ['badge'] = selected_emoji
+            save_data()
+            bot.answer_callback_query(call.id, f"✅ Вы успешно надели значок {selected_emoji}!", show_alert=True)
+            try:
+                bot.delete_message(chat_id, call.message.message_id)
+            except Exception:
+                pass
+            send_user_profile(chat_id, user_tag, user_id)
+
+    elif call.data == 'remove_badge':
+        econ = get_user_econ(chat_id, user_tag)
+        econ['badge'] = None
+        save_data()
+        bot.answer_callback_query(call.id, "❌ Значок снят!", show_alert=True)
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception:
+            pass
+        send_user_profile(chat_id, user_tag, user_id)
+
+    # --- ВКЛЮЧЕНИЕ / ВЫКЛЮЧЕНИЕ НЯ-ПАССА ---
+    elif call.data == 'toggle_nya_pass':
+        econ = get_user_econ(chat_id, user_tag)
+        econ['nya_pass_enabled'] = not econ.get('nya_pass_enabled', True)
+        save_data()
+        status_msg = "включен" if econ['nya_pass_enabled'] else "выключен"
+        bot.answer_callback_query(call.id, f"⚙️ Ня-Пасс {status_msg}!", show_alert=True)
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception:
+            pass
+        send_user_profile(chat_id, user_tag, user_id)
 
     # --- ЗАПРОСЫ РЕСТОВ ---
     elif call.data.startswith(('app_', 'qs_')):
