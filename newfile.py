@@ -75,6 +75,7 @@ BADGES = {
     'badge_unicorn': {'name': 'Единорог', 'emoji': '🦄', 'price': 1000},
     'badge_dragon': {'name': 'Дракон', 'emoji': '🐉', 'price': 1500},
     'badge_ghost': {'name': 'Призрак', 'emoji': '👻', 'price': 2000},
+    'badge_foot': {'name': 'Пятка', 'emoji': '🦶', 'price': 3000},
 }
 
 # --- ВСЕГДА АКТИВНЫЕ ТРИГГЕРЫ (Работают даже с Ня-Пассом) ---
@@ -237,7 +238,7 @@ req_counter = 0
 # ---------------------------------------------------------
 def load_data():
     """Загружает свежий бекап из Telegram-канала, если локальный файл отсутствует или устарел"""
-    data = {'rests': {}, 'history': {}, 'settings': {}, 'economy': {}}
+    data = {'rests': {}, 'history': {}, 'settings': {}, 'economy': {}, 'promos': {}}
     
     try:
         if DB_CHANNEL_ID:
@@ -263,6 +264,8 @@ def load_data():
                     data['history'] = {}
                 if 'economy' not in data:
                     data['economy'] = {}
+                if 'promos' not in data:
+                    data['promos'] = {}
                 return data
         except Exception as e:
             print(f'Ошибка чтения файла: {e}')
@@ -313,9 +316,11 @@ def get_user_econ(chat_id, user_tag):
             'smeh': 0,               # Очки смехуятинки
             'iq': 100,               # Уровень IQ
             'fat': 20,               # Процент жира
+            'foot_size': 25,         # Размер пятки в см
             'last_hourly': 0,        # Timestamp последнего часового сбора
-            'last_iq_time': 0,       # Timestamp последнего измерения IQ (КД 30 сек)
-            'last_fat_time': 0,      # Timestamp последнего измерения жира (КД 30 сек)
+            'last_iq_time': 0,       # Timestamp последнего измерения IQ (КД 30 мин)
+            'last_fat_time': 0,      # Timestamp последнего измерения жира (КД 30 мин)
+            'last_foot_time': 0,     # Timestamp последнего измерения пятки (КД 20 мин)
             'nya_pass_until': 0,     # Timestamp окончания действия Ня-Пасса
             'nya_pass_enabled': True,# Включен ли Ня-Пасс владельцем
             'badge': None,           # Активный значок
@@ -334,10 +339,14 @@ def get_user_econ(chat_id, user_tag):
         u_data['iq'] = 100
     if 'fat' not in u_data:
         u_data['fat'] = 20
+    if 'foot_size' not in u_data:
+        u_data['foot_size'] = 25
     if 'last_iq_time' not in u_data:
         u_data['last_iq_time'] = 0
     if 'last_fat_time' not in u_data:
         u_data['last_fat_time'] = 0
+    if 'last_foot_time' not in u_data:
+        u_data['last_foot_time'] = 0
 
     return u_data
 
@@ -615,22 +624,29 @@ def send_welcome(message):
         '🪙 <b>2. ВАЛЮТА И ПРОФИЛЬ:</b>\n'
         '• <code>бонус</code> / <code>/bonus</code> — получать от 1 до 100 коинов каждый час.\n'
         '• <code>баланс</code> / <code>/balance</code> — ваш кошелек.\n'
-        '• <code>инвентарь</code> / <code>профиль</code> — просмотр баланса, смехуятинки, IQ, жира, выбор значков и вкл/выкл Ня-Пасса.\n'
+        '• <code>инвентарь</code> / <code>профиль</code> — просмотр баланса, IQ, жира, размера пятки и т.д.\n'
         '• <code>+смехуятинка</code> — ответить на сообщение, чтобы начислить +1 очко смехуятинки.\n'
-        '• <code>айкью</code> / <code>iq</code> — симулятор изменения IQ (КД 30 сек).\n'
-        '• <code>жир</code> / <code>жирок</code> — замер уровня жира (КД 30 сек).\n'
+        '• <code>айкью</code> / <code>iq</code> — симулятор изменения IQ (КД 30 мин).\n'
+        '• <code>жир</code> / <code>жирок</code> — замер уровня жира (КД 30 мин).\n'
+        '• <code>пятка</code> / <code>пяточка</code> — замер размера пятки (КД 20 мин).\n'
         '• <code>перевод @username [сумма]</code> — перевод коинов.\n'
-        '• <code>промокод [код]</code> — секретный промокод.\n\n'
+        '• <code>промокод [код]</code> — активация промокода (напр. <code>промокод NYA400</code>).\n\n'
 
-        '🏪 <b>3. ЛАВКА И СМАЙЛИКИ:</b>\n'
+        '📊 <b>3. СТА ТИСТИКА И ТОПЫ:</b>\n'
+        '• <code>топ богачей</code> — топ по Ня-коинам.\n'
+        '• <code>топ жира</code> — рейтинг по проценту жира.\n'
+        '• <code>топ iq</code> — рейтинг самых умных участников.\n'
+        '• <code>топ пяток</code> — рейтинг по размеру пятки.\n\n'
+
+        '🏪 <b>4. ЛАВКА И СМАЙЛИКИ:</b>\n'
         '• <code>магазин</code> — открыть лавку.\n'
         '• 🎟 <b>Ня-Пасс от мата (500 🪙)</b> — игнор мата и слова "коч".\n'
-        '• 👑 <b>Большой выбор значков (100-2000 🪙)</b> — украшай свое имя!\n\n'
+        '• 👑 <b>Большой выбор значков (100-3000 🪙)</b> — украшай свое имя (есть Пятка 🦶 за 3000 🪙)!\n\n'
 
-        '💬 <b>4. ИНТЕРАКТИВ И АВТО-ОТВЕТЧИК:</b>\n'
+        '💬 <b>5. ИНТЕРАКТИВ И АВТО-ОТВЕТЧИК:</b>\n'
         '• Приветствия, прощания, комплименты про маму и фильтр мата.\n\n'
 
-        '⚙️ <b>5. НАСТРОЙКИ (для Админов):</b>\n'
+        '⚙️ <b>6. НАСТРОЙКИ (для Админов):</b>\n'
         '• <code>/settings</code> — меню ограничений чата.\n'
         '• <code>/export</code> — экспорт CSV.'
     )
@@ -714,6 +730,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
         f"😂 Смехуятинка: <b>{econ.get('smeh', 0)} балл(ов)</b>\n"
         f"🧠 Айкью (IQ): <b>{econ.get('iq', 100)}</b>\n"
         f"🍔 Процент жира: <b>{econ.get('fat', 20)}%</b>\n"
+        f"🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
         f"🏷 Активный значок: <b>{current_badge}</b>\n"
         f"🎒 Инвентарь значков: {inv_str}\n"
         f"🎟 Ня-Пасс от мата: <b>{pass_status_text}</b>"
@@ -797,15 +814,17 @@ def handle_messages(message):
             bot.reply_to(message, "❌ Ответьте этой командой на сообщение человека, которому хотите начислить смехуятинку!")
         return
 
-    # --- СИМУЛЯТОР АЙКЬЮ (С КД 30 СЕКУНД) ---
+    # --- СИМУЛЯТОР АЙКЬЮ (С КД 30 МИНУТ) ---
     elif text_lower in ['айкью', 'iq', 'iqи', 'айкю']:
         econ = get_user_econ(chat_id, user_tag)
         now_ts = time.time()
-        cooldown = 30  # КД 30 секунд
+        cooldown = 1800  # КД 30 минут (1800 секунд)
         
         if now_ts - econ.get('last_iq_time', 0) < cooldown:
             left_sec = int(cooldown - (now_ts - econ.get('last_iq_time', 0)))
-            bot.reply_to(message, f"⏳ Тест на IQ можно проходить не чаще чем раз в 30 секунд!\nПодождите еще: <b>{left_sec} сек</b>.", parse_mode='HTML')
+            minutes = left_sec // 60
+            seconds = left_sec % 60
+            bot.reply_to(message, f"⏳ Тест на IQ можно проходить раз в 30 минут!\nПодождите еще: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
             return
 
         change = random.randint(-5, 15)
@@ -817,15 +836,17 @@ def handle_messages(message):
         bot.reply_to(message, f"🧠 {make_link(chat_id, user_tag, user_id)}, ваш тест на IQ завершен!\nИзменение: <b>{sign}{change} IQ</b>\nТекущий уровень интеллекта: <b>{econ['iq']} IQ 📊</b>", parse_mode='HTML')
         return
 
-    # --- СИМУЛЯТОР ЖИРА (С КД 30 СЕКУНД) ---
+    # --- СИМУЛЯТОР ЖИРА (С КД 30 МИНУТ) ---
     elif text_lower in ['жир', 'жирок', 'жирность', 'процент жира']:
         econ = get_user_econ(chat_id, user_tag)
         now_ts = time.time()
-        cooldown = 30  # КД 30 секунд
+        cooldown = 1800  # КД 30 минут (1800 секунд)
         
         if now_ts - econ.get('last_fat_time', 0) < cooldown:
             left_sec = int(cooldown - (now_ts - econ.get('last_fat_time', 0)))
-            bot.reply_to(message, f"⏳ Замер жира можно проводить раз в 30 секунд!\nПодождите еще: <b>{left_sec} сек</b>.", parse_mode='HTML')
+            minutes = left_sec // 60
+            seconds = left_sec % 60
+            bot.reply_to(message, f"⏳ Замер жира можно проводить раз в 30 минут!\nПодождите еще: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
             return
 
         change = random.randint(-4, 6)
@@ -835,6 +856,62 @@ def handle_messages(message):
         
         sign = "+" if change >= 0 else ""
         bot.reply_to(message, f"🥩 {make_link(chat_id, user_tag, user_id)}, сканирование жирового слоя завершено!\nИзменение: <b>{sign}{change}%</b>\nТекущий процент жира: <b>{econ['fat']}% 🍔</b>", parse_mode='HTML')
+        return
+
+    # --- СИМУЛЯТОР ПЯТКИ (С КД 20 МИНУТ) ---
+    elif text_lower in ['пятка', 'пяточка', 'размер пятки', 'пятки']:
+        econ = get_user_econ(chat_id, user_tag)
+        now_ts = time.time()
+        cooldown = 1200  # КД 20 минут (1200 секунд)
+        
+        if now_ts - econ.get('last_foot_time', 0) < cooldown:
+            left_sec = int(cooldown - (now_ts - econ.get('last_foot_time', 0)))
+            minutes = left_sec // 60
+            seconds = left_sec % 60
+            bot.reply_to(message, f"⏳ Измерить пятку можно раз в 20 минут!\nПодождите еще: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
+            return
+
+        change = random.randint(-3, 4)
+        econ['foot_size'] = max(5, min(60, econ.get('foot_size', 25) + change))
+        econ['last_foot_time'] = now_ts
+        save_data()
+        
+        sign = "+" if change >= 0 else ""
+        bot.reply_to(message, f"🦶 {make_link(chat_id, user_tag, user_id)}, замер вашей пятки завершен!\nИзменение: <b>{sign}{change} см</b>\nТекущий размер пятки: <b>{econ['foot_size']} см 🦶</b>", parse_mode='HTML')
+        return
+
+    # --- БЛОК ТОПОВ И СТАТИСТИКИ (ЖИР, IQ, ПЯТКИ, БОГАЧИ) ---
+    elif text_lower in ['топ жира', 'топ жирных', 'топ по жиру']:
+        if 'economy' in db and str_chat in db['economy']:
+            sorted_fat = sorted(db['economy'][str_chat].items(), key=lambda x: x[1].get('fat', 0), reverse=True)
+            resp = "🍔 <b>Топ участников по проценту жира:</b>\n\n"
+            for idx, (u, info) in enumerate(sorted_fat[:10], 1):
+                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info.get('fat', 20)}%</b>\n"
+            bot.reply_to(message, resp, parse_mode='HTML')
+        else:
+            bot.reply_to(message, "📊 Статистика пока пуста.")
+        return
+
+    elif text_lower in ['топ iq', 'топ айкью', 'топ умных']:
+        if 'economy' in db and str_chat in db['economy']:
+            sorted_iq = sorted(db['economy'][str_chat].items(), key=lambda x: x[1].get('iq', 0), reverse=True)
+            resp = "🧠 <b>Топ самых умных участников (IQ):</b>\n\n"
+            for idx, (u, info) in enumerate(sorted_iq[:10], 1):
+                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info.get('iq', 100)} IQ</b>\n"
+            bot.reply_to(message, resp, parse_mode='HTML')
+        else:
+            bot.reply_to(message, "📊 Статистика пока пуста.")
+        return
+
+    elif text_lower in ['топ пяток', 'топ пяточек', 'топ пятка']:
+        if 'economy' in db and str_chat in db['economy']:
+            sorted_foot = sorted(db['economy'][str_chat].items(), key=lambda x: x[1].get('foot_size', 0), reverse=True)
+            resp = "🦶 <b>Топ участников по размеру пятки:</b>\n\n"
+            for idx, (u, info) in enumerate(sorted_foot[:10], 1):
+                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info.get('foot_size', 25)} см</b>\n"
+            bot.reply_to(message, resp, parse_mode='HTML')
+        else:
+            bot.reply_to(message, "📊 Статистика пока пуста.")
         return
 
     # --- БЛОК НЯ-КОИНОВ И ИНВЕНТАРЯ ---
@@ -868,21 +945,38 @@ def handle_messages(message):
             bot.reply_to(message, f"⏳ Можно собирать коины каждый час! Следующий сбор через: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
         return
 
-    # --- СЕКРЕТНЫЙ ПРОМОКОД ---
+    # --- ПРОМОКОДЫ ---
     elif text_lower.startswith('промокод') or text_lower.startswith('/promo'):
         match = re.search(r'(?:промокод|/promo)\s+(.+)', text, re.IGNORECASE)
         if match:
-            code = match.group(1).strip()
-            if code.upper() == 'ADMIN1000':
+            code = match.group(1).strip().upper()
+            
+            # Промокод для администратора
+            if code == 'ADMIN1000':
                 if user_username == ADMIN_USERNAME:
                     add_coins(chat_id, user_tag, 1000)
-                    bot.reply_to(message, "🎁 <b>Разработчик активировал промокод!</b>\nВам начислено +1000 Ня-коинов 🪙!", parse_mode='HTML')
+                    bot.reply_to(message, "🎁 <b>Разработчик активировал секретный промокод!</b>\nВам начислено +1000 Ня-коинов 🪙!", parse_mode='HTML')
                 else:
                     bot.reply_to(message, "❌ Этот промокод только для администратора/разработчика проекта!")
+            
+            # Общий промокод на 400 коинов
+            elif code == 'NYA400' or code == '400':
+                if 'promos' not in db:
+                    db['promos'] = {}
+                if 'NYA400' not in db['promos']:
+                    db['promos']['NYA400'] = []
+
+                if user_tag in db['promos']['NYA400']:
+                    bot.reply_to(message, "❌ Вы уже активировали этот промокод!")
+                else:
+                    db['promos']['NYA400'].append(user_tag)
+                    add_coins(chat_id, user_tag, 400)
+                    save_data()
+                    bot.reply_to(message, "🎉 <b>Промокод успешно активирован!</b>\nВам начислено <b>+400 Ня-коинов 🪙</b>!", parse_mode='HTML')
             else:
                 bot.reply_to(message, "❌ Неверный промокод!")
         else:
-            bot.reply_to(message, "❌ Формат: <code>промокод ADMIN1000</code>", parse_mode='HTML')
+            bot.reply_to(message, "❌ Формат: <code>промокод NYA400</code>", parse_mode='HTML')
         return
 
     elif text_lower.startswith('перевод'):
@@ -945,7 +1039,8 @@ def handle_messages(message):
             InlineKeyboardButton('🐉 Дракон (1500 🪙)', callback_data='buy_badge_badge_dragon')
         )
         markup.add(
-            InlineKeyboardButton('👻 Призрак (2000 🪙)', callback_data='buy_badge_badge_ghost')
+            InlineKeyboardButton('👻 Призрак (2000 🪙)', callback_data='buy_badge_badge_ghost'),
+            InlineKeyboardButton('🦶 Пятка (3000 🪙)', callback_data='buy_badge_badge_foot')
         )
         
         pass_status = "❌ Не куплен"
@@ -966,7 +1061,7 @@ def handle_messages(message):
             "• 💀 Череп — 600 🪙 | 🚀 Ракета — 700 🪙\n"
             "• 🦊 Лисичка — 800 🪙 | 👽 Инопланетянин — 900 🪙\n"
             "• 🦄 Единорог — 1000 🪙 | 🐉 Дракон — 1500 🪙\n"
-            "• 👻 Призрак — 2000 🪙\n\n"
+            "• 👻 Призрак — 2000 🪙 | 🦶 Пятка — 3000 🪙\n\n"
             "Выбери товар кнопкой ниже:",
             reply_markup=markup,
             parse_mode='HTML'
