@@ -312,7 +312,10 @@ def get_user_econ(chat_id, user_tag):
             'balance': 50,           # Стартовый баланс
             'smeh': 0,               # Очки смехуятинки
             'iq': 100,               # Уровень IQ
+            'fat': 20,               # Процент жира
             'last_hourly': 0,        # Timestamp последнего часового сбора
+            'last_iq_time': 0,       # Timestamp последнего измерения IQ (КД 30 сек)
+            'last_fat_time': 0,      # Timestamp последнего измерения жира (КД 30 сек)
             'nya_pass_until': 0,     # Timestamp окончания действия Ня-Пасса
             'nya_pass_enabled': True,# Включен ли Ня-Пасс владельцем
             'badge': None,           # Активный значок
@@ -329,6 +332,12 @@ def get_user_econ(chat_id, user_tag):
         u_data['smeh'] = 0
     if 'iq' not in u_data:
         u_data['iq'] = 100
+    if 'fat' not in u_data:
+        u_data['fat'] = 20
+    if 'last_iq_time' not in u_data:
+        u_data['last_iq_time'] = 0
+    if 'last_fat_time' not in u_data:
+        u_data['last_fat_time'] = 0
 
     return u_data
 
@@ -606,9 +615,10 @@ def send_welcome(message):
         '🪙 <b>2. ВАЛЮТА И ПРОФИЛЬ:</b>\n'
         '• <code>бонус</code> / <code>/bonus</code> — получать от 1 до 100 коинов каждый час.\n'
         '• <code>баланс</code> / <code>/balance</code> — ваш кошелек.\n'
-        '• <code>инвентарь</code> / <code>профиль</code> — просмотр баланса, смехуятинки, IQ, выбор значков и вкл/выкл Ня-Пасса.\n'
+        '• <code>инвентарь</code> / <code>профиль</code> — просмотр баланса, смехуятинки, IQ, жира, выбор значков и вкл/выкл Ня-Пасса.\n'
         '• <code>+смехуятинка</code> — ответить на сообщение, чтобы начислить +1 очко смехуятинки.\n'
-        '• <code>айкью</code> / <code>iq</code> — симулятор изменения IQ.\n'
+        '• <code>айкью</code> / <code>iq</code> — симулятор изменения IQ (КД 30 сек).\n'
+        '• <code>жир</code> / <code>жирок</code> — замер уровня жира (КД 30 сек).\n'
         '• <code>перевод @username [сумма]</code> — перевод коинов.\n'
         '• <code>промокод [код]</code> — секретный промокод.\n\n'
 
@@ -703,6 +713,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
         f"🪙 Баланс: <b>{econ['balance']} Ня-коинов</b>\n"
         f"😂 Смехуятинка: <b>{econ.get('smeh', 0)} балл(ов)</b>\n"
         f"🧠 Айкью (IQ): <b>{econ.get('iq', 100)}</b>\n"
+        f"🍔 Процент жира: <b>{econ.get('fat', 20)}%</b>\n"
         f"🏷 Активный значок: <b>{current_badge}</b>\n"
         f"🎒 Инвентарь значков: {inv_str}\n"
         f"🎟 Ня-Пасс от мата: <b>{pass_status_text}</b>"
@@ -786,16 +797,44 @@ def handle_messages(message):
             bot.reply_to(message, "❌ Ответьте этой командой на сообщение человека, которому хотите начислить смехуятинку!")
         return
 
-    # --- СИМУЛЯТОР АЙКЬЮ ---
+    # --- СИМУЛЯТОР АЙКЬЮ (С КД 30 СЕКУНД) ---
     elif text_lower in ['айкью', 'iq', 'iqи', 'айкю']:
         econ = get_user_econ(chat_id, user_tag)
-        # Случайный прирост или изменение IQ от -5 до +15
+        now_ts = time.time()
+        cooldown = 30  # КД 30 секунд
+        
+        if now_ts - econ.get('last_iq_time', 0) < cooldown:
+            left_sec = int(cooldown - (now_ts - econ.get('last_iq_time', 0)))
+            bot.reply_to(message, f"⏳ Тест на IQ можно проходить не чаще чем раз в 30 секунд!\nПодождите еще: <b>{left_sec} сек</b>.", parse_mode='HTML')
+            return
+
         change = random.randint(-5, 15)
         econ['iq'] = max(0, econ.get('iq', 100) + change)
+        econ['last_iq_time'] = now_ts
         save_data()
         
         sign = "+" if change >= 0 else ""
         bot.reply_to(message, f"🧠 {make_link(chat_id, user_tag, user_id)}, ваш тест на IQ завершен!\nИзменение: <b>{sign}{change} IQ</b>\nТекущий уровень интеллекта: <b>{econ['iq']} IQ 📊</b>", parse_mode='HTML')
+        return
+
+    # --- СИМУЛЯТОР ЖИРА (С КД 30 СЕКУНД) ---
+    elif text_lower in ['жир', 'жирок', 'жирность', 'процент жира']:
+        econ = get_user_econ(chat_id, user_tag)
+        now_ts = time.time()
+        cooldown = 30  # КД 30 секунд
+        
+        if now_ts - econ.get('last_fat_time', 0) < cooldown:
+            left_sec = int(cooldown - (now_ts - econ.get('last_fat_time', 0)))
+            bot.reply_to(message, f"⏳ Замер жира можно проводить раз в 30 секунд!\nПодождите еще: <b>{left_sec} сек</b>.", parse_mode='HTML')
+            return
+
+        change = random.randint(-4, 6)
+        econ['fat'] = max(0, min(100, econ.get('fat', 20) + change))
+        econ['last_fat_time'] = now_ts
+        save_data()
+        
+        sign = "+" if change >= 0 else ""
+        bot.reply_to(message, f"🥩 {make_link(chat_id, user_tag, user_id)}, сканирование жирового слоя завершено!\nИзменение: <b>{sign}{change}%</b>\nТекущий процент жира: <b>{econ['fat']}% 🍔</b>", parse_mode='HTML')
         return
 
     # --- БЛОК НЯ-КОИНОВ И ИНВЕНТАРЯ ---
