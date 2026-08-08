@@ -38,6 +38,9 @@ bot = telebot.TeleBot(TOKEN)
 DB_CHANNEL_ID = int(os.environ.get('DB_CHANNEL_ID', -1004334874700))
 DATA_FILE = 'rests_data.json'
 
+# Юзернейм администратора/разработчика для секретного промокода
+ADMIN_USERNAME = 'ukrgorilka'
+
 MONTHS = {
     'января': 1, 'январь': 1,
     'февраля': 2, 'февраль': 2,
@@ -51,6 +54,18 @@ MONTHS = {
     'октября': 10, 'октябрь': 10,
     'ноября': 11, 'ноябрь': 11,
     'декабря': 12, 'декабрь': 12,
+}
+
+# Доступные значки в магазине с разнообразными ценами
+BADGES = {
+    'badge_star': {'name': 'Звездочка', 'emoji': '🌟', 'price': 100},
+    'badge_paw': {'name': 'Лапка Котика', 'emoji': '🐾', 'price': 200},
+    'badge_heart': {'name': 'Сердечко', 'emoji': '💖', 'price': 200},
+    'badge_lightning': {'name': 'Молния', 'emoji': '⚡️', 'price': 300},
+    'badge_crown': {'name': 'Корона', 'emoji': '👑', 'price': 300},
+    'badge_diamond': {'name': 'Бриллиант', 'emoji': '💎', 'price': 500},
+    'badge_rocket': {'name': 'Ракета', 'emoji': '🚀', 'price': 700},
+    'badge_unicorn': {'name': 'Единорог', 'emoji': '🦄', 'price': 1000},
 }
 
 # --- ВСЕГДА АКТИВНЫЕ ТРИГГЕРЫ (Работают даже с Ня-Пассом) ---
@@ -129,124 +144,86 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Не стоит такое писать 🛑'
     ],
     
-    # --- ОСКОРБЛЕНИЯ И МАТ ---
-    r'\b(даун|даунич|дауненок|даунёнок|аутист|аутизм|дебил|дебилоид|имбецил|кретин|олигофрен)\b': [
+    # --- РАСШИРЕННЫЙ СПИСОК МАТОВ И ОСКОРБЛЕНИЙ ---
+    r'\b(долбоеб|долбаеб|долбаёб|далбоеб|далбаеб|далбаёб|долбоёб|долбоеб|долбоящер|долбень|еблан|ебланище|ебланчик)\b': [
+        'Давай без личных оскорблений, дружище! 🤝⚠️',
+        'А вот обижать людей нельзя! 🥺🚫',
+        'Доброта спасет мир, а ты ругаешься 🌸🕊',
+        'А сам-то идеальный? 😜',
+        'Давай жить дружно! 🐱💬',
+        'Словарный запас подкачал, давай культурнее! 📚'
+    ],
+    r'\b(даун|даунич|дауненок|даунёнок|аутист|аутизм|дебил|дебилоид|имбецил|кретин|олигофрен|дауны)\b': [
         'Не стоит диагнозами бросаться, будь добрее! 🧠❤️',
         'Уважение к собеседнику выходит из чата... 🚶‍♂️💔',
         'Давай без ярлыков и оскорблений! 🛑🤐',
         'Эрудиция на высоте, а вот вежливость подкачала 📉📚',
         'Кто обозвал, тот сам так называется! 😜✨'
     ],
-    r'\b(залупа|залупыш|залупоглаз|залупин|залупистый)\b': [
+    r'\b(залупа|залупыш|залупоглаз|залупин|залупистый|залупка)\b': [
         'Ого, какие изысканные выражения из подворотни! 🏰💩',
         'Фильтруй базар, а то фильтр забьется! 🧼💥',
         'Давай общаться как цивилизованные люди! 🎩✨',
         'Фу такими словами кидаться, иди рот ополосни! 🚰🧼',
         'Минус 50 очков за дерзость! 🧙‍♂️🧹'
     ],
-    r'\b(сосать|соси|отсоси|соснуть|сосешь|сосёшь|сосиска)\b': [
+    r'\b(сосать|соси|отсоси|соснуть|сосешь|сосёшь|сосиска|отсосино)\b': [
         'Сосать можно только чупа-чупс! 🍭😋',
         'Кажется, кому-то не хватает сладкого в жизни! 🍫🍬',
         'Рот свой держи на замке, а не предлагай глупости! 🤐🔑',
         'Детский сад, группа «Солнышко» объявляет тихий час! 👶💤',
         'Давай без этих взрослых фантазий! 🛑🙈'
     ],
-    r'\b(трахнул|трахать|вытрахал|втрахал|трахни|трахну|вытрахать)\b': [
+    r'\b(трахнул|трахать|вытрахал|втрахал|трахни|трахну|вытрахать|затрахал)\b': [
         'Трахать тут можно только мозги админу, но не советую! 🧠⚡️',
         'Какой грозный казанова нашелся! 🕶😏',
         'Попридержи коней, герой-любовник! 🐎🛑',
         'Режиссер, выключите у него взрослый канал! 📺❌',
         'Давай без пошлостей в общем чате! 🔞🚫'
     ],
-    r'\b(шлюха|шлюшка|шлюховатый|проститутка|шалава|шмара|лярва|стерва)\b': [
+    r'\b(шлюха|шлюшка|шлюховатый|проститутка|шалава|шмара|лярва|стерва|шлюхи)\b': [
         'Словарь негодяя активирован? Фильтруй базар! 🧼💥',
         'Уважение к людям вышло из чата... 🚶‍♂️💔',
         'Не смей так называть людей, уважай окружающих! 🙅‍♂️🔥',
         'За такие слова можно и в бан улететь! ✈️🔨',
         'Слишком много грязи, иди помойся! 🚿🧼'
     ],
-    r'\b(мудак|мудило|гандон|презерватив|уебок|уёбок|уебан|уебище|уёбище|выблядок|мразь|сука)\b': [
+    r'\b(мудак|мудило|гандон|презерватив|уебок|уёбок|уебан|уебище|уёбище|выблядок|мразь|сука|сучара)\b': [
         'Уровень токсичности зашкаливает! ☣️😱',
         'Давай без тяжелой артиллерии и оскорблений! 💣🛑',
         'Столько желчи, чашечку чая для успокоения? 🍵🧘‍♂️',
         'Кто-то забыл принять таблетки от агрессии! 💊😉',
         'Культура речи на нуле, пересдача осенью! 📚❌'
     ],
-    r'\b(пизденыш|пиздёныш|говноед|засранец|падла|гад)\b': [
-        'Ого, какие выражения! 🏰💩',
+    r'\b(пизденыш|пиздёныш|говноед|засранец|падла|гад|пидор|пидорас|пидарас|чмо|хуесос|хуесосина)\b': [
+        'Ого, какие глубокие познания ругательств! 🧹😱',
         'Давай общаться как цивилизованные люди! 🎩✨',
         'Минус 50 очков за дерзость! 🧙‍♂️🧹',
-        'Не кидайся грязью, сам запачкаешься! 🧼💩'
+        'За такие слова в приличном доме чаем не угощают! ☕️❌'
     ],
-    r'\b(блять|бля|блеать|блят|бляя|блятьь|блядь)\b': [
+    r'\b(блять|бля|блеать|блят|бляя|блятьь|блядь|блядина)\b': [
         'Вообще-то матюкаться нельзя 🤓☝️',
         'Рот с мылом помыть? 🧼🤐',
         'За такое и в угол поставить могут! 📐👵',
         'Культурнее, пожалуйста, мы же в приличном обществе! 🎩✨',
-        'Словарный запас покинул чат... 📉',
-        'А без «бля» никак нельзя было предложение составить? 🤔'
+        'Словарный запас покинул чат... 📉'
     ],
     r'\b(нах|нахуй|похуй|нахуя|нахуйй|похую|нахрен|нафиг)\b': [
         'Маршрут перестроен: туда мы точно не идем 🗺❌',
         'GPS-навигатор отклонил ваш запрос! 🛑🧭',
         'Вектор движения выбран крайне некультурно! 📐🧭',
-        'А вежливо попросить или сказать культурно — не судьба? 🥺',
         'Фильтруй базар, а то фильтр забьется! 🧼💥'
     ],
-    r'\b(сука|сучка|сучко|сучара)\b': [
-        'Собака — друг человека, а ты ругаешься! 🐶😏',
-        'Не ругайся, а то мама увидит! 🙈',
-        'Ай-яй-яй, кто это тут сквернословит? 🧐',
-        'Держи свои эмоции в узде! 🐎🤐',
-        'Минус вайб от таких слов 💔'
-    ],
-    r'\b(пиздец|пизда|пиздос|пиздей|пиздато|пиздеть|пиздець)\b': [
+    r'\b(пиздец|пизда|пиздос|пиздей|пиздато|пиздеть|пиздець|хуй|хуя|хуи|хуйня|хуево|заебись)\b': [
         'Ого, какие мы громкие слова знаем! 📢🤯',
-        'Давай без драмы и плохих слов 🎭🤐',
-        'А вот это уже вообще ни в какие ворота! 🚪🚫',
-        'Кажется, у кого-то сгорел предохранитель 💥⚡️',
+        'Словарь Даля нервно курит в сторонке... 📚🚬',
+        'Давай переведём это на интеллигентный язык? 🎩📜',
         'Спокойствие, только спокойствие! 🎈'
     ],
-    r'\b(хуй|хуя|хуи|хуйня|хуево|заебись|похуй)\b': [
-        'Словарь Даля нервно курит в сторонке... 📚🚬',
-        'Культура речи вышла в рест! 🌴🤐',
-        'Так, минус 10 очков Гриффиндору за мат! 🧙‍♂️🧹',
-        'Давай переведём это на интеллигентный язык? 🎩📜',
-        'Эмоции кипят, а слова страдают 🌋'
-    ],
-    r'\b(долбоеб|долбаеб|долбаёб|еблан|долбоёб|долбень)\b': [
-        'Давай без личных оскорблений, дружище! 🤝⚠️',
-        'А вот обижать людей нельзя! 🥺🚫',
-        'Доброта спасет мир, а ты ругаешься 🌸🕊',
-        'А сам-то идеальный? 😜',
-        'Давай жить дружно! 🐱💬'
-    ],
-    r'\b(пидор|пидорас|пидарас|гандон|презерватив|чмо)\b': [
-        'Соблюдаем правила приличного тона в чате! 🛑🎩',
-        'Не кидайся обидными словами! 🙅‍♂️🔥',
-        'Лучше скажи что-то приятное! 🍫✨',
-        'Тут вообще-то интеллигентная тусовка! 🤵',
-        'Уровень токсичности зашкаливает! ☣️'
-    ],
-    r'\b(хуесос|хуесосина|хуеплет|хуеплёт)\b': [
-        'Ого, вот это пылесос для плохих слов включился! 🧹😱',
-        'Давай без таких глубоких познаний ругательств! 🛑🙅‍♂️',
-        'Фу таким быть, иди рот ополосни! 🚰🧼',
-        'За такие слова в приличном доме чаем не угощают! ☕️❌',
-        'Слишком жестко, снизь градус! 🌡🧊'
-    ],
-    r'\b(ахуеть|охуеть|охуел|ахуел|охуеть|офигеть)\b': [
-        'Удивление можно выразить и без мата! 😲✨',
-        'Челюсть на полу, а мат на языке? 🦴😯',
-        'Вот это поворот! Но давай культурнее! 🏎💨',
-        'Я сам в шоке, но держу себя в руках! 🤯🤐',
-        'Ничего себе! Давай без эпатажа! 🎭⚡️'
-    ],
-    r'\b(ебать|ебаться|ебаный|ёбаный|ебнутый|ебанутый)\b': [
+    r'\b(ахуеть|охуеть|охуел|ахуел|ебать|ебаться|ебаный|ёбаный|ебнутый|ебанутый)\b': [
         'Энергию бы да в полезное русло! ⚡️🚜',
         'Не выражайся, а то клавиатура покраснеет! ⌨️😳',
         'Опять эмоциональный взрыв? 💥🤯',
-        'Кто-то забыл включить фильтр цензуры! 🎛❌',
         'Ты бы лучше так правила чата учил! 📖🤓'
     ]
 }
@@ -333,7 +310,8 @@ def get_user_econ(chat_id, user_tag):
         db['economy'][str_chat][clean_u] = {
             'balance': 50,           # Стартовый баланс
             'last_hourly': 0,        # Timestamp последнего часового сбора
-            'nya_pass_until': 0      # Timestamp окончания действия Ня-Пасса
+            'nya_pass_until': 0,     # Timestamp окончания действия Ня-Пасса
+            'badge': None            # Купленный смайлик/значок
         }
         save_data()
     return db['economy'][str_chat][clean_u]
@@ -353,18 +331,25 @@ def is_nya_pass_active(chat_id, user_tag):
     return time.time() < until
 
 # ---------------------------------------------------------
-# ВСПАМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ПАРСИНГА И ВСЕХ ПОЛЬЗОВАТЕЛЕЙ
 # ---------------------------------------------------------
 def clean_tag(user_str):
     if not user_str:
         return 'Пользователь'
-    return user_str.replace('@', '')
+    return user_str.replace('@', '').strip()
 
-def make_link(user_name, user_id=None):
+def make_link(chat_id, user_name, user_id=None):
+    """Генерирует ссылку на юзера с учетом купленных кастомных смайлов"""
     name = clean_tag(user_name)
+    badge_str = ""
+    if chat_id:
+        user_econ = get_user_econ(chat_id, name)
+        if user_econ.get('badge'):
+            badge_str = f" [{user_econ['badge']}]"
+
     if user_id:
-        return f'<a href="tg://user?id={user_id}">{name}</a>'
-    return f'<b>{name}</b>'
+        return f'<a href="tg://user?id={user_id}">{name}</a>{badge_str}'
+    return f'<b>{name}</b>{badge_str}'
 
 def is_admin(chat_id, user_id):
     if chat_id > 0:
@@ -374,6 +359,52 @@ def is_admin(chat_id, user_id):
         return member.status in ['administrator', 'creator']
     except Exception:
         return False
+
+def parse_target_and_args(message, cmd_prefix):
+    text = message.text.strip() if message.text else ''
+    target_user = None
+    target_user_id = None
+    raw_args = ''
+
+    # Вариант 1: Ответ на сообщение (Reply)
+    if message.reply_to_message:
+        u = message.reply_to_message.from_user
+        target_user = clean_tag(u.username or u.first_name)
+        target_user_id = u.id
+        m = re.search(f'{re.escape(cmd_prefix)}\\s*(.*)', text, re.IGNORECASE)
+        if m:
+            raw_args = m.group(1).strip()
+        return target_user, target_user_id, raw_args
+
+    m_body = re.search(f'{re.escape(cmd_prefix)}\\s+(.+)', text, re.IGNORECASE)
+    if not m_body:
+        return None, None, ''
+
+    body = m_body.group(1).strip()
+
+    # Вариант 2: Юзернейм через @
+    m_tag = re.search(r'@(\w+)', body)
+    if m_tag:
+        target_user = clean_tag(m_tag.group(1))
+        raw_args = body.replace(m_tag.group(0), '').strip()
+        return target_user, None, raw_args
+
+    # Вариант 3: Имя через |
+    if '|' in body:
+        parts = body.split('|')
+        possible_name = parts[-1].strip()
+        if len(possible_name.split()) == 1:
+            target_user = clean_tag(possible_name)
+            raw_args = '|'.join(parts[:-1]).strip()
+            return target_user, None, raw_args
+
+    words = body.split()
+    if len(words) > 1:
+        target_user = clean_tag(words[-1])
+        raw_args = ' '.join(words[:-1]).strip()
+        return target_user, None, raw_args
+
+    return None, None, ''
 
 def parse_duration_to_seconds(duration_str, chat_id=None):
     duration_str = duration_str.lower().strip()
@@ -455,7 +486,7 @@ def schedule_rest_timers(chat_id, user, end_timestamp, target_user_id=None):
         str_chat = str(chat_id)
         reminded = False
         clean_user = clean_tag(user)
-        user_link = make_link(clean_user, target_user_id)
+        user_link = make_link(chat_id, clean_user, target_user_id)
         while True:
             now = time.time()
             remaining = end_timestamp - now
@@ -485,7 +516,7 @@ def schedule_rest_timers(chat_id, user, end_timestamp, target_user_id=None):
                 except Exception:
                     pass
 
-            time.sleep(min(remaining, 30))
+         time.sleep(min(remaining, 30))
 
     t = threading.Thread(target=timer_thread)
     t.daemon = True
@@ -528,7 +559,7 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_members(message):
     for member in message.new_chat_members:
-        user_link = make_link(member.username or member.first_name, member.id)
+        user_link = make_link(message.chat.id, member.username or member.first_name, member.id)
         
         # Начисляем приветственный бонус
         add_coins(message.chat.id, member.username or member.first_name, 50)
@@ -537,45 +568,59 @@ def welcome_new_members(message):
             f"🎉 <b>Добро пожаловать в чат, {user_link}!</b>\n\n"
             f"🌸 Мы очень рады тебя видеть!\n"
             f"🪙 Тебе начислен приветственный бонус: <b>50 Ня-коинов</b>!\n\n"
-            f"💡 Используй <code>/help</code>, чтобы узнать все команды бота."
+            f"💡 Используй <code>/help</code> или <code>/start</code>, чтобы узнать все возможности бота."
         )
         bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
 
 @bot.message_handler(content_types=['left_chat_member'])
 def goodbye_left_member(message):
     member = message.left_chat_member
-    user_link = make_link(member.username or member.first_name, member.id)
+    user_link = make_link(message.chat.id, member.username or member.first_name, member.id)
     
     farewell_text = f"👋 <b>{user_link}</b> покинул(а) наш чат. Пожелаем удачи! 🌸"
     bot.send_message(message.chat.id, farewell_text, parse_mode='HTML')
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ КОМАНД
+# ОБРАБОТЧИКИ КОМАНД И ПОЛНОЕ ОПИСАНИЕ БОТА
 # ---------------------------------------------------------
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     help_text = (
-        '🌴 <b>Бот для учета рестов и внутренней системы Ня-коинов!</b>\n\n'
-        '👑 <b>Админ-команды:</b>\n'
-        '• <code>+рест на 3 д | отпуск</code> — выдать рест\n'
-        '• <code>-рест</code> — снять рест\n'
-        '• <code>+продлить на 2 д</code> — продлить рест\n'
-        '• <code>причина новая причина</code> — изменить причину\n'
-        '• <code>/settings</code> — настройки чата\n'
-        '• <code>/export</code> — выгрузить CSV-файл истории\n'
-        '• <code>отчет</code> — аналитический отчет\n'
-        '• <code>логи</code> — история чата\n\n'
-        '👤 <b>Для всех (Ресты):</b>\n'
-        '• <code>запрос рест на 2 д</code> — отправить запрос админам\n'
-        '• <code>ресты</code> — список активных рестов\n'
-        '• <code>мой рест</code> — время до конца реста\n'
-        '• <code>топ</code> — статистика чата по рестам\n\n'
-        '🪙 <b>Ня-коины и Лавка:</b>\n'
-        '• <code>баланс</code> (или <code>/balance</code>) — ваш счет\n'
-        '• <code>бонус</code> (или <code>/bonus</code>) — получать коины (от 1 до 100 каждый час)\n'
-        '• <code>перевод @user 100</code> — перевести коины другу\n'
-        '• <code>магазин</code> — купить Ня-Пасс от мата\n'
-        '• <code>богачи</code> (или <code>топ коинов</code>) — топ участников по коинам'
+        '🤖 <b>ПОЛНОЕ РУКОВОДСТВО И ВОЗМОЖНОСТИ БОТА</b>\n\n'
+        '🌴 <b>1. СИСТЕМА УЧЕТА РЕСТОВ (ОТПУСКОВ):</b>\n'
+        '• <code>+рест [срок] | [причина] [юзер]</code> — выдать рест пользователю (например: <code>+рест на 3 д | отпуск vorthon</code> или ответом на сообщение).\n'
+        '• <code>-рест [юзер]</code> — снять рест с участника.\n'
+        '• <code>+продлить [срок] [юзер]</code> — продлить действующий рест.\n'
+        '• <code>причина [юзер] [новая причина]</code> — изменить причину реста.\n'
+        '• <code>запрос рест [срок] | [причина]</code> — отправить запрос на рест администраторам чата.\n'
+        '• <code>ресты</code> — список всех людей, находящихся в ресте сейчас.\n'
+        '• <code>мой рест</code> — проверить оставшееся время своего реста.\n'
+        '• <code>топ</code> / <code>статистика</code> — статистика чата по количеству рестов.\n'
+        '• <code>отчет</code> / <code>логи</code> — подробный аналитический отчет и история.\n\n'
+        
+        '🪙 <b>2. ВНУТРЕННЯЯ ВАЛЮТА (НЯ-КОИНЫ):</b>\n'
+        '• <code>бонус</code> / <code>/bonus</code> / <code>коин</code> — получать от 1 до 100 Ня-коинов КАЖДЫЙ ЧАС.\n'
+        '• <code>баланс</code> / <code>/balance</code> — узнать свой баланс и статус.\n'
+        '• <code>перевод @username [сумма]</code> — перевести коины другу.\n'
+        '• <code>промокод [код]</code> — ввести секретный промокод.\n'
+        '• <code>богачи</code> / <code>топ коинов</code> — рейтинг самых богатых участников.\n'
+        '• <i>Награда за рест:</i> За каждый оформленный рест бот автоматический начисляeт <b>+150 Ня-коинов</b>!\n\n'
+
+        '🏪 <b>3. ЛАВКА, СМАЙЛИКИ И НЯ-ПАСС:</b>\n'
+        '• <code>магазин</code> / <code>лавка</code> — открыть магазин.\n'
+        '• 🎟 <b>Ня-Пасс от мата (500 🪙)</b> — покупается на 7 дней. Бот перестает реагировать на ваши матерные слова и слово "коч".\n'
+        '• 👑 <b>Пассы на Смайлики и Значки (100-1000 🪙)</b> — украшают ваше имя значками в списке рестов и топах!\n\n'
+
+        '💬 <b>4. ИНТЕРАКТИВ И АВТО-ОТВЕТЧИК:</b>\n'
+        '• <b>Приветствия и прощания:</b> Бот автоматически встречает новых участников бонусом и провожает ушедших.\n'
+        '• <b>Реакции на слова:</b>\n'
+        '  — При упоминании мамы ("твоя мама", "твоя мамка") бот отвечает добрыми комплиментами!\n'
+        '  — Реакция на аниме фразы ("охаё", "ня", "кавай", "даттебаё", "аригато", "ямете", "десу").\n'
+        '  — Фильтр мата и оскорблений (залупа, даун, блять и др.).\n\n'
+
+        '⚙️ <b>5. НАСТРОЙКИ ЧАТА (для Админов):</b>\n'
+        '• <code>/settings</code> — меню ограничений, лимитов дней и авто-удаления сообщений от участников в ресте.\n'
+        '• <code>/export</code> — выгрузка всей истории рестов в файле CSV.'
     )
     bot.reply_to(message, help_text, parse_mode='HTML')
 
@@ -638,10 +683,11 @@ def handle_messages(message):
     chat_id = message.chat.id
     str_chat = str(chat_id)
     user_id = message.from_user.id
+    user_username = (message.from_user.username or '').lower()
     user_tag = clean_tag(message.from_user.username or message.from_user.first_name)
     text_lower = text.lower()
 
-    # 1. СНАЧАЛА ПРОВЕРЯЕМ ВСЕГДА АКТИВНЫЕ СЛОВА (Мама, Охаё, Аниме, Кавай)
+    # 1. ПРОВЕРКА ВСЕГДА АКТИВНЫХ СЛОВ (Мама, Охаё, Аниме, Кавай)
     triggered = False
     for pattern, responses in ALWAYS_ACTIVE_PATTERNS.items():
         if re.search(pattern, text_lower, re.IGNORECASE):
@@ -662,7 +708,7 @@ def handle_messages(message):
         if user_tag in db['rests'][str_chat]:
             try:
                 bot.delete_message(chat_id, message.message_id)
-                user_link = make_link(user_tag, user_id)
+                user_link = make_link(chat_id, user_tag, user_id)
                 warn = bot.send_message(chat_id, f'⚠️ {user_link}, вы находитесь в ресте! Ваше сообщение удалено.', parse_mode='HTML')
                 threading.Timer(5, lambda: bot.delete_message(chat_id, warn.message_id)).start()
                 return
@@ -680,10 +726,12 @@ def handle_messages(message):
             hours = (rem_sec % 86400) // 3600
             pass_str = f"\n🎟 <b>Ня-Пасс (Игнор мата):</b> Активен еще {days}д {hours}ч"
         
+        badge_str = f"\n🏷 Значок профиля: {econ['badge']}" if econ.get('badge') else "\n🏷 Значок профиля: Отсутствует"
+
         bot.reply_to(
             message,
-            f"🪙 <b>Кошелек пользователя {make_link(user_tag, user_id)}:</b>\n"
-            f"• Баланс: <b>{econ['balance']} Ня-коинов 🪙</b>{pass_str}",
+            f"🪙 <b>Кошелек пользователя {make_link(chat_id, user_tag, user_id)}:</b>\n"
+            f"• Баланс: <b>{econ['balance']} Ня-коинов 🪙</b>{pass_str}{badge_str}",
             parse_mode='HTML'
         )
         return
@@ -705,6 +753,23 @@ def handle_messages(message):
             bot.reply_to(message, f"⏳ Можно собирать коины каждый час! Следующий сбор через: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
         return
 
+    # --- СЕКРЕТНЫЙ ПРОМОКОД ДЛЯ РАЗРАБОТЧИКА ---
+    elif text_lower.startswith('промокод') or text_lower.startswith('/promo'):
+        match = re.search(r'(?:промокод|/promo)\s+(.+)', text, re.IGNORECASE)
+        if match:
+            code = match.group(1).strip()
+            if code.upper() == 'ADMIN1000':
+                if user_username == ADMIN_USERNAME:
+                    add_coins(chat_id, user_tag, 1000)
+                    bot.reply_to(message, "🎁 <b>Разработчик активировал промокод!</b>\nВам начислено +1000 Ня-коинов 🪙!", parse_mode='HTML')
+                else:
+                    bot.reply_to(message, "❌ Этот промокод только для администратора/разработчика проекта!")
+            else:
+                bot.reply_to(message, "❌ Неверный промокод!")
+        else:
+            bot.reply_to(message, "❌ Формат: <code>промокод ADMIN1000</code>", parse_mode='HTML')
+        return
+
     elif text_lower.startswith('перевод'):
         match = re.search(r'перевод\s+@?(\w+)\s+(\d+)', text, re.IGNORECASE)
         if match:
@@ -722,7 +787,7 @@ def handle_messages(message):
                 
             sender_econ['balance'] -= amount
             add_coins(chat_id, target_u, amount)
-            bot.reply_to(message, f"💸 Вы успешно перевели <b>{amount} 🪙</b> пользователю {make_link(target_u)}!", parse_mode='HTML')
+            bot.reply_to(message, f"💸 Вы успешно перевели <b>{amount} 🪙</b> пользователю {make_link(chat_id, target_u)}!", parse_mode='HTML')
         else:
             bot.reply_to(message, "❌ Формат перевода: <code>перевод @username 50</code>", parse_mode='HTML')
         return
@@ -730,7 +795,23 @@ def handle_messages(message):
     elif text_lower in ['магазин', 'лавка', 'shop']:
         markup = InlineKeyboardMarkup()
         markup.add(
-            InlineKeyboardButton('🎟 Купить Ня-Пасс от мата (500 🪙)', callback_data='buy_nya_pass')
+            InlineKeyboardButton('🎟 Ня-Пасс от мата (500 🪙)', callback_data='buy_nya_pass')
+        )
+        markup.add(
+            InlineKeyboardButton('🌟 Звезда (100 🪙)', callback_data='buy_badge_badge_star'),
+            InlineKeyboardButton('🐾 Лапка (200 🪙)', callback_data='buy_badge_badge_paw'),
+            InlineKeyboardButton('💖 Сердце (200 🪙)', callback_data='buy_badge_badge_heart')
+        )
+        markup.add(
+            InlineKeyboardButton('⚡️ Молния (300 🪙)', callback_data='buy_badge_badge_lightning'),
+            InlineKeyboardButton('👑 Корона (300 🪙)', callback_data='buy_badge_badge_crown')
+        )
+        markup.add(
+            InlineKeyboardButton('💎 Бриллиант (500 🪙)', callback_data='buy_badge_badge_diamond'),
+            InlineKeyboardButton('🚀 Ракета (700 🪙)', callback_data='buy_badge_badge_rocket')
+        )
+        markup.add(
+            InlineKeyboardButton('🦄 Единорог (1000 🪙)', callback_data='buy_badge_badge_unicorn')
         )
         
         pass_status = "❌ Не куплен"
@@ -739,12 +820,19 @@ def handle_messages(message):
 
         bot.reply_to(
             message,
-            "🏪 <b>Магазин Ня-коинов:</b>\n\n"
-            "🎟 <b>Ня-Пасс от мата (на 1 неделю)</b>\n"
-            "• Ваша цена: <b>500 Ня-коинов 🪙</b>\n"
-            "• Описание: Бот перестанет отвечать на ваши матерные слова и триггер 'коч' в течение 7 дней.\n"
-            f"• Ваш статус: <b>{pass_status}</b>\n\n"
-            "Нажмите кнопку ниже для покупки:",
+            "🏪 <b>Лавка Ня-коинов и Значков:</b>\n\n"
+            "🎟 <b>Ня-Пасс от мата (на 1 неделю) — 500 🪙</b>\n"
+            f"• Статус пасса: <b>{pass_status}</b>\n\n"
+            "✨ <b>Значки и смайлы в топ и список рестов:</b>\n"
+            "• 🌟 <b>Звезда</b> — 100 🪙\n"
+            "• 🐾 <b>Лапка</b> — 200 🪙\n"
+            "• 💖 <b>Сердечко</b> — 200 🪙\n"
+            "• ⚡️ <b>Молния</b> — 300 🪙\n"
+            "• 👑 <b>Корона</b> — 300 🪙\n"
+            "• 💎 <b>Бриллиант</b> — 500 🪙\n"
+            "• 🚀 <b>Ракета</b> — 700 🪙\n"
+            "• 🦄 <b>Единорог</b> — 1000 🪙\n\n"
+            "Выбери товар кнопкой ниже:",
             reply_markup=markup,
             parse_mode='HTML'
         )
@@ -755,14 +843,14 @@ def handle_messages(message):
             sorted_econ = sorted(db['economy'][str_chat].items(), key=lambda x: x[1]['balance'], reverse=True)
             resp = "🏆 <b>Топ самых богатых участников чата:</b>\n\n"
             for idx, (u, info) in enumerate(sorted_econ[:10], 1):
-                resp += f"{idx}. {make_link(u)} — <b>{info['balance']} 🪙</b>\n"
+                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info['balance']} 🪙</b>\n"
             bot.reply_to(message, resp, parse_mode='HTML')
         else:
             bot.reply_to(message, "🪙 Статистика коинов пока пуста.")
         return
 
     # --- ОБЫЧНЫЕ КОМАНДЫ РЕСТОВ ---
-    if text.lower().startswith('запрос рест'):
+    if text_lower.startswith('запрос рест'):
         match = re.search(r'запрос\s+рест\s+(.+)', text, re.IGNORECASE)
         if not match:
             bot.reply_to(message, '❌ Формат: <code>запрос рест на 3 д | причина</code>', parse_mode='HTML')
@@ -791,7 +879,7 @@ def handle_messages(message):
             InlineKeyboardButton('🌴 Отпуск', callback_data=f'qs_{req_id}_Отпуск')
         )
 
-        user_link = make_link(user_tag, user_id)
+        user_link = make_link(chat_id, user_tag, user_id)
         bot.reply_to(
             message,
             f'📩 <b>Запрос на рест от:</b> {user_link}\n⏱ <b>Срок:</b> {duration_text}\n📝 <b>Причина:</b> {reason}',
@@ -800,55 +888,28 @@ def handle_messages(message):
         )
         return
 
-    if text.lower().startswith('+рест'):
+    if text_lower.startswith('+рест'):
         if not is_admin(chat_id, user_id):
             bot.reply_to(message, '❌ Эта команда доступна только администраторам!')
             return
-        target_user = None
-        target_user_id = None
-        raw_args = ''
 
-        if message.reply_to_message:
-            u = message.reply_to_message.from_user
-            target_user = clean_tag(u.username or u.first_name)
-            target_user_id = u.id
-            m = re.search(r'\+рест\s*(.*)', text, re.IGNORECASE)
-            if m:
-                raw_args = m.group(1).strip()
-        else:
-            m = re.search(r'\+рест\s+@?(\w+)\s*(.*)', text, re.IGNORECASE)
-            if m:
-                target_user = clean_tag(m.group(1))
-                raw_args = m.group(2).strip()
+        target_user, target_user_id, raw_args = parse_target_and_args(message, '+рест')
 
         if target_user and raw_args:
             parts = raw_args.split('|')
             duration_text = parts[0].strip()
             reason = parts[1].strip() if len(parts) > 1 else 'Не указана'
             apply_rest(chat_id, target_user, duration_text, reason, target_user_id)
-            user_link = make_link(target_user, target_user_id)
+            user_link = make_link(chat_id, target_user, target_user_id)
             bot.reply_to(message, f'✅ Рест для {user_link} добавлен!\n⏱ Срок: {duration_text}\n📝 Причина: {reason}\n🪙 Выдано +150 Ня-коинов за рест!', parse_mode='HTML')
         else:
-            bot.reply_to(message, '❌ Ошибка! Формат: <code>+рест на 3 д | отпуск</code>', parse_mode='HTML')
+            bot.reply_to(message, '❌ Ошибка! Формат: <code>+рест на 3 д | отпуск юзер</code> (или ответом на сообщение)', parse_mode='HTML')
 
-    elif text.lower().startswith('+продлить'):
+    elif text_lower.startswith('+продлить'):
         if not is_admin(chat_id, user_id):
             return
-        target_user = None
-        target_user_id = None
-        add_text = ''
-        if message.reply_to_message:
-            u = message.reply_to_message.from_user
-            target_user = clean_tag(u.username or u.first_name)
-            target_user_id = u.id
-            m = re.search(r'\+продлить\s+(.+)', text, re.IGNORECASE)
-            if m:
-                add_text = m.group(1).strip()
-        else:
-            m = re.search(r'\+продлить\s+@?(\w+)\s+(.+)', text, re.IGNORECASE)
-            if m:
-                target_user = clean_tag(m.group(1))
-                add_text = m.group(2).strip()
+
+        target_user, target_user_id, add_text = parse_target_and_args(message, '+продлить')
 
         if target_user and add_text and str_chat in db['rests'] and target_user in db['rests'][str_chat]:
             add_sec = parse_duration_to_seconds(add_text, chat_id)
@@ -860,51 +921,30 @@ def handle_messages(message):
                     target_user_id = info.get('user_id')
                 save_data()
                 schedule_rest_timers(chat_id, target_user, info['end_time'], target_user_id)
-                user_link = make_link(target_user, target_user_id)
+                user_link = make_link(chat_id, target_user, target_user_id)
                 bot.reply_to(message, f'✅ Рест для {user_link} успешно продлен на {add_text}!', parse_mode='HTML')
             else:
                 bot.reply_to(message, '❌ Не удалось распознать прибавляемое время.')
 
-    elif text.lower().startswith('причина'):
+    elif text_lower.startswith('причина'):
         if not is_admin(chat_id, user_id):
             return
-        target_user = None
-        target_user_id = None
-        new_reason = ''
-        if message.reply_to_message:
-            u = message.reply_to_message.from_user
-            target_user = clean_tag(u.username or u.first_name)
-            target_user_id = u.id
-            m = re.search(r'причина\s+(.+)', text, re.IGNORECASE)
-            if m:
-                new_reason = m.group(1).strip()
-        else:
-            m = re.search(r'причина\s+@?(\w+)\s+(.+)', text, re.IGNORECASE)
-            if m:
-                target_user = clean_tag(m.group(1))
-                new_reason = m.group(2).strip()
+
+        target_user, target_user_id, new_reason = parse_target_and_args(message, 'причина')
 
         if target_user and new_reason and str_chat in db['rests'] and target_user in db['rests'][str_chat]:
             db['rests'][str_chat][target_user]['reason'] = new_reason
             if not target_user_id:
                 target_user_id = db['rests'][str_chat][target_user].get('user_id')
             save_data()
-            user_link = make_link(target_user, target_user_id)
+            user_link = make_link(chat_id, target_user, target_user_id)
             bot.reply_to(message, f'📝 Причина реста для {user_link} изменена на: <b>{new_reason}</b>', parse_mode='HTML')
 
-    elif text.lower().startswith('-рест'):
+    elif text_lower.startswith('-рест'):
         if not is_admin(chat_id, user_id):
             return
-        target_user = None
-        target_user_id = None
-        if message.reply_to_message:
-            u = message.reply_to_message.from_user
-            target_user = clean_tag(u.username or u.first_name)
-            target_user_id = u.id
-        else:
-            m = re.search(r'-рест\s+@?(\w+)', text, re.IGNORECASE)
-            if m:
-                target_user = clean_tag(m.group(1))
+
+        target_user, target_user_id, _ = parse_target_and_args(message, '-рест')
 
         if target_user and str_chat in db['rests']:
             if target_user in db['rests'][str_chat]:
@@ -912,21 +952,21 @@ def handle_messages(message):
                     target_user_id = db['rests'][str_chat][target_user].get('user_id')
                 del db['rests'][str_chat][target_user]
                 save_data()
-                user_link = make_link(target_user, target_user_id)
+                user_link = make_link(chat_id, target_user, target_user_id)
                 bot.reply_to(message, f'🗑 Рест с {user_link} успешно снят.', parse_mode='HTML')
 
-    elif text.lower() in ['ресты', 'рест']:
+    elif text_lower in ['ресты', 'рест']:
         if str_chat not in db['rests'] or not db['rests'][str_chat]:
             bot.reply_to(message, '🌴 В данный момент никто не находится в ресте.')
         else:
             resp = '📋 <b>Список активных рестов:</b>\n\n'
             for u, info in db['rests'][str_chat].items():
                 reason_text = info.get('reason', 'Не указана')
-                u_link = make_link(u, info.get('user_id'))
+                u_link = make_link(chat_id, u, info.get('user_id'))
                 resp += f"• {u_link} — {info['duration']} (Причина: {reason_text})\n"
             bot.reply_to(message, resp, parse_mode='HTML')
 
-    elif text.lower() == 'мой рест':
+    elif text_lower == 'мой рест':
         if str_chat in db['rests'] and user_tag in db['rests'][str_chat]:
             info = db['rests'][str_chat][user_tag]
             rem_str = ''
@@ -938,7 +978,7 @@ def handle_messages(message):
                     rem_str = f'\n⏳ Осталось: {hours} ч {minutes} мин'
             bot.reply_to(message, f"🌴 <b>Ваш рест:</b> {info['duration']}\n📝 <b>Причина:</b> {info['reason']}{rem_str}", parse_mode='HTML')
 
-    elif text.lower() == 'отчет':
+    elif text_lower == 'отчет':
         if not is_admin(chat_id, user_id):
             return
         if str_chat in db['history'] and db['history'][str_chat]:
@@ -962,7 +1002,7 @@ def handle_messages(message):
         else:
             bot.reply_to(message, '📊 Нет данных для формирования отчета.')
 
-    elif text.lower() in ['топ', 'статистика']:
+    elif text_lower in ['топ', 'статистика']:
         if str_chat in db['history'] and db['history'][str_chat]:
             stats = {}
             user_ids = {}
@@ -975,11 +1015,11 @@ def handle_messages(message):
             sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)
             resp = '🏆 <b>Топ по количеству рестов:</b>\n\n'
             for idx, (u, count) in enumerate(sorted_stats[:10], 1):
-                u_link = make_link(u, user_ids.get(u))
+                u_link = make_link(chat_id, u, user_ids.get(u))
                 resp += f'{idx}. {u_link} — {count} раз(а)\n'
             bot.reply_to(message, resp, parse_mode='HTML')
 
-    elif text.lower() == 'логи':
+    elif text_lower == 'логи':
         if not is_admin(chat_id, user_id):
             return
         if str_chat in db['history'] and db['history'][str_chat]:
@@ -990,7 +1030,7 @@ def handle_messages(message):
                     all_logs.append((it['date'], u, it['duration'], it['reason'], it.get('user_id')))
             all_logs.sort(key=lambda x: x[0], reverse=True)
             for date, u, dur, reas, u_id in all_logs[:10]:
-                u_link = make_link(u, u_id)
+                u_link = make_link(chat_id, u, u_id)
                 resp += f'• {date} — {u_link}: {dur} ({reas})\n'
             bot.reply_to(message, resp, parse_mode='HTML')
 
@@ -1050,9 +1090,31 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, '🎉 Вы успешно купили Ня-Пасс от мата на 1 неделю!', show_alert=True)
         bot.send_message(
             chat_id, 
-            f"🎟 Пользователь {make_link(user_tag, user_id)} купил <b>Ня-Пасс от мата</b> на 7 дней! Бот не будет замечать мат и слово 'коч' от него в течение недели.",
+            f"🎟 Пользователь {make_link(chat_id, user_tag, user_id)} купил <b>Ня-Пасс от мата</b> на 7 дней! Бот не будет замечать мат и слово 'коч' от него в течение недели.",
             parse_mode='HTML'
         )
+
+    # --- ПОКУПКА СМАЙЛИКОВ/ЗНАЧКОВ ---
+    elif call.data.startswith('buy_badge_'):
+        badge_key = call.data.replace('buy_badge_', '')
+        if badge_key in BADGES:
+            item = BADGES[badge_key]
+            econ = get_user_econ(chat_id, user_tag)
+            
+            if econ['balance'] < item['price']:
+                bot.answer_callback_query(call.id, f"❌ Недостаточно Ня-коинов! Нужно {item['price']} 🪙", show_alert=True)
+                return
+
+            econ['balance'] -= item['price']
+            econ['badge'] = item['emoji']
+            save_data()
+
+            bot.answer_callback_query(call.id, f"🎉 Вы купили значок {item['emoji']}! Теперь он отображается возле вашего имени.", show_alert=True)
+            bot.send_message(
+                chat_id,
+                f"✨ Пользователь {make_link(chat_id, user_tag, user_id)} приобрел кастомный значок <b>{item['emoji']}</b> в магазине!",
+                parse_mode='HTML'
+            )
 
     # --- ЗАПРОСЫ РЕСТОВ ---
     elif call.data.startswith(('app_', 'qs_')):
@@ -1074,8 +1136,8 @@ def callback_inline(call):
         target_user_id = req_info['user_id']
 
         apply_rest(chat_id, target_user, duration_text, reason, target_user_id)
-        admin_link = make_link(call.from_user.username or call.from_user.first_name, user_id)
-        user_link = make_link(target_user, target_user_id)
+        admin_link = make_link(chat_id, call.from_user.username or call.from_user.first_name, user_id)
+        user_link = make_link(chat_id, target_user, target_user_id)
         
         bot.edit_message_text(
             f'✅ <b>Запрос принят админом {admin_link}!</b>\n'
@@ -1093,7 +1155,7 @@ def callback_inline(call):
         req_info = pending_requests.get(req_id)
         target_user = req_info['user_tag'] if req_info else 'Пользователь'
         user_id_val = req_info['user_id'] if req_info else None
-        user_link = make_link(target_user, user_id_val)
+        user_link = make_link(chat_id, target_user, user_id_val)
         bot.edit_message_text(
             f'❌ <b>Запрос от {user_link} отклонен.</b>',
             chat_id=chat_id,
