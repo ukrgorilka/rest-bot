@@ -29,7 +29,7 @@ def keep_alive():
     t.start()
 
 # ---------------------------------------------------------
-# НАЛАШТУВАННЯ БОТА ТА БАЗИ ДАНИХ
+# НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
 TOKEN = '8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g'
 bot = telebot.TeleBot(TOKEN)
@@ -516,7 +516,7 @@ def schedule_rest_timers(chat_id, user, end_timestamp, target_user_id=None):
                 except Exception:
                     pass
 
-         time.sleep(min(remaining, 30))
+            time.sleep(min(remaining, 30))
 
     t = threading.Thread(target=timer_thread)
     t.daemon = True
