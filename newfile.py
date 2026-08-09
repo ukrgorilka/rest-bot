@@ -41,6 +41,28 @@ DATA_FILE = 'rests_data.json'
 # Юзернейм администратора/разработчика для секретного промокода
 ADMIN_USERNAME = 'ukrgorilka'
 
+# Список ID Telegram Premium Custom Emoji
+PREMIUM_EMOJIS = [
+    '5210956306952758910', '5461117441612462242', '5456140674028019486', '5224607267797606837',
+    '5229064374403998351', '5260293700088511294', '5240241223632954241', '5274099962655816924',
+    '5440660757194744323', '5314504236132747481', '5436113877181941026', '5447644880824181073',
+    '5420323339723881652', '5447410659077661506', '5443038326535759644', '5467538555158943525',
+    '5452069934089641166', '5231200819986047254', '5449683594425410231', '5447183459602669338',
+    '5451882707875276247', '5244837092042750681', '5246762912428603768', '5206607081334906820',
+    '5210952531676504517', '5222079954421818267', '5458603043203327669', '5391112412445288650',
+    '5269531045165816230', '5395444514028529554', '5397782960512444700', '5409048419211682843',
+    '5233326571099534068', '5231449120635370684', '5278751923338490157', '5290017777174722330',
+    '5231005931550030290', '5402186569006210455', '5264919878082509254', '5411225014148014586',
+    '5416081784641168838', '5416117059207572332', '5424972470023104089', '5276032951342088188',
+    '5294339927318739359'
+]
+
+def p_emoji(index, fallback="✨"):
+    """Возвращает HTML-тег премиум эмодзи по индексу или замену"""
+    if 0 <= index < len(PREMIUM_EMOJIS):
+        return f'<tg-emoji emoji-id="{PREMIUM_EMOJIS[index]}">{fallback}</tg-emoji>'
+    return fallback
+
 MONTHS = {
     'января': 1, 'январь': 1,
     'февраля': 2, 'февраль': 2,
@@ -56,7 +78,7 @@ MONTHS = {
     'декабря': 12, 'декабрь': 12,
 }
 
-# Доступные значки в магазине (расширенный список)
+# Доступные значки в магазине
 BADGES = {
     'badge_star': {'name': 'Звездочка', 'emoji': '🌟', 'price': 100},
     'badge_dango': {'name': 'Данго', 'emoji': '🍡', 'price': 150},
@@ -191,7 +213,6 @@ ALWAYS_ACTIVE_PATTERNS = {
 }
 
 # --- МАТЫ И СЛОВО КОЧ (Отключаются у тех, у кого активен Ня-Пасс) ---
-# Каждая категория содержит более 15 вариаций мата и минимум 10 уникальных ответов
 MUTABLE_BAD_WORDS_PATTERNS = {
     # 1. Слово "Коч"
     r'(коч|кочч|коча|кочу|кочем|кочи|koch|kochch)': [
@@ -206,7 +227,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Зачем употреблять такие слова? 🤔',
         'Минус вайб от этого слова 📉'
     ],
-    # 2. Оскорбления личности (долбоеб, еблан, долбоящер и т.д.)
+    # 2. Оскорбления личности
     r'(долбоеб|долбаеб|долбаёб|далбоеб|далбаеб|далбаёб|долбоёб|долбоящер|долбень|еблан|ебланище|ебланчик|ебнат|ебло|ебач|ебобо|ебанат|ебанько|долбо|долба|еблыга|dolboeb|dalboeb|eblan|ebnat|ebobo|ebanat)': [
         'Давай без личных оскорблений, дружище! 🤝⚠️',
         'А вот обижать людей нельзя! 🥺🚫',
@@ -219,7 +240,33 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Лучше скажи человеку что-то приятное! 💐',
         'Оскорбления никого не красят 🙅‍♂️'
     ],
-    # 3. Медицинские/Умственные оскорбления (даун, дебил, аутист...)
+    # 3. Пездюк, пиздюк и мелкие оскорбления
+    r'(пездюк|пиздюк|пиздюки|пездюки|пиздюшонок|пездюшонок|пиздюга|пездюга)': [
+        'Не обозывай мелких, сам таким был! 👶🍼',
+        'Культура речи на нуле, выражайся вежливее! 🧼',
+        'Ого, какие слова полетели! Попридержи коней 🐎',
+        'Зачем же так грубо о людях? 🥺',
+        'Фильтруй выражения, дружище! 🛑',
+        'Не надо обидных кличек! 🤝',
+        'Давай без этикеток и прозвищ! 🏷❌',
+        'Словарный запас требует чистки! 🧹',
+        'Будь добрее, и к тебе потянутся! 🌸',
+        'Успокойся и скажи нормально! ☕️'
+    ],
+    # 4. Пидр, пидорас и ЛГБТ-оскорбления
+    r'(пидр|пидор|пидорас|пидарас|пидрила|пидорина|пидорасще|пидорок|pidr|pidor|pidaras|pidrila)': [
+        'Давай без грубых оскорблений в чате! 🛑',
+        'Язык твой — враг твой! Фильтруй базар 🧼',
+        'За такие слова можно и в бан улететь! ✈️🔨',
+        'Уважение к собеседнику вышло из чата... 🚶‍♂️',
+        'Слишком много яда, остынь! 🧊',
+        'Держи свои ругательства при себе! 🤫',
+        'В приличном обществе так не выражаются! 🎩',
+        'Меньше грубости, больше позитива! 🐝',
+        'Агрессия ни к чему хорошему не приведет 🛑',
+        'Переключаем волну на вежливое общение! 📻'
+    ],
+    # 5. Медицинские/Умственные оскорбления
     r'(даун|даунич|дауненок|даунёнок|аутист|аутизм|дебил|дебилоид|имбецил|кретин|олигофрен|дауны|daun|debil|kretin|autist)': [
         'Не стоит диагнозами бросаться, будь добрее! 🧠❤️',
         'Уважение к собеседнику выходит из чата... 🚶‍♂️💔',
@@ -232,7 +279,20 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Твои слова могут задеть человека, подумай! 💭',
         'Переключаем волну на позитив! 📻✨'
     ],
-    # 4. Залупа и анатомические оскорбления
+    # 6. Вахуе, вахуи, в ахуе
+    r'(вахуе|вахуи|в\s*ахуе|в\s*ахуи|вахуии|вахуее)': [
+        'Вот это поворот! Удивление зашкаливает 😲⚡️',
+        'Челюсть на полу? Поднимай аккуратно! 🦷😱',
+        'Шок — это по-нашему, но выражайся потише! 🤫',
+        'Эмоции кипят, остуди чайник! ☕️💥',
+        'Сам в шоке от твоих слов! 🤯',
+        'Удивление принято, но давай без мата! 🛑',
+        'Ничего себе новости! 🗞⚡️',
+        'Да уж, ситуадочка действительно культурный шок! 🎭',
+        'Взрыв мозга зафиксирован! 💣',
+        'Спокойствие, только спокойствие! 🎈'
+    ],
+    # 7. Залупа и анатомические оскорбления
     r'(залупа|залупыш|залупоглаз|залупин|залупистый|залупка|залупь|zalupa|zalupish|zalupoglaz)': [
         'Ого, какие изысканные выражения из подворотни! 🏰💩',
         'Фильтруй базар, а то фильтр забьется! 🧼💥',
@@ -245,7 +305,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Давай без физиологических подробностей! 🙈',
         'Изысканность речи оставляет желать лучшего 🥐'
     ],
-    # 5. Сосать / соси
+    # 8. Сосать / соси
     r'(сосать|соси|отсоси|соснуть|сосешь|сосёшь|сосиска|отсосино|всосать|присосался|sosas|sosi|otsosi|sosesh)': [
         'Сосать можно только чупа-чупс! 🍭😋',
         'Кажется, кому-то не хватает сладкого в жизни! 🍫🍬',
@@ -258,7 +318,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'А может лучше чаю попить? 🍵',
         'Возрастной рейтинг чата: 0+, соблюдай! 🔞❌'
     ],
-    # 6. Трахать / пошлости
+    # 9. Трахать / пошлости
     r'(трахнул|трахать|вытрахал|втрахал|трахни|трахну|вытрахать|затрахал|трах|трахаться|trax|traxat|vytraxat)': [
         'Трахать тут можно только мозги админу, но не советую! 🧠⚡️',
         'Какой грозный казанова нашелся! 🕶😏',
@@ -271,7 +331,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Романтик из подворотни на связи 🌹',
         'Перенаправляем энергию в полезные дела! 🚜'
     ],
-    # 7. Шлюха, проститутка, шалава
+    # 10. Шлюха, проститутка, шалава
     r'(шлюха|шлюшка|шлюховатый|проститутка|шалава|шмара|лярва|стерва|шлюхи|шалавa|shliux|shlyux|prostitutka|shalava|shmara)': [
         'Словарь негодяя активирован? Фильтруй базар! 🧼💥',
         'Уважение к людям вышло из чата... 🚶‍♂️💔',
@@ -284,7 +344,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Давай общаться без вульгарности! 🎩',
         'Фильтр грубости сработал на 100%! 🛡'
     ],
-    # 8. Мудак, презерватив, уебище, мразь, сука
+    # 11. Мудак, презерватив, уебище, мразь, сука
     r'(мудак|мудило|гандон|презерватив|уебок|уёбок|уебан|уебище|уёбище|выблядок|мразь|сука|сучара|сучка|mudak|gandon|uebok|uebishe|mraz|suka|suchara)': [
         'Уровень токсичности зашкаливает! ☣️😱',
         'Давай без тяжелой артиллерии и оскорблений! 💣🛑',
@@ -297,8 +357,8 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Меньше яда, больше позитива! 🍯',
         'Давай обойдемся без этих эпитетов! 🛑'
     ],
-    # 9. Пизда, пиздец, пидор, хуесос
-    r'(пизденыш|пиздёныш|говноед|засранец|падла|гад|пидор|пидорас|пидарас|чмо|хуесос|хуесосина|пизда|пиздец|пиздос|пиздей|пиздато|пиздеть|pizda|pizdec|pidor|pidaras|chmo|xuyesos)': [
+    # 12. Пизда, пиздец, хуесос, пиздос
+    r'(пизденыш|пиздёныш|говноед|засранец|падла|гад|чмо|хуесос|хуесосина|пизда|пиздец|пиздос|пиздей|пиздато|пиздеть|pizda|pizdec|chmo|xuyesos)': [
         'Ого, какие глубокие познания ругательств! 🧹😱',
         'Давай общаться как цивилизованные люди! 🎩✨',
         'Минус 50 очков за дерзость! 🧙‍♂️🧹',
@@ -310,8 +370,8 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Давай выражать эмоции более культурно! 🎨',
         'Стоп-слово активировано! 🛑'
     ],
-    # 10. Блять, бля
-    r'(блять|бля|блеать|блят|бляя|блятьь|блядь|блядина|blyat|blya|bleat|bliat)': [
+    # 13. Блять, бля, бл, бль
+    r'(\bбл\b|\bбль\b|блять|бля|блеать|блят|бляя|блятьь|блядь|блядина|blyat|blya|bleat|bliat)': [
         'Вообще-то матюкаться нельзя 🤓☝️',
         'Рот с мылом помыть? 🧼🤐',
         'За такое и в угол поставить могут! 📐👵',
@@ -323,7 +383,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Мат вреден для вашего кармического баланса! ⚖️',
         'Сдерживай свои эмоции, дружище! 🥊'
     ],
-    # 11. Нахуй, похуй, нафиг
+    # 14. Нахуй, похуй, нафиг
     r'(нах|нахуй|похуй|нахуя|нахуйй|похую|нахрен|нафиг|nahuy|pohuy|nahui|pohui|nahren|nafig)': [
         'Маршрут перестроен: туда мы точно не идем 🗺❌',
         'GPS-навигатор отклонил ваш запрос! 🛑🧭',
@@ -336,7 +396,7 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Давай без указывания странных направлений! 🛑',
         'Навигатор заблокирован за грубость! 🔒'
     ],
-    # 12. Хуй, хуйня, заебись
+    # 15. Хуй, хуйня, заебись
     r'(хуй|хуя|хуи|хуйня|хуево|заебись|хуета|хуевина|xuy|hui|xui|xue|xuya|xuynea)': [
         'Ого, какие мы громкие слова знаем! 📢🤯',
         'Словарь Даля нервно курит в сторонке... 📚🚬',
@@ -349,8 +409,8 @@ MUTABLE_BAD_WORDS_PATTERNS = {
         'Языковой фильтр напрягся! ⚡️',
         'Тссс, не выражайся так громко! 🤫'
     ],
-    # 13. Ахуеть, охуеть, ебать
-    r'(ахуеть|охуеть|охуел|ахуел|ебать|ебаться|ебаный|ёбаный|ебнутый|ебанутый|axuet|oxuet|ebat|ebany|ebnuty)': [
+    # 16. Ахуеть, охуеть, охуел, ахуел
+    r'(ахуеть|охуеть|охуел|ахуел|охуели|ахуели|охуевший|ахуевший|ебать|ебаться|ебаный|ёбаный|ебнутый|ебанутый|axuet|oxuet|ebat|ebany|ebnuty)': [
         'Энергию бы да в полезное русло! ⚡️🚜',
         'Не выражайся, а то клавиатура покраснеет! ⌨️😳',
         'Опять эмоциональный взрыв? 💥🤯',
@@ -373,7 +433,6 @@ req_counter = 0
 def load_data():
     """Загружает свежий бекап из Telegram-канала, если локальный файл отсутствует или устарел"""
     data = {'rests': {}, 'history': {}, 'settings': {}, 'economy': {}, 'promos': {}}
-    
     try:
         if DB_CHANNEL_ID:
             chat = bot.get_chat(DB_CHANNEL_ID)
@@ -390,16 +449,11 @@ def load_data():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                if 'settings' not in data:
-                    data['settings'] = {}
-                if 'rests' not in data:
-                    data['rests'] = {}
-                if 'history' not in data:
-                    data['history'] = {}
-                if 'economy' not in data:
-                    data['economy'] = {}
-                if 'promos' not in data:
-                    data['promos'] = {}
+                if 'settings' not in data: data['settings'] = {}
+                if 'rests' not in data: data['rests'] = {}
+                if 'history' not in data: data['history'] = {}
+                if 'economy' not in data: data['economy'] = {}
+                if 'promos' not in data: data['promos'] = {}
                 return data
         except Exception as e:
             print(f'Ошибка чтения файла: {e}')
@@ -449,16 +503,31 @@ def get_chat_settings(chat_id):
         save_data()
     return db['settings'][str_chat]
 
-# --- ФУНКЦИИ ВАЛЮТЫ И ЭКОНОМИКИ (НЯ-КОИНЫ 🪙) ---
-def get_user_econ(chat_id, user_tag):
-    str_chat = str(chat_id)
-    clean_u = clean_tag(user_tag)
+# --- ОБЩАЯ ГЛОБАЛЬНАЯ ЭКОНОМИКА (Единая для ЛС и всех групп) ---
+def clean_tag(user_str):
+    if not user_str:
+        return 'Пользователь'
+    return user_str.replace('@', '').strip()
+
+def get_global_user_key(user_id=None, user_tag=None):
+    """Генерирует единый ключ пользователя для глобальной базы"""
+    if user_id:
+        return f"id_{user_id}"
+    if user_tag:
+        return f"tag_{clean_tag(user_tag).lower()}"
+    return "unknown_user"
+
+def get_user_econ(user_id=None, user_tag=None):
+    """Возвращает общую статистику пользователя по всей сети бота"""
     if 'economy' not in db:
         db['economy'] = {}
-    if str_chat not in db['economy']:
-        db['economy'][str_chat] = {}
-    if clean_u not in db['economy'][str_chat]:
-        db['economy'][str_chat][clean_u] = {
+    
+    key = get_global_user_key(user_id, user_tag)
+    
+    if key not in db['economy']:
+        db['economy'][key] = {
+            'display_name': clean_tag(user_tag) if user_tag else 'Пользователь',
+            'user_id': user_id,
             'balance': 50,           # Стартовый баланс
             'smeh': 0,               # Очки смехуятинки
             'iq': 100,               # Уровень IQ
@@ -471,51 +540,43 @@ def get_user_econ(chat_id, user_tag):
             'nya_pass_until': 0,     # Timestamp окончания действия Ня-Пасса
             'nya_pass_enabled': True,# Включен ли Ня-Пасс владельцем
             'badge': None,           # Активный значок
-            'inventory': []          # Список купленных значков
+            'inventory': [],         # Список купленных значков
+            'rest_rewards_count': 0  # Счетчик выданных 150 коинов (макс 5 насовсем)
         }
         save_data()
-    
-    u_data = db['economy'][str_chat][clean_u]
-    if 'inventory' not in u_data:
-        u_data['inventory'] = []
-    if 'nya_pass_enabled' not in u_data:
-        u_data['nya_pass_enabled'] = True
-    if 'smeh' not in u_data:
-        u_data['smeh'] = 0
-    if 'iq' not in u_data:
-        u_data['iq'] = 100
-    if 'fat' not in u_data:
-        u_data['fat'] = 20
-    if 'foot_size' not in u_data:
-        u_data['foot_size'] = 25
-    if 'last_iq_time' not in u_data:
-        u_data['last_iq_time'] = 0
-    if 'last_fat_time' not in u_data:
-        u_data['last_fat_time'] = 0
-    if 'last_foot_time' not in u_data:
-        u_data['last_foot_time'] = 0
+
+    u_data = db['economy'][key]
+    if user_tag:
+        u_data['display_name'] = clean_tag(user_tag)
+    if user_id:
+        u_data['user_id'] = user_id
+    if 'inventory' not in u_data: u_data['inventory'] = []
+    if 'nya_pass_enabled' not in u_data: u_data['nya_pass_enabled'] = True
+    if 'smeh' not in u_data: u_data['smeh'] = 0
+    if 'iq' not in u_data: u_data['iq'] = 100
+    if 'fat' not in u_data: u_data['fat'] = 20
+    if 'foot_size' not in u_data: u_data['foot_size'] = 25
+    if 'rest_rewards_count' not in u_data: u_data['rest_rewards_count'] = 0
 
     return u_data
 
-def add_coins(chat_id, user_tag, amount):
-    str_chat = str(chat_id)
-    clean_u = clean_tag(user_tag)
-    user_data = get_user_econ(chat_id, clean_u)
+def add_coins(user_id=None, user_tag=None, amount=0):
+    user_data = get_user_econ(user_id, user_tag)
     user_data['balance'] += amount
     save_data()
     return user_data['balance']
 
-def is_nya_pass_active(chat_id, user_tag):
-    user_data = get_user_econ(chat_id, user_tag)
+def is_nya_pass_active(user_id=None, user_tag=None):
+    user_data = get_user_econ(user_id, user_tag)
     until = user_data.get('nya_pass_until', 0)
     enabled = user_data.get('nya_pass_enabled', True)
     return enabled and (time.time() < until)
 
 # ---------------------------------------------------------
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ПАРСИНГА И ВСЕХ ПОЛЬЗОВАТЕЛЕЙ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ПАРСИНГА И ССЫЛОК
 # ---------------------------------------------------------
 def normalize_text_for_bad_words(text):
-    """Нормализует текст: удаляет спецсимволы, точки, пробелы между буквами и заменяет английские буквы на похожие русские"""
+    """Нормализует текст: удаляет спецсимволы, точки, пробелы и заменяет латиницу на кириллицу"""
     text = text.lower()
     replacements = {
         'a': 'а', 'b': 'б', 'c': 'с', 'e': 'е', 'k': 'к', 
@@ -524,22 +585,15 @@ def normalize_text_for_bad_words(text):
     }
     for en, ru in replacements.items():
         text = text.replace(en, ru)
-    
     clean_text = re.sub(r'[\.\*_\-\+\/\&%\$\#@!\s\d]+', '', text)
     return clean_text
-
-def clean_tag(user_str):
-    if not user_str:
-        return 'Пользователь'
-    return user_str.replace('@', '').strip()
 
 def make_link(chat_id, user_name, user_id=None):
     name = clean_tag(user_name)
     badge_str = ""
-    if chat_id:
-        user_econ = get_user_econ(chat_id, name)
-        if user_econ.get('badge'):
-            badge_str = f" [{user_econ['badge']}]"
+    user_econ = get_user_econ(user_id, user_name)
+    if user_econ.get('badge'):
+        badge_str = f" [{user_econ['badge']}]"
 
     if user_id:
         return f'<a href="tg://user?id={user_id}">{name}</a>{badge_str}'
@@ -730,7 +784,7 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
     clean_user = clean_tag(user)
     
     if clean_user == '8' or clean_user.isdigit():
-        return
+        return False, 0
         
     seconds = parse_duration_to_seconds(duration_text, chat_id)
     end_time = (time.time() + seconds) if seconds else None
@@ -741,10 +795,20 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
         'user_id': target_user_id,
     }
     add_to_history(str_chat, clean_user, duration_text, reason, target_user_id)
-    add_coins(chat_id, clean_user, 150)
+    
+    # ПРОВЕРКА ЛИМИТА: Максимум 5 раз по 150 коинов НАВСЕГДА
+    econ = get_user_econ(target_user_id, clean_user)
+    reward_given = False
+    if econ['rest_rewards_count'] < 5:
+        econ['balance'] += 150
+        econ['rest_rewards_count'] += 1
+        reward_given = True
+    
     save_data()
     if end_time:
         schedule_rest_timers(chat_id, clean_user, end_time, target_user_id)
+        
+    return reward_given, econ['rest_rewards_count']
 
 # ---------------------------------------------------------
 # ПРИВЕТСТВИЕ И ПРОЩАНИЕ (ВХОД / ВЫХОД ИЗ ЧАТА)
@@ -753,12 +817,12 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
 def welcome_new_members(message):
     for member in message.new_chat_members:
         user_link = make_link(message.chat.id, member.username or member.first_name, member.id)
-        add_coins(message.chat.id, member.username or member.first_name, 50)
+        add_coins(member.id, member.username or member.first_name, 50)
         
         welcome_text = (
             f"🎉 <b>Добро пожаловать в чат, {user_link}!</b>\n\n"
             f"🌸 Мы очень рады тебя видеть!\n"
-            f"🪙 Тебе начислен приветственный бонус: <b>50 Ня-коинов</b>!\n\n"
+            f"💵 Тебе начислен приветственный бонус: <b>50 Ня-коинов</b>!\n\n"
             f"💡 Используй <code>/help</code> или <code>/start</code>, чтобы узнать все возможности бота."
         )
         bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
@@ -787,27 +851,27 @@ def send_welcome(message):
         '• <code>мой рест</code> — ваше время.\n'
         '• <code>топ</code> / <code>статистика</code> — топ рестов.\n\n'
         
-        '🪙 <b>2. ВАЛЮТА И ПРОФИЛЬ:</b>\n'
+        '💸 <b>2. ЕДИНАЯ ГЛОБАЛЬНАЯ ВАЛЮТА И ПРОФИЛЬ:</b>\n'
         '• <code>бонус</code> / <code>/bonus</code> — получать от 1 до 100 коинов каждый час.\n'
         '• <code>баланс</code> / <code>/balance</code> — ваш кошелек.\n'
-        '• <code>инвентарь</code> / <code>профиль</code> — просмотр баланса, IQ, жира, размера пятки и т.д.\n'
-        '• <code>+смехуятинка</code> — ответить на сообщение, чтобы начислить +1 очко смехуятинки.\n'
+        '• <code>инвентарь</code> / <code>профиль</code> — ваш единый профиль во всех чатах и ЛС!\n'
+        '• <code>+смехуятинка</code> — ответить на сообщение (+1 очко).\n'
         '• <code>айкью</code> / <code>iq</code> — симулятор изменения IQ (КД 30 мин).\n'
         '• <code>жир</code> / <code>жирок</code> — замер уровня жира (КД 30 мин).\n'
         '• <code>пятка</code> / <code>пяточка</code> — замер размера пятки (КД 20 мин).\n'
         '• <code>перевод @username [сумма]</code> — перевод коинов.\n'
         '• <code>промокод [код]</code> — активация промокода (напр. <code>промокод NYA400</code>).\n\n'
 
-        '📊 <b>3. СТАТИСТИКА И ТОПЫ:</b>\n'
-        '• <code>топ богачей</code> — топ по Ня-коинам.\n'
-        '• <code>топ жира</code> — рейтинг по проценту жира.\n'
-        '• <code>топ iq</code> — рейтинг самых умных участников.\n'
-        '• <code>топ пяток</code> — рейтинг по размеру пятки.\n\n'
+        '📊 <b>3. ГЛОБАЛЬНАЯ СТАТИСТИКА И ТОПЫ:</b>\n'
+        '• <code>топ богачей</code> — глобальный топ по Ня-коинам.\n'
+        '• <code>топ жира</code> — глобальный рейтинг по проценту жира.\n'
+        '• <code>топ iq</code> — глобальный рейтинг умников.\n'
+        '• <code>топ пяток</code> — глобальный рейтинг по размеру пятки.\n\n'
 
         '🏪 <b>4. ЛАВКА И СМАЙЛИКИ:</b>\n'
         '• <code>магазин</code> — открыть лавку.\n'
         '• 🎟 <b>Ня-Пасс от мата (500 🪙)</b> — игнор мата и слова "коч".\n'
-        '• 👑 <b>Большой выбор значков (100-3000 🪙)</b> — украшай свое имя (есть Пятка 🦶 за 3000 🪙)!\n\n'
+        '• 👑 <b>Большой выбор значков (100-3000 🪙)</b> — украшай свое имя!\n\n'
 
         '💬 <b>5. ИНТЕРАКТИВ И АВТО-ОТВЕТЧИК:</b>\n'
         '• Приветствия, прощания, семпай, комплименты про маму и умный фильтр мата.\n\n'
@@ -872,7 +936,7 @@ def export_csv(message):
 
 # --- МЕНЮ ПРОФИЛЯ, ИНВЕНТАРЯ И НАСТРОЕК ---
 def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
-    econ = get_user_econ(chat_id, user_tag)
+    econ = get_user_econ(user_id, user_tag)
     
     pass_enabled = econ.get('nya_pass_enabled', True)
     pass_status_text = "❌ Отсутствует"
@@ -889,16 +953,21 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
     current_badge = econ.get('badge') or "Отсутствует"
     inv = econ.get('inventory', [])
     inv_str = " ".join(inv) if inv else "Пусто (купите значки в магазине)"
+    
+    rest_rewards = econ.get('rest_rewards_count', 0)
+    rest_rewards_str = f"{rest_rewards}/5 (150 🪙)" if rest_rewards < 5 else "5/5 (Лимит бонусов исчерпан ⛔️)"
 
     text = (
-        f"👤 <b>Профиль пользователя {make_link(chat_id, user_tag, user_id)}</b>\n\n"
-        f"🪙 Баланс: <b>{econ['balance']} Ня-коинов</b>\n"
+        f"🌐 <b>Единый Профиль: {make_link(chat_id, user_tag, user_id)}</b>\n"
+        f"<i>(Статистика синхронизирована во всех чатах и ЛС)</i>\n\n"
+        f"💵 Баланс: <b>{econ['balance']} Ня-коинов 💸</b>\n"
         f"😂 Смехуятинка: <b>{econ.get('smeh', 0)} балл(ов)</b>\n"
         f"🧠 Айкью (IQ): <b>{econ.get('iq', 100)}</b>\n"
         f"🍔 Процент жира: <b>{econ.get('fat', 20)}%</b>\n"
         f"🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
+        f"🎁 Награды за ресты: <b>{rest_rewards_str}</b>\n"
         f"🏷 Активный значок: <b>{current_badge}</b>\n"
-        f"🎒 Инвентарь значков: {inv_str}\n"
+        f"🎒 Инвентарь: {inv_str}\n"
         f"🎟 Ня-Пасс от мата: <b>{pass_status_text}</b>"
     )
 
@@ -924,6 +993,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
     else:
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
+# --- ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ ---
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     global req_counter
@@ -944,7 +1014,7 @@ def handle_messages(message):
             break
 
     # 2. ПРОВЕРКА НА МАТ И СЛОВО КОЧ (Усиленный фильтр с нормализацией символов)
-    if not triggered and not is_nya_pass_active(chat_id, user_tag):
+    if not triggered and not is_nya_pass_active(user_id, user_tag):
         normalized_text = normalize_text_for_bad_words(text)
         for pattern, responses in MUTABLE_BAD_WORDS_PATTERNS.items():
             if re.search(pattern, normalized_text, re.IGNORECASE) or re.search(pattern, text_lower, re.IGNORECASE):
@@ -971,7 +1041,7 @@ def handle_messages(message):
             target_tag = clean_tag(target_u.username or target_u.first_name)
             target_id = target_u.id
             
-            econ = get_user_econ(chat_id, target_tag)
+            econ = get_user_econ(target_id, target_tag)
             econ['smeh'] = econ.get('smeh', 0) + 1
             save_data()
             
@@ -983,7 +1053,7 @@ def handle_messages(message):
 
     # --- СИМУЛЯТОР АЙКЬЮ (С КД 30 МИНУТ) ---
     elif text_lower in ['айкью', 'iq', 'iqи', 'айкю']:
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         now_ts = time.time()
         cooldown = 1800  # КД 30 минут (1800 секунд)
         
@@ -1005,7 +1075,7 @@ def handle_messages(message):
 
     # --- СИМУЛЯТОР ЖИРА (С КД 30 МИНУТ) ---
     elif text_lower in ['жир', 'жирок', 'жирность', 'процент жира']:
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         now_ts = time.time()
         cooldown = 1800  # КД 30 минут (1800 секунд)
         
@@ -1027,7 +1097,7 @@ def handle_messages(message):
 
     # --- СИМУЛЯТОР ПЯТКИ (С КД 20 МИНУТ) ---
     elif text_lower in ['пятка', 'пяточка', 'размер пятки', 'пятки']:
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         now_ts = time.time()
         cooldown = 1200  # КД 20 минут (1200 секунд)
         
@@ -1047,47 +1117,66 @@ def handle_messages(message):
         bot.reply_to(message, f"🦶 {make_link(chat_id, user_tag, user_id)}, замер вашей пятки завершен!\nИзменение: <b>{sign}{change} см</b>\nТекущий размер пятки: <b>{econ['foot_size']} см 🦶</b>", parse_mode='HTML')
         return
 
-    # --- БЛОК ТОПОВ И СТАТИСТИКИ (ЖИР, IQ, ПЯТКИ, БОГАЧИ) ---
+    # --- БЛОК ГЛОБАЛЬНЫХ ТОПОВ И СТАТИСТИКИ ---
     elif text_lower in ['топ жира', 'топ жирных', 'топ по жиру']:
-        if 'economy' in db and str_chat in db['economy']:
-            sorted_fat = sorted(db['economy'][str_chat].items(), key=lambda x: x[1].get('fat', 0), reverse=True)
-            resp = "🍔 <b>Топ участников по проценту жира:</b>\n\n"
-            for idx, (u, info) in enumerate(sorted_fat[:10], 1):
-                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info.get('fat', 20)}%</b>\n"
+        if 'economy' in db and db['economy']:
+            sorted_fat = sorted(db['economy'].items(), key=lambda x: x[1].get('fat', 0), reverse=True)
+            resp = "🌐 <b>Глобальный топ участников по проценту жира:</b>\n\n"
+            for idx, (k, info) in enumerate(sorted_fat[:10], 1):
+                u_name = info.get('display_name', 'Пользователь')
+                u_id = info.get('user_id')
+                resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('fat', 20)}%</b>\n"
             bot.reply_to(message, resp, parse_mode='HTML')
         else:
             bot.reply_to(message, "📊 Статистика пока пуста.")
         return
 
     elif text_lower in ['топ iq', 'топ айкью', 'топ умных']:
-        if 'economy' in db and str_chat in db['economy']:
-            sorted_iq = sorted(db['economy'][str_chat].items(), key=lambda x: x[1].get('iq', 0), reverse=True)
-            resp = "🧠 <b>Топ самых умных участников (IQ):</b>\n\n"
-            for idx, (u, info) in enumerate(sorted_iq[:10], 1):
-                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info.get('iq', 100)} IQ</b>\n"
+        if 'economy' in db and db['economy']:
+            sorted_iq = sorted(db['economy'].items(), key=lambda x: x[1].get('iq', 0), reverse=True)
+            resp = "🌐 <b>Глобальный топ самых умных участников (IQ):</b>\n\n"
+            for idx, (k, info) in enumerate(sorted_iq[:10], 1):
+                u_name = info.get('display_name', 'Пользователь')
+                u_id = info.get('user_id')
+                resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('iq', 100)} IQ</b>\n"
             bot.reply_to(message, resp, parse_mode='HTML')
         else:
             bot.reply_to(message, "📊 Статистика пока пуста.")
         return
 
     elif text_lower in ['топ пяток', 'топ пяточек', 'топ пятка']:
-        if 'economy' in db and str_chat in db['economy']:
-            sorted_foot = sorted(db['economy'][str_chat].items(), key=lambda x: x[1].get('foot_size', 0), reverse=True)
-            resp = "🦶 <b>Топ участников по размеру пятки:</b>\n\n"
-            for idx, (u, info) in enumerate(sorted_foot[:10], 1):
-                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info.get('foot_size', 25)} см</b>\n"
+        if 'economy' in db and db['economy']:
+            sorted_foot = sorted(db['economy'].items(), key=lambda x: x[1].get('foot_size', 0), reverse=True)
+            resp = "🌐 <b>Глобальный топ участников по размеру пятки:</b>\n\n"
+            for idx, (k, info) in enumerate(sorted_foot[:10], 1):
+                u_name = info.get('display_name', 'Пользователь')
+                u_id = info.get('user_id')
+                resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('foot_size', 25)} см</b>\n"
             bot.reply_to(message, resp, parse_mode='HTML')
         else:
             bot.reply_to(message, "📊 Статистика пока пуста.")
         return
 
+    elif text_lower in ['богачи', 'топ коинов', 'топ богачей']:
+        if 'economy' in db and db['economy']:
+            sorted_econ = sorted(db['economy'].items(), key=lambda x: x[1].get('balance', 0), reverse=True)
+            resp = "🏆 <b>Глобальный топ самых богатых участников:</b>\n\n"
+            for idx, (k, info) in enumerate(sorted_econ[:10], 1):
+                u_name = info.get('display_name', 'Пользователь')
+                u_id = info.get('user_id')
+                resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('balance', 0)} 🪙</b>\n"
+            bot.reply_to(message, resp, parse_mode='HTML')
+        else:
+            bot.reply_to(message, "🪙 Статистика коинов пока пуста.")
+        return
+
     # --- БЛОК НЯ-КОИНОВ И ИНВЕНТАРЯ ---
     if text_lower in ['баланс', '/balance', 'коины', 'ня-коины']:
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         bot.reply_to(
             message,
-            f"🪙 <b>Кошелек пользователя {make_link(chat_id, user_tag, user_id)}:</b>\n"
-            f"• Баланс: <b>{econ['balance']} Ня-коинов 🪙</b>",
+            f"💵 <b>Ваш единый кошелек {make_link(chat_id, user_tag, user_id)}:</b>\n"
+            f"• Баланс: <b>{econ['balance']} Ня-коинов 💸</b>",
             parse_mode='HTML'
         )
         return
@@ -1097,14 +1186,14 @@ def handle_messages(message):
         return
 
     elif text_lower in ['бонус', '/bonus', 'коин', 'собрать']:
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         now_ts = time.time()
         if now_ts - econ.get('last_hourly', 0) >= 3600:
             reward = random.randint(1, 100)
             econ['balance'] += reward
             econ['last_hourly'] = now_ts
             save_data()
-            bot.reply_to(message, f"🎲 Вы собрали: <b>+{reward} Ня-коинов 🪙</b>!\nТекущий баланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"🎲 Вы собрали: <b>+{reward} Ня-коинов 🪙</b>!\nЕдиный баланс: <b>{econ['balance']} 💸</b>", parse_mode='HTML')
         else:
             left_sec = 3600 - (now_ts - econ.get('last_hourly', 0))
             minutes = int(left_sec // 60)
@@ -1121,23 +1210,24 @@ def handle_messages(message):
             # Промокод для администратора
             if code == 'ADMIN1000':
                 if user_username == ADMIN_USERNAME:
-                    add_coins(chat_id, user_tag, 1000)
+                    add_coins(user_id, user_tag, 1000)
                     bot.reply_to(message, "🎁 <b>Разработчик активировал секретный промокод!</b>\nВам начислено +1000 Ня-коинов 🪙!", parse_mode='HTML')
                 else:
                     bot.reply_to(message, "❌ Этот промокод только для администратора/разработчика проекта!")
             
             # Общий промокод на 400 коинов
-            elif code == 'NYA400' or code == '400':
+            elif code in ['NYA400', '400']:
                 if 'promos' not in db:
                     db['promos'] = {}
                 if 'NYA400' not in db['promos']:
                     db['promos']['NYA400'] = []
 
-                if user_tag in db['promos']['NYA400']:
+                user_key = get_global_user_key(user_id, user_tag)
+                if user_key in db['promos']['NYA400']:
                     bot.reply_to(message, "❌ Вы уже активировали этот промокод!")
                 else:
-                    db['promos']['NYA400'].append(user_tag)
-                    add_coins(chat_id, user_tag, 400)
+                    db['promos']['NYA400'].append(user_key)
+                    add_coins(user_id, user_tag, 400)
                     save_data()
                     bot.reply_to(message, "🎉 <b>Промокод успешно активирован!</b>\nВам начислено <b>+400 Ня-коинов 🪙</b>!", parse_mode='HTML')
             else:
@@ -1156,13 +1246,13 @@ def handle_messages(message):
                 bot.reply_to(message, "❌ Сумма перевода должна быть больше 0!")
                 return
                 
-            sender_econ = get_user_econ(chat_id, user_tag)
+            sender_econ = get_user_econ(user_id, user_tag)
             if sender_econ['balance'] < amount:
                 bot.reply_to(message, "❌ У вас недостаточно Ня-коинов для перевода!")
                 return
                 
             sender_econ['balance'] -= amount
-            add_coins(chat_id, target_u, amount)
+            add_coins(None, target_u, amount)
             bot.reply_to(message, f"💸 Вы успешно перевели <b>{amount} 🪙</b> пользователю {make_link(chat_id, target_u)}!", parse_mode='HTML')
         else:
             bot.reply_to(message, "❌ Формат перевода: <code>перевод @username 50</code>", parse_mode='HTML')
@@ -1211,12 +1301,12 @@ def handle_messages(message):
         )
         
         pass_status = "❌ Не куплен"
-        if is_nya_pass_active(chat_id, user_tag):
+        if is_nya_pass_active(user_id, user_tag):
             pass_status = "✅ Активен"
 
         bot.reply_to(
             message,
-            "🏪 <b>Лавка Ня-коинов и Значков:</b>\n\n"
+            "🏪 <b>Глобальная Лавка Ня-коинов и Значков:</b>\n\n"
             "🎟 <b>Ня-Пасс от мата (на 1 неделю) — 500 🪙</b>\n"
             f"• Статус пасса: <b>{pass_status}</b>\n\n"
             "✨ <b>Значки и смайлы для профиля и топов:</b>\n"
@@ -1233,17 +1323,6 @@ def handle_messages(message):
             reply_markup=markup,
             parse_mode='HTML'
         )
-        return
-
-    elif text_lower in ['богачи', 'топ коинов', 'топ богачей']:
-        if 'economy' in db and str_chat in db['economy']:
-            sorted_econ = sorted(db['economy'][str_chat].items(), key=lambda x: x[1]['balance'], reverse=True)
-            resp = "🏆 <b>Топ самых богатых участников чата:</b>\n\n"
-            for idx, (u, info) in enumerate(sorted_econ[:10], 1):
-                resp += f"{idx}. {make_link(chat_id, u)} — <b>{info['balance']} 🪙</b>\n"
-            bot.reply_to(message, resp, parse_mode='HTML')
-        else:
-            bot.reply_to(message, "🪙 Статистика коинов пока пуста.")
         return
 
     # --- ОБЫЧНЫЕ КОМАНДЫ РЕСТОВ ---
@@ -1296,9 +1375,12 @@ def handle_messages(message):
             parts = raw_args.split('|')
             duration_text = parts[0].strip()
             reason = parts[1].strip() if len(parts) > 1 else 'Не указана'
-            apply_rest(chat_id, target_user, duration_text, reason, target_user_id)
+            
+            reward_given, count = apply_rest(chat_id, target_user, duration_text, reason, target_user_id)
             user_link = make_link(chat_id, target_user, target_user_id)
-            bot.reply_to(message, f'✅ Рест для {user_link} добавлен!\n⏱ Срок: {duration_text}\n📝 Причина: {reason}\n🪙 Выдано +150 Ня-коинов за рест!', parse_mode='HTML')
+            
+            coin_msg = f"\n🪙 Выдано +150 Ня-коинов за рест! ({count}/5)" if reward_given else f"\n⛔️ Лимит бонусов за рест исчерпан ({count}/5)!"
+            bot.reply_to(message, f'✅ Рест для {user_link} добавлен!\n⏱ Срок: {duration_text}\n📝 Причина: {reason}{coin_msg}', parse_mode='HTML')
         else:
             bot.reply_to(message, '❌ Ошибка! Формат: <code>+рест на 3 д | отпуск юзер</code> (или ответом на сообщение)', parse_mode='HTML')
 
@@ -1473,7 +1555,7 @@ def callback_inline(call):
 
     # --- ПОКУПКА НЯ-ПАССА ---
     elif call.data == 'buy_nya_pass':
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         if econ['balance'] < 500:
             bot.answer_callback_query(call.id, '❌ Недостаточно Ня-коинов! Нужно 500 🪙', show_alert=True)
             return
@@ -1497,7 +1579,7 @@ def callback_inline(call):
         badge_key = call.data.replace('buy_badge_', '')
         if badge_key in BADGES:
             item = BADGES[badge_key]
-            econ = get_user_econ(chat_id, user_tag)
+            econ = get_user_econ(user_id, user_tag)
             
             if item['emoji'] in econ.get('inventory', []):
                 bot.answer_callback_query(call.id, f"У вас уже есть значок {item['emoji']}! Вы можете надеть его в профиле.", show_alert=True)
@@ -1523,7 +1605,7 @@ def callback_inline(call):
     # --- СМЕНА И УПРАВЛЕНИЕ ЗНАЧКАМИ В ИНВЕНТАРЕ ---
     elif call.data.startswith('set_badge_'):
         selected_emoji = call.data.replace('set_badge_', '')
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         if selected_emoji in econ.get('inventory', []):
             econ['badge'] = selected_emoji
             save_data()
@@ -1535,7 +1617,7 @@ def callback_inline(call):
             send_user_profile(chat_id, user_tag, user_id)
 
     elif call.data == 'remove_badge':
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         econ['badge'] = None
         save_data()
         bot.answer_callback_query(call.id, "❌ Значок снят!", show_alert=True)
@@ -1547,7 +1629,7 @@ def callback_inline(call):
 
     # --- ВКЛЮЧЕНИЕ / ВЫКЛЮЧЕНИЕ НЯ-ПАССА ---
     elif call.data == 'toggle_nya_pass':
-        econ = get_user_econ(chat_id, user_tag)
+        econ = get_user_econ(user_id, user_tag)
         econ['nya_pass_enabled'] = not econ.get('nya_pass_enabled', True)
         save_data()
         status_msg = "включен" if econ['nya_pass_enabled'] else "выключен"
@@ -1577,14 +1659,15 @@ def callback_inline(call):
         reason = parts[2] if len(parts) > 2 else req_info['reason']
         target_user_id = req_info['user_id']
 
-        apply_rest(chat_id, target_user, duration_text, reason, target_user_id)
+        reward_given, count = apply_rest(chat_id, target_user, duration_text, reason, target_user_id)
         admin_link = make_link(chat_id, call.from_user.username or call.from_user.first_name, user_id)
         user_link = make_link(chat_id, target_user, target_user_id)
         
+        coin_msg = f"\n🪙 Начислено +150 Ня-коинов ({count}/5)!" if reward_given else f"\n⛔️ Награда не начислена: достигнут лимит 5/5!"
+        
         bot.edit_message_text(
             f'✅ <b>Запрос принят админом {admin_link}!</b>\n'
-            f'Пользователю {user_link} выдан рест на {duration_text} (Причина: {reason}).\n'
-            f'🪙 Пользователю вычислено +150 Ня-коинов!',
+            f'Пользователю {user_link} выдан рест на {duration_text} (Причина: {reason}).{coin_msg}',
             chat_id=chat_id,
             message_id=call.message.message_id,
             parse_mode='HTML'
@@ -1611,5 +1694,5 @@ def callback_inline(call):
 restore_timers()
 keep_alive()  # Запускаем веб-сервер для пинга
 
-print('Бот запущен...')
+print('Бот успешно запущен...')
 bot.infinity_polling()
