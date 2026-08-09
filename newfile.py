@@ -41,28 +41,6 @@ DATA_FILE = 'rests_data.json'
 # Юзернейм администратора/разработчика для секретного промокода
 ADMIN_USERNAME = 'ukrgorilka'
 
-# Список ID Telegram Premium Custom Emoji
-PREMIUM_EMOJIS = [
-    '5210956306952758910', '5461117441612462242', '5456140674028019486', '5224607267797606837',
-    '5229064374403998351', '5260293700088511294', '5240241223632954241', '5274099962655816924',
-    '5440660757194744323', '5314504236132747481', '5436113877181941026', '5447644880824181073',
-    '5420323339723881652', '5447410659077661506', '5443038326535759644', '5467538555158943525',
-    '5452069934089641166', '5231200819986047254', '5449683594425410231', '5447183459602669338',
-    '5451882707875276247', '5244837092042750681', '5246762912428603768', '5206607081334906820',
-    '5210952531676504517', '5222079954421818267', '5458603043203327669', '5391112412445288650',
-    '5269531045165816230', '5395444514028529554', '5397782960512444700', '5409048419211682843',
-    '5233326571099534068', '5231449120635370684', '5278751923338490157', '5290017777174722330',
-    '5231005931550030290', '5402186569006210455', '5264919878082509254', '5411225014148014586',
-    '5416081784641168838', '5416117059207572332', '5424972470023104089', '5276032951342088188',
-    '5294339927318739359'
-]
-
-def p_emoji(index, fallback="✨"):
-    """Возвращает HTML-тег премиум эмодзи по индексу или замену"""
-    if 0 <= index < len(PREMIUM_EMOJIS):
-        return f'<tg-emoji emoji-id="{PREMIUM_EMOJIS[index]}">{fallback}</tg-emoji>'
-    return fallback
-
 MONTHS = {
     'января': 1, 'январь': 1,
     'февраля': 2, 'февраль': 2,
@@ -847,6 +825,7 @@ def send_welcome(message):
         '• <code>+продлить [срок] [юзер]</code> — продлить рест.\n'
         '• <code>причина [юзер] [причина]</code> — изменить причину.\n'
         '• <code>запрос рест [срок] | [причина]</code> — запрос на рест.\n'
+        '• <code>кто ты [юзер/айди]</code> — проверка, находится ли человек в ресте.\n'
         '• <code>ресты</code> — список рестов.\n'
         '• <code>мой рест</code> — ваше время.\n'
         '• <code>топ</code> / <code>статистика</code> — топ рестов.\n\n'
@@ -1004,6 +983,47 @@ def handle_messages(message):
     user_username = (message.from_user.username or '').lower()
     user_tag = clean_tag(message.from_user.username or message.from_user.first_name)
     text_lower = text.lower()
+
+    # --- НОВАЯ ФУНКЦИЯ: "Кто ты [юзер/айди]" (ПРОВЕРКА РЕСТА ЧЕЛОВЕКА) ---
+    who_match = re.search(r'^(?:кто\s+ты|кто\s+такой|кто|что\s+за)\s+@?([\w\d_]+)', text_lower)
+    if who_match:
+        target_str = clean_tag(who_match.group(1))
+        
+        # Поиск информации в текущем чате или по всем чатам
+        in_rest = False
+        rest_info = None
+        target_found_tag = target_str
+        target_found_id = None
+
+        if str_chat in db.get('rests', {}):
+            for u_tag, info in db['rests'][str_chat].items():
+                u_id = str(info.get('user_id', ''))
+                if u_tag.lower() == target_str.lower() or u_id == target_str:
+                    in_rest = True
+                    rest_info = info
+                    target_found_tag = u_tag
+                    target_found_id = info.get('user_id')
+                    break
+        
+        if in_rest and rest_info:
+            user_link = make_link(chat_id, target_found_tag, target_found_id)
+            rem_str = ''
+            if rest_info.get('end_time'):
+                rem = int(rest_info['end_time'] - time.time())
+                if rem > 0:
+                    hours, remainder = divmod(rem, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    rem_str = f' (Осталось: {hours}ч {minutes}мин)'
+            bot.reply_to(
+                message,
+                f"🌴 <b>Пользователь {user_link} находится в ресте!</b>\n"
+                f"📝 <b>Причина:</b> {rest_info.get('reason', 'Не указана')}\n"
+                f"⏱ <b>Срок:</b> {rest_info.get('duration', 'Не указан')}{rem_str}",
+                parse_mode='HTML'
+            )
+        else:
+            bot.reply_to(message, f"✅ Пользователь <b>{target_str}</b> сейчас не находится в ресте!", parse_mode='HTML')
+        return
 
     # 1. ПРОВЕРКА ВСЕГДА АКТИВНЫХ СЛОВ (Мама, Охаё, Аниме, Кавай, Семпай)
     triggered = False
