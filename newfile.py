@@ -31,7 +31,7 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = "8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g"
+TOKEN = "СЮДА ВСТАВИТЬ ТОКЕН"
 bot = telebot.TeleBot(TOKEN)
 
 # ID вашего приватного канала для авто-бекапов
@@ -507,6 +507,11 @@ def save_data(send_backup=True):
 
 db = load_data()
 
+def clean_tag(user_str):
+    if not user_str:
+        return 'Пользователь'
+    return user_str.replace('@', '').strip()
+
 def clean_junk_rests():
     """Удаляет сбойные/тестовые ресты из базы данных."""
     changed = False
@@ -533,11 +538,6 @@ def get_chat_settings(chat_id):
     return db['settings'][str_chat]
 
 # --- ОБЩАЯ ГЛОБАЛЬНАЯ ЭКОНОМИКА (Единая для ЛС и всех групп) ---
-def clean_tag(user_str):
-    if not user_str:
-        return 'Пользователь'
-    return user_str.replace('@', '').strip()
-
 def get_global_user_key(user_id=None, user_tag=None):
     """Генерирует единый ключ пользователя для глобальной базы"""
     if user_id:
