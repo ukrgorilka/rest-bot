@@ -508,11 +508,11 @@ def save_data(send_backup=True):
 db = load_data()
 
 def clean_junk_rests():
-    """Удаляет сбойные ресты вроде '8' из базы данных"""
+    """Удаляет сбойные/тестовые ресты из базы данных."""
     changed = False
     for str_chat in list(db.get('rests', {}).keys()):
         for user_key in list(db['rests'][str_chat].keys()):
-            if user_key == '8' or user_key.isdigit():
+            if user_key == '8' or user_key.isdigit() or clean_tag(user_key).lower() == 'тест':
                 del db['rests'][str_chat][user_key]
                 changed = True
     if changed:
@@ -706,6 +706,29 @@ def normalize_text_for_bad_words(text):
     clean_text = re.sub(r'[\.\*_\-\+\/\&%\$\#@!\s\d]+', '', text)
     return clean_text
 
+# Кэш наличия @username, чтобы не делать лишние запросы Telegram API.
+_USERNAME_CACHE = {}
+
+def has_public_username(user_id):
+    """Возвращает True только если у Telegram-пользователя действительно есть @username.
+    Если username отсутствует или Telegram API недоступен — не создаём кликабельный тег.
+    """
+    if not user_id:
+        return False
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    if user_id in _USERNAME_CACHE:
+        return _USERNAME_CACHE[user_id]
+    try:
+        chat = bot.get_chat(user_id)
+        result = bool(getattr(chat, 'username', None))
+    except Exception:
+        result = False
+    _USERNAME_CACHE[user_id] = result
+    return result
+
 def make_link(chat_id, user_name, user_id=None):
     name = clean_tag(user_name)
     badge_str = ""
@@ -717,7 +740,9 @@ def make_link(chat_id, user_name, user_id=None):
     if active_title in TITLES:
         title_str = f" [{TITLES[active_title]['text']}]"
 
-    if user_id:
+    # ВАЖНО: пользователя без @username больше не тегаем через tg://user?id=...
+    # В таком случае показываем обычное имя без кликабельного упоминания.
+    if user_id and has_public_username(user_id):
         return f'<a href="tg://user?id={user_id}">{name}</a>{badge_str}{title_str}'
     return f'<b>{name}</b>{badge_str}{title_str}'
 
@@ -2163,7 +2188,7 @@ def callback_inline(call):
         user_id_val = req_info['user_id'] if req_info else None
         user_link = make_link(chat_id, target_user, user_id_val)
         bot.edit_message_text(
-            f'❌ <b>Запрос от {user_link} отклонен.</b>',
+   f'❌ <b>Запрос от {user_link} отклонен.</b>',
             chat_id=chat_id,
             message_id=call.message.message_id,
             parse_mode='HTML'
