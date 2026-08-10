@@ -32,8 +32,6 @@ def keep_alive():
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
 TOKEN = "8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g"
-if not TOKEN:
-    raise RuntimeError('Не задана переменная окружения TELEGRAM_BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
 # ID вашего приватного канала для авто-бекапов
@@ -563,8 +561,6 @@ def get_user_econ(user_id=None, user_tag=None):
             'smeh': 0,               # Очки смехуятинки
             'iq': 100,               # Уровень IQ
             'fat': 20,               # Процент жира
-            'chromosomes': 46,        # Виртуальный игровой показатель хромосом
-            'last_chromosomes_time': 0, # Timestamp последнего симулятора хромосом
             'foot_size': 25,         # Размер пятки в см
             'last_hourly': 0,        # Timestamp последнего часового сбора
             'last_iq_time': 0,       # Timestamp последнего измерения IQ (КД 30 мин)
@@ -597,8 +593,6 @@ def get_user_econ(user_id=None, user_tag=None):
     if 'smeh' not in u_data: u_data['smeh'] = 0
     if 'iq' not in u_data: u_data['iq'] = 100
     if 'fat' not in u_data: u_data['fat'] = 20
-    if 'chromosomes' not in u_data: u_data['chromosomes'] = 46
-    if 'last_chromosomes_time' not in u_data: u_data['last_chromosomes_time'] = 0
     if 'foot_size' not in u_data: u_data['foot_size'] = 25
     if 'rest_rewards_count' not in u_data: u_data['rest_rewards_count'] = 0
     if 'titles' not in u_data: u_data['titles'] = []
@@ -736,6 +730,32 @@ def is_admin(chat_id, user_id):
     except Exception:
         return False
 
+def find_known_user_id(chat_id, user_name):
+    """Ищет сохранённый Telegram ID по нику/имени.
+    Если пользователь уже встречался в данных бота, его ник можно показать
+    как кликабельную ссылку даже без @username.
+    """
+    clean_name = clean_tag(user_name).lower()
+    str_chat = str(chat_id)
+
+    # Сначала ищем среди активных рестов текущего чата.
+    for tag, info in db.get('rests', {}).get(str_chat, {}).items():
+        if clean_tag(tag).lower() == clean_name and info.get('user_id'):
+            return info.get('user_id')
+
+    # Затем в глобальной экономике.
+    for info in db.get('economy', {}).values():
+        if clean_tag(info.get('display_name', '')).lower() == clean_name and info.get('user_id'):
+            return info.get('user_id')
+
+    # И в истории рестов.
+    for tag, items in db.get('history', {}).get(str_chat, {}).items():
+        if clean_tag(tag).lower() == clean_name:
+            for item in reversed(items):
+                if item.get('user_id'):
+                    return item.get('user_id')
+    return None
+
 def parse_target_and_args(message, cmd_prefix):
     text = message.text.strip() if message.text else ''
     target_user = None
@@ -769,19 +789,45 @@ def parse_target_and_args(message, cmd_prefix):
         if not re.search(r'\d', potential_name) and len(potential_name.split()) == 1:
             target_user = clean_tag(potential_name)
             raw_args = '|'.join(parts[:-1]).strip()
-            return target_user, None, raw_args
+            target_user_id = find_known_user_id(chat_id, target_user)
+            return target_user, target_user_id, raw_args
 
     words = body.split()
     if len(words) > 1:
+        # Для формата '+рест Vorthon до 16 августа' имя пользователя
+        # находится в начале, а не в конце. Это важно, чтобы 'августа'
+        # не определялось как ник.
+        if text_lower_for_parse := text.lower():
+            if re.match(r'^\+рест\s+', text, re.IGNORECASE):
+                m_rest_name = re.match(r'^\+рест\s+([^|\s]+)\s+(.+)$', text, re.IGNORECASE)
+                if m_rest_name:
+                    candidate = clean_tag(m_rest_name.group(1))
+                    rest_args = m_rest_name.group(2).strip()
+                    if candidate and not candidate.startswith(('до', 'на')):
+                        target_user = candidate
+                        target_user_id = find_known_user_id(chat_id, target_user)
+                        return target_user, target_user_id, rest_args
+
         if not re.search(r'\d', words[-1]):
             target_user = clean_tag(words[-1])
             raw_args = ' '.join(words[:-1]).strip()
-            return target_user, None, raw_args
+            target_user_id = find_known_user_id(chat_id, target_user)
+            return target_user, target_user_id, raw_args
 
     return None, None, body
 
 def parse_duration_to_seconds(duration_str, chat_id=None):
     duration_str = duration_str.lower().strip()
+
+    # Бессрочный рест: отсутствие end_time означает, что он не истекает автоматически.
+    indefinite_markers = (
+        'на неопределённый срок', 'на неопределенный срок',
+        'неопределённый срок', 'неопределенный срок',
+        'бессрочно', 'без срока', 'навсегда'
+    )
+    if any(marker in duration_str for marker in indefinite_markers):
+        return None
+
     match_rel = re.search(r'(\d+)\s*(д|день|дня|дней|ч|час|часа|часов|м|мин|минут)', duration_str)
     if match_rel:
         val = int(match_rel.group(1))
@@ -915,9 +961,15 @@ def apply_rest(chat_id, user, duration_text, reason='Не указана', targe
         return False, 0
         
     seconds = parse_duration_to_seconds(duration_text, chat_id)
+    is_indefinite = any(marker in duration_text.lower() for marker in (
+        'на неопределённый срок', 'на неопределенный срок',
+        'неопределённый срок', 'неопределенный срок',
+        'бессрочно', 'без срока', 'навсегда'
+    ))
     end_time = (time.time() + seconds) if seconds else None
+    display_duration = 'на неопределённый срок' if is_indefinite else duration_text
     db['rests'][str_chat][clean_user] = {
-        'duration': duration_text,
+        'duration': display_duration,
         'reason': reason,
         'end_time': end_time,
         'user_id': target_user_id,
@@ -972,6 +1024,7 @@ def send_welcome(message):
         '🤖 <b>НЯ-БОТ — ПОЛНЫЙ СПИСОК ВОЗМОЖНОСТЕЙ</b>\n\n'
         '🌴 <b>РЕСТЫ</b>\n'
         '• <code>+рест 3 дня | отпуск @username</code> — выдать рест. Можно также ответить на сообщение.\n'
+        '• <code>+рест @username на неопределённый срок</code> — бессрочный рест.\n'
         '• <code>-рест @username</code> — снять рест.\n'
         '• <code>+продлить 2 часа @username</code> — продлить рест.\n'
         '• <code>причина @username новая причина</code> — изменить причину.\n'
@@ -1009,7 +1062,6 @@ def send_welcome(message):
         '🧠 <b>РАЗВЛЕЧЕНИЯ И СТАТИСТИКА</b>\n'
         '• <code>айкью</code> / <code>iq</code> — изменить IQ, КД 30 минут.\n'
         '• <code>жир</code> / <code>жирок</code> — измерить жир, КД 30 минут.\n'
-        '• <code>хромосомы</code> / <code>хромосома</code> — симулятор хромосом, КД 30 минут.\n'
         '• <code>пятка</code> / <code>пяточка</code> — измерить пятку, КД 20 минут.\n'
         '• <code>топ богачей</code> — топ по коинам.\n'
         '• <code>топ iq</code> — топ по IQ.\n'
@@ -1134,7 +1186,6 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
         f"😂 Смехуятинка: <b>{econ.get('smeh', 0)} балл(ов)</b>\n"
         f"🧠 Айкью (IQ): <b>{econ.get('iq', 100)}</b>\n"
         f"🍔 Процент жира: <b>{econ.get('fat', 20)}%</b>\n"
-        f"🧬 Хромосомы: <b>{econ.get('chromosomes', 46)}</b> <i>(виртуальный игровой показатель)</i>\n"
         f"🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
         f"🎁 Награды за ресты: <b>{rest_rewards_str}</b>\n"
         f"🏷 Активный значок: <b>{current_badge}</b>\n"
@@ -1178,16 +1229,6 @@ def handle_messages(message):
     user_username = (message.from_user.username or '').lower()
     user_tag = clean_tag(message.from_user.username or message.from_user.first_name)
     text_lower = text.lower()
-
-    # --- ОТВЕТ НА СЛОВО «ПОЧЕМУ» ГОТОВЫМ GIF ИЗ СООБЩЕНИЯ TELEGRAM ---
-    # Ссылка пользователя: https://t.me/c/3703264754/246742
-    # Для Telegram Bot API это приватный чат -1003703264754 и сообщение 246742.
-    if text_lower == 'почему':
-        try:
-            bot.copy_message(chat_id, -1003703264754, 246742)
-        except Exception as e:
-            print(f'Не удалось скопировать GIF из сообщения 246742: {e}')
-        return
 
     # Любое сообщение засчитывается в дневное задание сообщений.
     completed_tasks = track_daily_task(user_id, user_tag, 'messages', 1)
@@ -1335,34 +1376,6 @@ def handle_messages(message):
             bot.send_message(chat_id, f'🎉 Задание Ня-Пасса выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
         return
 
-    # --- СИМУЛЯТОР ХРОМОСОМ (С КД 30 МИНУТ) ---
-    elif text_lower in ['хромосомы', 'хромосома', 'хромосом', 'chromosomes']:
-        econ = get_user_econ(user_id, user_tag)
-        now_ts = time.time()
-        cooldown = 1800  # КД 30 минут
-
-        if now_ts - econ.get('last_chromosomes_time', 0) < cooldown:
-            left_sec = int(cooldown - (now_ts - econ.get('last_chromosomes_time', 0)))
-            minutes = left_sec // 60
-            seconds = left_sec % 60
-            bot.reply_to(message, f"⏳ Симулятор хромосом можно использовать раз в 30 минут!\nПодождите еще: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
-            return
-
-        change = random.randint(-2, 2)
-        econ['chromosomes'] = max(44, min(48, econ.get('chromosomes', 46) + change))
-        econ['last_chromosomes_time'] = now_ts
-        save_data()
-
-        sign = '+' if change >= 0 else ''
-        bot.reply_to(
-            message,
-            f"🧬 {make_link(chat_id, user_tag, user_id)}, симуляция хромосом завершена!\n"
-            f"Изменение: <b>{sign}{change}</b>\n"
-            f"Текущий виртуальный показатель хромосом: <b>{econ['chromosomes']} 🧬</b>",
-            parse_mode='HTML'
-        )
-        return
-
     # --- СИМУЛЯТОР ПЯТКИ (С КД 20 МИНУТ) ---
     elif text_lower in ['пятка', 'пяточка', 'размер пятки', 'пятки']:
         econ = get_user_econ(user_id, user_tag)
@@ -1394,19 +1407,6 @@ def handle_messages(message):
                 u_name = info.get('display_name', 'Пользователь')
                 u_id = info.get('user_id')
                 resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('fat', 20)}%</b>\n"
-            bot.reply_to(message, resp, parse_mode='HTML')
-        else:
-            bot.reply_to(message, "📊 Статистика пока пуста.")
-        return
-
-    elif text_lower in ['топ хромосом', 'топ хромосомов', 'топ по хромосомам']:
-        if 'economy' in db and db['economy']:
-            sorted_chromosomes = sorted(db['economy'].items(), key=lambda x: x[1].get('chromosomes', 46), reverse=True)
-            resp = "🌐 <b>Глобальный топ по виртуальному показателю хромосом:</b>\n\n"
-            for idx, (k, info) in enumerate(sorted_chromosomes[:10], 1):
-                u_name = info.get('display_name', 'Пользователь')
-                u_id = info.get('user_id')
-                resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('chromosomes', 46)} 🧬</b>\n"
             bot.reply_to(message, resp, parse_mode='HTML')
         else:
             bot.reply_to(message, "📊 Статистика пока пуста.")
