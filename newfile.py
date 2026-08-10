@@ -31,9 +31,9 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = '8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g'
+TOKEN = "8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g"
 if not TOKEN:
-    raise RuntimeError('Не задан токен бота')
+    raise RuntimeError('Не задана переменная окружения TELEGRAM_BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
 # ID вашего приватного канала для авто-бекапов
@@ -563,6 +563,8 @@ def get_user_econ(user_id=None, user_tag=None):
             'smeh': 0,               # Очки смехуятинки
             'iq': 100,               # Уровень IQ
             'fat': 20,               # Процент жира
+            'chromosomes': 46,        # Виртуальный игровой показатель хромосом
+            'last_chromosomes_time': 0, # Timestamp последнего симулятора хромосом
             'foot_size': 25,         # Размер пятки в см
             'last_hourly': 0,        # Timestamp последнего часового сбора
             'last_iq_time': 0,       # Timestamp последнего измерения IQ (КД 30 мин)
@@ -595,6 +597,8 @@ def get_user_econ(user_id=None, user_tag=None):
     if 'smeh' not in u_data: u_data['smeh'] = 0
     if 'iq' not in u_data: u_data['iq'] = 100
     if 'fat' not in u_data: u_data['fat'] = 20
+    if 'chromosomes' not in u_data: u_data['chromosomes'] = 46
+    if 'last_chromosomes_time' not in u_data: u_data['last_chromosomes_time'] = 0
     if 'foot_size' not in u_data: u_data['foot_size'] = 25
     if 'rest_rewards_count' not in u_data: u_data['rest_rewards_count'] = 0
     if 'titles' not in u_data: u_data['titles'] = []
@@ -1005,6 +1009,7 @@ def send_welcome(message):
         '🧠 <b>РАЗВЛЕЧЕНИЯ И СТАТИСТИКА</b>\n'
         '• <code>айкью</code> / <code>iq</code> — изменить IQ, КД 30 минут.\n'
         '• <code>жир</code> / <code>жирок</code> — измерить жир, КД 30 минут.\n'
+        '• <code>хромосомы</code> / <code>хромосома</code> — симулятор хромосом, КД 30 минут.\n'
         '• <code>пятка</code> / <code>пяточка</code> — измерить пятку, КД 20 минут.\n'
         '• <code>топ богачей</code> — топ по коинам.\n'
         '• <code>топ iq</code> — топ по IQ.\n'
@@ -1129,6 +1134,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None):
         f"😂 Смехуятинка: <b>{econ.get('smeh', 0)} балл(ов)</b>\n"
         f"🧠 Айкью (IQ): <b>{econ.get('iq', 100)}</b>\n"
         f"🍔 Процент жира: <b>{econ.get('fat', 20)}%</b>\n"
+        f"🧬 Хромосомы: <b>{econ.get('chromosomes', 46)}</b> <i>(виртуальный игровой показатель)</i>\n"
         f"🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
         f"🎁 Награды за ресты: <b>{rest_rewards_str}</b>\n"
         f"🏷 Активный значок: <b>{current_badge}</b>\n"
@@ -1172,6 +1178,16 @@ def handle_messages(message):
     user_username = (message.from_user.username or '').lower()
     user_tag = clean_tag(message.from_user.username or message.from_user.first_name)
     text_lower = text.lower()
+
+    # --- ОТВЕТ НА СЛОВО «ПОЧЕМУ» ГОТОВЫМ GIF ИЗ СООБЩЕНИЯ TELEGRAM ---
+    # Ссылка пользователя: https://t.me/c/3703264754/246742
+    # Для Telegram Bot API это приватный чат -1003703264754 и сообщение 246742.
+    if text_lower == 'почему':
+        try:
+            bot.copy_message(chat_id, -1003703264754, 246742)
+        except Exception as e:
+            print(f'Не удалось скопировать GIF из сообщения 246742: {e}')
+        return
 
     # Любое сообщение засчитывается в дневное задание сообщений.
     completed_tasks = track_daily_task(user_id, user_tag, 'messages', 1)
@@ -1319,6 +1335,34 @@ def handle_messages(message):
             bot.send_message(chat_id, f'🎉 Задание Ня-Пасса выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
         return
 
+    # --- СИМУЛЯТОР ХРОМОСОМ (С КД 30 МИНУТ) ---
+    elif text_lower in ['хромосомы', 'хромосома', 'хромосом', 'chromosomes']:
+        econ = get_user_econ(user_id, user_tag)
+        now_ts = time.time()
+        cooldown = 1800  # КД 30 минут
+
+        if now_ts - econ.get('last_chromosomes_time', 0) < cooldown:
+            left_sec = int(cooldown - (now_ts - econ.get('last_chromosomes_time', 0)))
+            minutes = left_sec // 60
+            seconds = left_sec % 60
+            bot.reply_to(message, f"⏳ Симулятор хромосом можно использовать раз в 30 минут!\nПодождите еще: <b>{minutes} мин {seconds} сек</b>.", parse_mode='HTML')
+            return
+
+        change = random.randint(-2, 2)
+        econ['chromosomes'] = max(44, min(48, econ.get('chromosomes', 46) + change))
+        econ['last_chromosomes_time'] = now_ts
+        save_data()
+
+        sign = '+' if change >= 0 else ''
+        bot.reply_to(
+            message,
+            f"🧬 {make_link(chat_id, user_tag, user_id)}, симуляция хромосом завершена!\n"
+            f"Изменение: <b>{sign}{change}</b>\n"
+            f"Текущий виртуальный показатель хромосом: <b>{econ['chromosomes']} 🧬</b>",
+            parse_mode='HTML'
+        )
+        return
+
     # --- СИМУЛЯТОР ПЯТКИ (С КД 20 МИНУТ) ---
     elif text_lower in ['пятка', 'пяточка', 'размер пятки', 'пятки']:
         econ = get_user_econ(user_id, user_tag)
@@ -1350,6 +1394,19 @@ def handle_messages(message):
                 u_name = info.get('display_name', 'Пользователь')
                 u_id = info.get('user_id')
                 resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('fat', 20)}%</b>\n"
+            bot.reply_to(message, resp, parse_mode='HTML')
+        else:
+            bot.reply_to(message, "📊 Статистика пока пуста.")
+        return
+
+    elif text_lower in ['топ хромосом', 'топ хромосомов', 'топ по хромосомам']:
+        if 'economy' in db and db['economy']:
+            sorted_chromosomes = sorted(db['economy'].items(), key=lambda x: x[1].get('chromosomes', 46), reverse=True)
+            resp = "🌐 <b>Глобальный топ по виртуальному показателю хромосом:</b>\n\n"
+            for idx, (k, info) in enumerate(sorted_chromosomes[:10], 1):
+                u_name = info.get('display_name', 'Пользователь')
+                u_id = info.get('user_id')
+                resp += f"{idx}. {make_link(chat_id, u_name, u_id)} — <b>{info.get('chromosomes', 46)} 🧬</b>\n"
             bot.reply_to(message, resp, parse_mode='HTML')
         else:
             bot.reply_to(message, "📊 Статистика пока пуста.")
