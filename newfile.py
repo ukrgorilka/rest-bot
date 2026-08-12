@@ -2874,4 +2874,3 @@ keep_alive()
 
 print('Бот успешно запущен...')
 bot.infinity_polling()
-```
