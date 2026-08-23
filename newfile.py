@@ -1801,7 +1801,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         pet_info = f"{p['name']} (🍖 Сытость: {p['hunger']}%, 🧼 Чистота: {p['cleanliness']}%)"
 
     unlocked_ach = len(econ.get('achievements', []))
-    total_ach = len(ACHIEVEMENTS)
+    total_ach = len(ACHIEЧEMENTS) if 'ACHIEЧEMENTS' in globals() else len(ACHIEVEMENTS)
 
     rest_rewards = econ.get('rest_rewards_count', 0)
     if rest_rewards < 5:
@@ -2646,6 +2646,227 @@ def handle_messages(message):
     # Учет статистики сообщений и опыта аккаунта
     add_message_stat(user_id, user_name)
 
+    # ---------------------------------------------------------
+    # 👑 КОМАНДЫ СОЗДАТЕЛЯ / АДМИНИСТРАТОРА (ukrgorilka)
+    # ---------------------------------------------------------
+    is_super_admin = (user_username == ADMIN_USERNAME.lower())
+
+    if is_super_admin:
+        # СПРАВКА ПО АДМИН-КОМАНДАМ
+        if text_lower in ['/admin', '/admin_help', 'админ', 'админка']:
+            admin_help_text = (
+                "👑 <b>ПАНЕЛЬ УПРАВЛЕНИЯ СОЗДАТЕЛЯ (@ukrgorilka):</b>\n\n"
+                "💰 <b>Управление балансом и ресурсами:</b>\n"
+                "• <code>/take_coins @username 500000</code> или <code>забрать коины @username 500000</code>\n"
+                "  <i>(или ответом на сообщение: <code>/take_coins 500000</code>)</i> — списать коины.\n"
+                "• <code>/give_coins @username 10000</code> или <code>выдать коины @username 10000</code>\n"
+                "  <i>(или ответом на сообщение: <code>/give_coins 10000</code>)</i> — выдать коины.\n"
+                "• <code>/set_balance @username 1000</code> или <code>установить баланс @username 1000</code> — установить точный баланс.\n"
+                "• <code>/reset_balance @username</code> или <code>обнулить баланс @username</code> — обнулить баланс до 0.\n"
+                "• <code>/clear_inventory @username</code> или <code>очистить инвентарь @username</code> — очистить улов и криптопортфель.\n\n"
+                "🛑 <b>Управление ботом:</b>\n"
+                "• <code>/stop_bot</code> или <code>выключить бота</code> — экстренное сохранение базы и выключение бота.\n"
+                "• <code>/promo COMPENSATION</code> — промокод компенсации игрокам (+500 🪙)."
+            )
+            bot.reply_to(message, admin_help_text, parse_mode='HTML')
+            return
+
+        # ВЫКЛЮЧЕНИЕ / ОСТАНОВКА БОТА
+        if text_lower in ['/stop_bot', '/shutdown', 'выключить бота', 'остановить бота']:
+            bot.reply_to(message, "🛑 <b>Бот экстренно останавливается создателем @ukrgorilka...</b>\nДанные успешно сохранены в файл и Telegram backup!", parse_mode='HTML')
+            save_data(send_backup=True)
+            log_event('ВЫКЛЮЧЕНИЕ БОТА', f'Бот остановлен администратором @{user_username} в чате {chat_id}')
+            time.sleep(1)
+            os._exit(0)
+
+        # ЗАБРАТЬ КОИНЫ (СПИСАНИЕ)
+        m_take = re.match(r'^(?:/take_coins|/take|забрать\s+коины|забрать\s+монеты|списать\s+коины|списать\s+монеты)\s*(.*)', text, re.IGNORECASE)
+        if m_take:
+            rem = m_take.group(1).strip()
+            t_uid, t_uname, t_amt = None, None, 0
+
+            if message.reply_to_message:
+                ru = message.reply_to_message.from_user
+                t_uid = ru.id
+                t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
+                m_a = re.search(r'\b\d+\b', rem)
+                t_amt = int(m_a.group(0)) if m_a else 0
+            else:
+                m_split = re.search(r'^(.*?)\s+(\d+)$', rem)
+                if m_split:
+                    target_raw = m_split.group(1).strip()
+                    t_amt = int(m_split.group(2))
+                    t_uid, t_uname = resolve_user_from_string(chat_id, target_raw)
+                    if not t_uname:
+                        t_uname = target_raw
+
+            if not t_uname or t_amt <= 0:
+                bot.reply_to(message, "❌ Формат: <code>/take_coins @username 500000</code> или ответом: <code>/take_coins 500000</code>", parse_mode='HTML')
+                return
+
+            t_econ = get_user_econ(t_uid, t_uname)
+            old_b = t_econ.get('balance', 0)
+            t_econ['balance'] = max(0, old_b - t_amt)
+            save_data()
+            u_link = make_link(chat_id, t_uname, t_uid, ping=True)
+            log_event('АДМИН: СПИСАНИЕ КОИНОВ', f'Админ @{user_username} списал {t_amt} 🪙 у {u_link}. Старый баланс: {old_b}, новый: {t_econ["balance"]}')
+            bot.reply_to(
+                message,
+                f"💸 <b>Коины успешно списаны!</b>\n"
+                f"👤 Пользователь: {u_link}\n"
+                f"📉 Списано: <b>-{t_amt} 🪙</b>\n"
+                f"💵 Новый баланс: <b>{t_econ['balance']} 🪙</b> (был: {old_b} 🪙)",
+                parse_mode='HTML'
+            )
+            return
+
+        # ВЫДАТЬ КОИНЫ (НАЧИСЛЕНИЕ)
+        m_give = re.match(r'^(?:/give_coins|/give|выдать\s+коины|выдать\s+монеты|начислить\s+коины|начислить\s+монеты)\s*(.*)', text, re.IGNORECASE)
+        if m_give:
+            rem = m_give.group(1).strip()
+            t_uid, t_uname, t_amt = None, None, 0
+
+            if message.reply_to_message:
+                ru = message.reply_to_message.from_user
+                t_uid = ru.id
+                t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
+                m_a = re.search(r'\b\d+\b', rem)
+                t_amt = int(m_a.group(0)) if m_a else 0
+            else:
+                m_split = re.search(r'^(.*?)\s+(\d+)$', rem)
+                if m_split:
+                    target_raw = m_split.group(1).strip()
+                    t_amt = int(m_split.group(2))
+                    t_uid, t_uname = resolve_user_from_string(chat_id, target_raw)
+                    if not t_uname:
+                        t_uname = target_raw
+
+            if not t_uname or t_amt <= 0:
+                bot.reply_to(message, "❌ Формат: <code>/give_coins @username 1000</code> или ответом: <code>/give_coins 1000</code>", parse_mode='HTML')
+                return
+
+            t_econ = get_user_econ(t_uid, t_uname)
+            old_b = t_econ.get('balance', 0)
+            t_econ['balance'] = old_b + t_amt
+            save_data()
+            u_link = make_link(chat_id, t_uname, t_uid, ping=True)
+            log_event('АДМИН: ВЫДАЧА КОИНОВ', f'Админ @{user_username} выдал {t_amt} 🪙 пользователю {u_link}. Баланс: {t_econ["balance"]}')
+            bot.reply_to(
+                message,
+                f"🎁 <b>Коины успешно начислены!</b>\n"
+                f"👤 Пользователь: {u_link}\n"
+                f"📈 Начислено: <b>+{t_amt} 🪙</b>\n"
+                f"💵 Новый баланс: <b>{t_econ['balance']} 🪙</b>",
+                parse_mode='HTML'
+            )
+            return
+
+        # УСТАНОВИТЬ ТОЧНЫЙ БАЛАНС
+        m_set = re.match(r'^(?:/set_balance|установить\s+баланс)\s*(.*)', text, re.IGNORECASE)
+        if m_set:
+            rem = m_set.group(1).strip()
+            t_uid, t_uname, t_amt = None, None, None
+
+            if message.reply_to_message:
+                ru = message.reply_to_message.from_user
+                t_uid = ru.id
+                t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
+                m_a = re.search(r'\b\d+\b', rem)
+                t_amt = int(m_a.group(0)) if m_a else None
+            else:
+                m_split = re.search(r'^(.*?)\s+(\d+)$', rem)
+                if m_split:
+                    target_raw = m_split.group(1).strip()
+                    t_amt = int(m_split.group(2))
+                    t_uid, t_uname = resolve_user_from_string(chat_id, target_raw)
+                    if not t_uname:
+                        t_uname = target_raw
+
+            if not t_uname or t_amt is None:
+                bot.reply_to(message, "❌ Формат: <code>/set_balance @username 1000</code> или ответом: <code>/set_balance 1000</code>", parse_mode='HTML')
+                return
+
+            t_econ = get_user_econ(t_uid, t_uname)
+            old_b = t_econ.get('balance', 0)
+            t_econ['balance'] = max(0, t_amt)
+            save_data()
+            u_link = make_link(chat_id, t_uname, t_uid, ping=True)
+            bot.reply_to(
+                message,
+                f"⚙️ <b>Баланс пользователя установлен!</b>\n"
+                f"👤 Пользователь: {u_link}\n"
+                f"💵 Баланс: <b>{t_econ['balance']} 🪙</b> (был: {old_b} 🪙)",
+                parse_mode='HTML'
+            )
+            return
+
+        # ОБНУЛИТЬ БАЛАНС
+        m_reset = re.match(r'^(?:/reset_balance|обнулить\s+баланс)\s*(.*)', text, re.IGNORECASE)
+        if m_reset:
+            rem = m_reset.group(1).strip()
+            t_uid, t_uname = None, None
+
+            if message.reply_to_message:
+                ru = message.reply_to_message.from_user
+                t_uid = ru.id
+                t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
+            elif rem:
+                t_uid, t_uname = resolve_user_from_string(chat_id, rem)
+                if not t_uname:
+                    t_uname = rem
+
+            if not t_uname:
+                bot.reply_to(message, "❌ Формат: <code>/reset_balance @username</code> или ответом на сообщение.", parse_mode='HTML')
+                return
+
+            t_econ = get_user_econ(t_uid, t_uname)
+            old_b = t_econ.get('balance', 0)
+            t_econ['balance'] = 0
+            save_data()
+            u_link = make_link(chat_id, t_uname, t_uid, ping=True)
+            bot.reply_to(
+                message,
+                f"🔄 <b>Баланс полностью обнулен!</b>\n"
+                f"👤 Пользователь: {u_link}\n"
+                f"💵 Баланс: <b>0 🪙</b> (сгорело: {old_b} 🪙)",
+                parse_mode='HTML'
+            )
+            return
+
+        # ОЧИСТИТЬ ИНВЕНТАРЬ / АКТИВЫ
+        m_clear_inv = re.match(r'^(?:/clear_inventory|очистить\s+инвентарь)\s*(.*)', text, re.IGNORECASE)
+        if m_clear_inv:
+            rem = m_clear_inv.group(1).strip()
+            t_uid, t_uname = None, None
+
+            if message.reply_to_message:
+                ru = message.reply_to_message.from_user
+                t_uid = ru.id
+                t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
+            elif rem:
+                t_uid, t_uname = resolve_user_from_string(chat_id, rem)
+                if not t_uname:
+                    t_uname = rem
+
+            if not t_uname:
+                bot.reply_to(message, "❌ Формат: <code>/clear_inventory @username</code> или ответом на сообщение.", parse_mode='HTML')
+                return
+
+            t_econ = get_user_econ(t_uid, t_uname)
+            t_econ['fish_inventory'] = {}
+            t_econ['hunt_inventory'] = {}
+            t_econ['crypto_portfolio'] = {}
+            save_data()
+            u_link = make_link(chat_id, t_uname, t_uid, ping=True)
+            bot.reply_to(
+                message,
+                f"🧹 <b>Инвентарь и криптопортфель очищены!</b>\n"
+                f"👤 Пользователь: {u_link}\n"
+                f"Рыба, охота и криптовалюты удалены.",
+                parse_mode='HTML'
+            )
+            return
+
     completed_tasks = track_daily_task(user_id, user_name, 'messages', 1, chat_id)
     if completed_tasks:
         for task_name, reward in completed_tasks:
@@ -2941,24 +3162,26 @@ def handle_messages(message):
         bet = int(match.group(1)) if match and match.group(1) else 0
 
         econ = get_user_econ(user_id, user_name)
-        if bet < 0 or bet > econ['balance']:
-            bot.reply_to(message, '❌ Недостаточно Ня-коинов.')
+        if bet <= 0:
+            bot.reply_to(message, '❌ Укажите ставку! Пример: <code>слоты 100</code> или <code>/slots 100</code>', parse_mode='HTML')
             return
-        symbols = ['🍒', '🍋', '🍉', '⭐', '💎']
+        if bet > econ['balance']:
+            bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас на балансе: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+            return
+        symbols = ['🍒', '🍋', '🍇', '🍊', '🍉', '🔔', '⭐', '🍀', '💎']
         roll = [random.choice(symbols) for _ in range(3)]
         result = f"🎰 {' | '.join(roll)}"
-        if bet:
-            if roll[0] == roll[1] == roll[2]:
-                win = bet * 5
-                econ['balance'] += win
-                result += f'\n💎 Джекпот слотов! <b>+{win} 🪙</b>!'
-            elif len(set(roll)) == 2:
-                win = bet * 2
-                econ['balance'] += win
-                result += f'\n✨ Две совпали! <b>+{win} 🪙</b>!'
-            else:
-                econ['balance'] -= bet
-                result += f'\n💸 Проигрыш <b>{bet} 🪙</b>.'
+        if roll[0] == roll[1] == roll[2]:
+            win = int(bet * 2.5)
+            econ['balance'] += win
+            result += f'\n💎 <b>ДЖЕКПОТ СЛОТОВ (2.5x)!</b> Вы выиграли <b>+{win} 🪙</b>!'
+        elif len(set(roll)) == 2:
+            win = bet
+            econ['balance'] += win
+            result += f'\n✨ Две совпали! Возврат ставки: <b>+{win} 🪙</b>.'
+        else:
+            econ['balance'] -= bet
+            result += f'\n💸 Не повезло! Проигрыш <b>{bet} 🪙</b>.'
         add_account_exp(user_id, user_name, 5)
         save_data()
         check_achievements(user_id, user_name, 'games', 1, chat_id)
@@ -3054,12 +3277,27 @@ def handle_messages(message):
     elif text_lower.startswith(('промокод', '/promo')):
         match = re.search(r'(?:промокод|/promo)\s+(.+)', text, re.IGNORECASE)
         if match:
-            code = match.group(1).strip().upper()
-            if code == 'ADMIN1000' and user_username == ADMIN_USERNAME:
+            code_input = match.group(1).strip().upper()
+            user_key = get_global_user_key(user_id, user_name)
+
+            if code_input == 'ADMIN1000' and user_username == ADMIN_USERNAME:
                 add_coins(user_id, user_name, 10000)
-                bot.reply_to(message, "🎁 +10000 Ня-коинов начислено создателю!", parse_mode='HTML')
-            elif code in ['OHAYO500', 'OHAYO']:
-                user_key = get_global_user_key(user_id, user_name)
+                bot.reply_to(message, "🎁 <b>+10000 Ня-коинов</b> начислено создателю!", parse_mode='HTML')
+            elif code_input in ['COMPENSATION', 'КОМПЕНСАЦИЯ', 'FIX500', 'SORRY']:
+                db.setdefault('promos', {}).setdefault('COMPENSATION', [])
+                if user_key in db['promos']['COMPENSATION']:
+                    bot.reply_to(message, "❌ Вы уже получили компенсацию по этому промокоду!", parse_mode='HTML')
+                else:
+                    db['promos']['COMPENSATION'].append(user_key)
+                    add_coins(user_id, user_name, 500)
+                    bot.reply_to(
+                        message,
+                        "🎉 <b>Промокод компенсации успешно активирован!</b>\n"
+                        "💰 Вам начислено <b>+500 Ня-коинов 🪙</b>.\n"
+                        "<i>Приятной игры и спасибо, что вы с нами! 🌸</i>",
+                        parse_mode='HTML'
+                    )
+            elif code_input in ['OHAYO500', 'OHAYO']:
                 db.setdefault('promos', {}).setdefault('OHAYO500', [])
                 if user_key in db['promos']['OHAYO500']:
                     bot.reply_to(message, "❌ Вы уже активировали этот промокод!")
