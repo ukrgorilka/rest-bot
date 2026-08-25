@@ -12,14 +12,14 @@ from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from flask import Flask
 
 # ---------------------------------------------------------
-# ВЕБ-СЕРВЕР ДЛЯ KEEP-ALIVE (RENDER / REPLIT)
+# ВЕБ-СЕРВЕР ДЛЯ KEEP-ALIVE (RENDER / REPLIT / VPS)
 # ---------------------------------------------------------
 app = Flask('')
 
 
 @app.route('/')
 def home():
-    return "Bot is alive and running!"
+    return "Nya Bot is alive and running!"
 
 
 def run_web():
@@ -39,6 +39,7 @@ def keep_alive():
 TOKEN = "8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g"
 bot = telebot.TeleBot(TOKEN)
 
+
 def normalize_tg_id(cid_val):
     if not cid_val:
         return 0
@@ -51,22 +52,22 @@ def normalize_tg_id(cid_val):
     except ValueError:
         return 0
 
+
 # ID приватного канала для авто-бекапов базы данных
 DB_CHANNEL_ID = normalize_tg_id(os.environ.get('DB_CHANNEL_ID', '-1004334874700'))
 
-# Отдельный канал для логов рестов, переводов, банка и покупок
-LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-1005587336891'))
+# Новый канал для логов действий, рестов, покупок и переводов
+LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-1004369517562'))
 DATA_FILE = 'rests_data.json'
 
-# Юзернейм администратора/разработчика для секретного промокода
+# Юзернейм администратора/разработчика
 ADMIN_USERNAME = 'ukrgorilka'
 
-# Источник гифок и аудио из Telegram (ID чата https://t.me/c/4311479842)
+# Медиа-канал
 MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
 WHY_TG_MSG_IDS = [5, 9]
 SUMMER_SONG_MSG_ID = 14
 
-# Резервные прямые ссылки на случай отсутствия доступа к чату
 WHY_GIFS = [
     "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3Z2eXpzc2ExOHBmbmdvZ3F0MHlyYm1sbTVrcHFqYm42aXFlZ3VwOSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/s239QJIh56sRW/giphy.gif",
     "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHlsMGVnZ29rNm0xb3JvdWRyc3dybDVrNTVrdXVnMzh0eWJ5dzdpNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1X7AZhiL08Y72/giphy.gif"
@@ -87,7 +88,6 @@ MONTHS = {
     'декабря': 12, 'декабрь': 12,
 }
 
-# Регулярное выражение для поиска длительности/срока
 DURATION_PATTERN = (
     r'(?:\b(?:до\s+)?\d+\s*(?:дней|дня|день|д|часов|часа|час|ч|минут|мин|м)\b|'
     r'\b(?:до\s+)?\d{1,2}[\.\/]\d{1,2}(?:[\.\/]\d{2,4})?|'
@@ -97,7 +97,7 @@ DURATION_PATTERN = (
 )
 
 # ---------------------------------------------------------
-# ЭКОНОМИКА: ТОВАРЫ И ЦЕНЫ
+# ЭКОНОМИКА: ТОВАРЫ, ЗНАЧКИ, КОЛЬЦА
 # ---------------------------------------------------------
 BADGES = {
     'badge_star': {'name': 'Звездочка', 'emoji': '🌟', 'price': 120},
@@ -120,12 +120,21 @@ BADGES = {
     'badge_foot': {'name': 'Пятка', 'emoji': '🦶', 'price': 3600},
 }
 
+# 👑 ТИТУЛЫ С ПАССИВНЫМИ ЭФФЕКТАМИ
 TITLES = {
-    'king': {'name': 'Кинг', 'text': '👑 Кинг', 'price': 3000},
-    'sonya': {'name': 'Соня', 'text': '💤 Соня', 'price': 2200},
-    'legend': {'name': 'Легенда', 'text': '🔥 Легенда', 'price': 3600},
-    'dragon': {'name': 'Дракон', 'text': '🐉 Дракон', 'price': 4200},
-    'bun': {'name': 'Булочка', 'text': '🥐 Булочка', 'price': 1800},
+    'king': {'name': 'Кинг', 'text': '👑 Кинг', 'price': 3000, 'buff': 'luck', 'val': 10, 'desc': '+10% к удаче в играх'},
+    'sonya': {'name': 'Соня', 'text': '💤 Соня', 'price': 2200, 'buff': 'cd_reduction', 'val': 10, 'desc': '-10% ко всем кулдаунам'},
+    'legend': {'name': 'Легенда', 'text': '🔥 Легенда', 'price': 3600, 'buff': 'exp_bonus', 'val': 25, 'desc': '+25% к опыту профиля'},
+    'dragon': {'name': 'Дракон', 'text': '🐉 Дракон', 'price': 4200, 'buff': 'biz_bonus', 'val': 8, 'desc': '+8% к доходу бизнесов'},
+    'bun': {'name': 'Булочка', 'text': '🥐 Булочка', 'price': 1800, 'buff': 'bonus_coins', 'val': 15, 'desc': '+15 коинов к /bonus'},
+    'coffee_man': {'name': 'Кофеман', 'text': '☕️ Кофеман', 'price': 2500, 'buff': 'cd_reduction', 'val': 15, 'desc': '-15% ко всем кулдаунам'},
+    'oligarch': {'name': 'Олигарх', 'text': '💸 Олигарх', 'price': 5000, 'buff': 'biz_bonus', 'val': 12, 'desc': '+12% к прибыли предприятий'},
+    'shadow_ninja': {'name': 'Теневой Ниндзя', 'text': '🥷 Теневой Ниндзя', 'price': 3500, 'buff': 'rob_save', 'val': 50, 'desc': '-50% штраф при ограблении'},
+    'sakura_lord': {'name': 'Сакура', 'text': '🌸 Сакура', 'price': 2800, 'buff': 'pet_exp', 'val': 30, 'desc': '+30% к опыту питомца'},
+    'gigachad': {'name': 'Гигачад', 'text': '🗿 Гигачад', 'price': 6000, 'buff': 'all_power', 'val': 10, 'desc': '+10% ко всем доходам и удаче'},
+    'clown': {'name': 'Главный Клоун', 'text': '🤡 Главный Клоун', 'price': 2000, 'buff': 'smeh_boost', 'val': 100, 'desc': '+1 очко Смехуятинки за смс'},
+    'beer_baron': {'name': 'Пивной Барон', 'text': '🍺 Пивной Барон', 'price': 3200, 'buff': 'bonus_coins', 'val': 25, 'desc': '+25 коинов к /bonus'},
+    'tapok_master': {'name': 'Повелитель Тапка', 'text': '🩴 Повелитель Тапка', 'price': 4000, 'buff': 'luck', 'val': 15, 'desc': '+15% к удаче охоты/рыбалки'},
 }
 
 RINGS = {
@@ -136,17 +145,48 @@ RINGS = {
     'cosmic': {'name': 'Космическое кольцо Любви', 'emoji': '🌌', 'price': 24000},
 }
 
+# ---------------------------------------------------------
+# БИЗНЕСЫ 2.0 (С УРОВНЯМИ И ПРОКАЧКОЙ)
+# ---------------------------------------------------------
 BUSINESSES = {
-    'coffee': {'name': '☕️ Уютная Кофейня', 'price': 2400, 'income_per_hour': 35},
-    'bakery': {'name': '🥐 Пекарня Булочек', 'price': 6000, 'income_per_hour': 90},
-    'crypto_farm': {'name': '💻 Крипто-Ферма', 'price': 18000, 'income_per_hour': 280},
-    'club': {'name': '🏰 Ночной Клуб', 'price': 54000, 'income_per_hour': 850},
+    'coffee': {'name': '☕️ Уютная Кофейня', 'price': 2400, 'base_income': 35, 'upgrade_cost': 1800},
+    'bakery': {'name': '🥐 Пекарня Булочек', 'price': 6000, 'base_income': 90, 'upgrade_cost': 4500},
+    'crypto_farm': {'name': '💻 Крипто-Ферма', 'price': 18000, 'base_income': 280, 'upgrade_cost': 13000},
+    'club': {'name': '🏰 Ночной Клуб', 'price': 54000, 'base_income': 850, 'upgrade_cost': 38000},
+    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'price': 120000, 'base_income': 1800, 'upgrade_cost': 85000},
+    'space_station': {'name': '🛰 Космическая Станция', 'price': 450000, 'base_income': 6500, 'upgrade_cost': 300000},
 }
 
 CUSTOM_TITLE_CERT_PRICE = 15000
 
 # ---------------------------------------------------------
-# СИСТЕМА КРИПТО-БИРЖИ И АКЦИЙ
+# СНАРЯЖЕНИЕ: УДОЧКИ И ЛУКИ
+# ---------------------------------------------------------
+RODS = {
+    'rod_bamboo': {'name': '🎋 Бамбуковая удочка', 'price': 500, 'luck': 10},
+    'rod_carbon': {'name': '🎣 Карбоновый спиннинг', 'price': 2500, 'luck': 30},
+    'rod_titan': {'name': '🔱 Титановая удочка Посейдона', 'price': 10000, 'luck': 70}
+}
+
+BOWS = {
+    'bow_hunting': {'name': '🏹 Охотничий деревянный лук', 'price': 600, 'luck': 10},
+    'bow_sniper': {'name': '🎯 Снайперский блочный лук', 'price': 3000, 'luck': 35},
+    'bow_phoenix': {'name': '🔥 Огненный лук Феникса', 'price': 12000, 'luck': 80}
+}
+
+# ---------------------------------------------------------
+# ГАРАЖ И ТРАНСПОРТ
+# ---------------------------------------------------------
+VEHICLES = {
+    'scooter': {'name': '🛴 Электросамокат', 'price': 1500, 'cd_cut': 0.05, 'desc': '-5% ко всем таймерам'},
+    'bike': {'name': '🏍 Спортбайк Yamaha', 'price': 7500, 'cd_cut': 0.12, 'desc': '-12% ко всем таймерам'},
+    'bmw': {'name': '🚗 BMW M5 CS', 'price': 30000, 'cd_cut': 0.22, 'desc': '-22% ко всем таймерам'},
+    'ferrari': {'name': '🏎 Ferrari SF90', 'price': 95000, 'cd_cut': 0.35, 'desc': '-35% ко всем таймерам'},
+    'rocket': {'name': '🚀 Ракета SpaceX Starship', 'price': 350000, 'cd_cut': 0.50, 'desc': '-50% ко всем таймерам'}
+}
+
+# ---------------------------------------------------------
+# КРИПТО-БИРЖА
 # ---------------------------------------------------------
 MARKET_DEFAULT = {
     'NYA': {
@@ -155,7 +195,7 @@ MARKET_DEFAULT = {
         'old_price': 110.0,
         'volatility': 0.18,
         'min_price': 15.0,
-        'max_price': 2500.0,
+        'max_price': 3500.0,
         'last_update': 0
     },
     'MEOW': {
@@ -164,7 +204,7 @@ MARKET_DEFAULT = {
         'old_price': 42.0,
         'volatility': 0.22,
         'min_price': 5.0,
-        'max_price': 900.0,
+        'max_price': 1200.0,
         'last_update': 0
     },
     'ANM': {
@@ -173,7 +213,7 @@ MARKET_DEFAULT = {
         'old_price': 14.0,
         'volatility': 0.28,
         'min_price': 1.0,
-        'max_price': 400.0,
+        'max_price': 500.0,
         'last_update': 0
     },
     'PAT': {
@@ -182,13 +222,13 @@ MARKET_DEFAULT = {
         'old_price': 6.0,
         'volatility': 0.35,
         'min_price': 0.5,
-        'max_price': 150.0,
+        'max_price': 200.0,
         'last_update': 0
     }
 }
 
 # ---------------------------------------------------------
-# СИСТЕМА ПРОФЕССИЙ И ВАКАНСИЙ
+# ПРОФЕССИИ
 # ---------------------------------------------------------
 JOBS = {
     'fermer': {'name': '👨‍🌾 Фермер', 'req_exp': 0, 'chance': 95, 'min_pay': 25, 'max_pay': 55, 'exp_gain': 10},
@@ -201,38 +241,56 @@ JOBS = {
 }
 
 # ---------------------------------------------------------
-# БЛОК РЫБАЛКИ, ОХОТЫ И ПИТОМЦЕВ
+# БОГАТЫЙ БЕСТИАРИЙ РЫБАЛКИ И ОХОТЫ
 # ---------------------------------------------------------
 FISH_TYPES = [
-    ('🐟 Карась', 'Обычный', 12, 45),
-    ('🐠 Окунь', 'Обычный', 20, 30),
-    ('🐡 Щука', 'Редкий', 50, 15),
-    ('🦀 Краб', 'Редкий', 75, 8),
-    ('🐙 Осьминог', 'Эпический', 160, 3),
-    ('🧜‍♀️ Русалка', 'Легендарный', 380, 2),
-    ('🐉 Небесный Драконорыб', 'Мифический', 850, 1),
+    ('🐟 Речной Карась', 'Обычный', 12, 50),
+    ('🐠 Речной Окунь', 'Обычный', 20, 40),
+    ('🐡 Речная Плотва', 'Обычный', 25, 35),
+    ('🦈 Зубастая Щука', 'Редкий', 60, 20),
+    ('🦀 Речной Рак', 'Редкий', 80, 15),
+    ('🦞 Золотистый Краб', 'Редкий', 110, 12),
+    ('🐙 Глубоководный Осьминог', 'Эпический', 220, 7),
+    ('🐡 Электрический Скат', 'Эпический', 290, 5),
+    ('🐬 Радужный Дельфин', 'Эпический', 360, 4),
+    ('🧜‍♀️ Лазурная Русалка', 'Легендарный', 650, 2),
+    ('🐳 Древний Белый Кит', 'Легендарный', 900, 2),
+    ('🐉 Небесный Драконорыб', 'Мифический', 1800, 1),
+    ('🔱 Божественный Левиафан', 'Божественный', 4500, 1),
 ]
 
 HUNT_TYPES = [
-    ('🐇 Заяц', 'Обычный', 15, 45),
-    ('🦊 Лиса', 'Обычный', 28, 30),
-    ('🐗 Кабан', 'Редкий', 65, 15),
-    ('🦌 Олень', 'Редкий', 95, 8),
-    ('🐅 Снежный Барс', 'Эпический', 210, 3),
-    ('🦅 Феникс', 'Легендарный', 420, 2),
-    ('🦄 Звездный Грифон', 'Мифический', 1000, 1),
+    ('🐇 Полевой Заяц', 'Обычный', 15, 50),
+    ('🐿 Шустрая Белка', 'Обычный', 22, 40),
+    ('🦊 Рыжая Лисица', 'Обычный', 35, 35),
+    ('🐗 Дикий Кабан', 'Редкий', 75, 20),
+    ('🐺 Серый Волк', 'Редкий', 95, 15),
+    ('🦌 Благородный Олень', 'Редкий', 130, 12),
+    ('🐻 Бурый Медведь', 'Эпический', 260, 7),
+    ('🐅 Снежный Барс', 'Эпический', 340, 5),
+    ('🦣 Мамонт Саванны', 'Эпический', 480, 4),
+    ('🦅 Огненный Феникс', 'Легендарный', 750, 2),
+    ('🦄 Звездный Грифон', 'Легендарный', 1100, 2),
+    ('🐉 Пещерный Дракон', 'Мифический', 2200, 1),
+    ('🌌 Астральный Бегемот', 'Божественный', 5500, 1),
 ]
 
+# ---------------------------------------------------------
+# ПИТОМЦЫ 2.0 (ПРОКАЧКА, АВТО-ДОБЫЧА, НОВЫЕ ВИДЫ)
+# ---------------------------------------------------------
 PETS_DATA = {
     'cat': {'name': '🐱 Котик Усач', 'price': 720, 'luck_bonus': 15, 'desc': '+15% к удаче в охоте и рыбалке'},
     'dog': {'name': '🐶 Пёсель Верный', 'price': 1450, 'luck_bonus': 25, 'desc': '+25% к удаче в охоте и рыбалке'},
     'fox': {'name': '🦊 Хитрая Лисичка', 'price': 3000, 'luck_bonus': 40, 'desc': '+40% к удаче в охоте и рыбалке'},
     'owl': {'name': '🦉 Мудрая Сова', 'price': 4800, 'luck_bonus': 60, 'desc': '+60% к удаче в охоте и рыбалке'},
-    'dragon': {'name': '🐉 Маленький Дракон', 'price': 9600, 'luck_bonus': 85, 'desc': '+85% к удаче в охоте и рыбалке'}
+    'raccoon': {'name': '🦝 Енот-Вор', 'price': 6500, 'luck_bonus': 45, 'desc': '+20% к успеху ограблений'},
+    'panda': {'name': '🐼 Панда Ленивец', 'price': 8000, 'luck_bonus': 50, 'desc': '+35% к часовому бонусу /bonus'},
+    'dragon': {'name': '🐉 Маленький Дракон', 'price': 12000, 'luck_bonus': 85, 'desc': '+85% к удаче в охоте и рыбалке'},
+    'unicorn': {'name': '🦄 Радужный Единорог', 'price': 25000, 'luck_bonus': 110, 'desc': '+110% к удаче во всех играх и добыче'}
 }
 
 # ---------------------------------------------------------
-# БЛОК РАСШИРЕННЫХ ДОСТИЖЕНИЙ (40 АЧИВОК)
+# ДОСТИЖЕНИЯ
 # ---------------------------------------------------------
 ACHIEVEMENTS = {
     'first_msg': {'title': '🌱 Первый шаг', 'desc': 'Отправить первое сообщение в чате', 'stat': 'messages', 'target': 1, 'reward': 50},
@@ -274,7 +332,9 @@ ACHIEVEMENTS = {
     'chromosomes_20': {'title': '🔬 Профессор генетики', 'desc': 'Измерить хромосомы 20 раз', 'stat': 'chromosomes_check', 'target': 20, 'reward': 500},
     'smeh_10': {'title': '😂 Душа компании', 'desc': 'Получить 10 очков Смехуятинки', 'stat': 'smeh_check', 'target': 10, 'reward': 400},
     'pet_care_20': {'title': '🐾 Заботливый хозяин', 'desc': 'Покормить или искупать питомца 20 раз', 'stat': 'pet_care', 'target': 20, 'reward': 500},
-    'first_rob': {'title': '🥷 Карманник', 'desc': 'Совершить ограбление участника', 'stat': 'robs', 'target': 1, 'reward': 100}
+    'first_rob': {'title': '🥷 Карманник', 'desc': 'Совершить ограбление участника', 'stat': 'robs', 'target': 1, 'reward': 100},
+    'mines_win': {'title': '💣 Опытный сапёр', 'desc': 'Успешно забрать выигрыш в Сапёре', 'stat': 'mines_wins', 'target': 5, 'reward': 500},
+    'wheel_spin': {'title': '🎡 Любимчик Фортуны', 'desc': 'Крутануть Колесо Фортуны 10 раз', 'stat': 'wheel_spins', 'target': 10, 'reward': 600}
 }
 
 DAILY_TASKS = {
@@ -295,7 +355,6 @@ WEEKLY_TASKS = [
     ('dice', 'Сыграть в кости 20 раз', 20, 240),
 ]
 
-# --- РП-КОМАНДЫ ---
 RP_ACTIONS = {
     'обнять': {'verb': 'крепко и тепло обнял(а)', 'emoji': '🫂✨'},
     'поцеловать': {'verb': 'нежно поцеловал(а) в щечку', 'emoji': '💋🌸'},
@@ -365,13 +424,17 @@ ALWAYS_ACTIVE_PATTERNS = {
     ]
 }
 
+# Память для активных сессий
 pending_marriages = {}
 active_bj_games = {}
 active_rps_games = {}
 active_drops = {}
+active_mines = {}
+active_dick_duels = {}
+current_quiz = {'question': None, 'answer': None, 'reward': 0, 'chat_id': None}
 
 # ---------------------------------------------------------
-# БЛОК РАБОТЫ С ДАННЫМИ (JSON + TELEGRAM BACKUP)
+# БАЗА ДАННЫХ И БЕКАПЫ
 # ---------------------------------------------------------
 def load_data():
     data = {
@@ -435,37 +498,36 @@ db = load_data()
 def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
-        BotCommand('profile', '👤 Ваш профиль, статистика и портфель'),
-        BotCommand('bank', '🏦 Ня-Банк и накопительный депозит'),
-        BotCommand('case', '📦 Открыть ежедневный бесплатный кейс'),
-        BotCommand('lottery', '🎟 Лотерея и покупка билетов'),
-        BotCommand('business', '🏢 Бизнесы и пассивный доход'),
+        BotCommand('profile', '👤 Профиль, статы и транспорт'),
+        BotCommand('wheel', '🎡 Бесплатное Колесо Фортуны'),
+        BotCommand('mines', '💣 Игра Сапёр (Мины)'),
+        BotCommand('dick', '🍆 Измерить размер писюна'),
+        BotCommand('fap', '💦 Сделать ежедневный фап'),
+        BotCommand('garage', '🏎 Гараж и личный транспорт'),
+        BotCommand('cook', '🍳 Приготовить пойманную еду'),
+        BotCommand('walk', '🦮 Отправить питомца на прогулку'),
+        BotCommand('bank', '🏦 Ня-Банк и депозиты'),
+        BotCommand('case', '📦 Ежедневный бесплатный кейс'),
+        BotCommand('lottery', '🎟 Лотерея джекпота'),
+        BotCommand('business', '🏢 Бизнесы 2.0 и прокачка'),
+        BotCommand('collect', '💰 Собрать прибыль предприятий'),
         BotCommand('family', '💍 Информация о браке и семье'),
         BotCommand('market', '📈 Крипто-биржа и котировки'),
-        BotCommand('work', '💼 Работа и вакансии'),
-        BotCommand('train', '🎓 Получить опыт работы'),
+        BotCommand('work', '💼 Биржа труда и вакансии'),
+        BotCommand('train', '🎓 Тренировка опыта работы'),
         BotCommand('pet', '🐾 Ваш питомец и уход'),
-        BotCommand('feed', '🍖 Покормить питомца'),
-        BotCommand('wash', '🧼 Помыть питомца'),
-        BotCommand('sell', '💰 Продать улов и трофеи'),
-        BotCommand('achievements', '🏆 Ваши достижения и награды'),
-        BotCommand('balance', '💵 Проверить баланс коинов'),
-        BotCommand('bonus', '🎁 Ежечасовой бонус коинов'),
-        BotCommand('shop', '🏪 Магазин (значки, кольца, питомцы)'),
-        BotCommand('tasks', '📋 Ежедневные и недельные задания'),
-        BotCommand('chromosomes', '🧬 Измерить уровень хромосом'),
-        BotCommand('history', '📜 История рестов участника'),
+        BotCommand('gear', '🎣 Магазин удочек и луков'),
+        BotCommand('fish', '🎣 Отправиться на рыбалку'),
+        BotCommand('hunt', '🏹 Отправиться на охоту'),
+        BotCommand('sell', '💰 Продать весь улов и дичь'),
         BotCommand('bj', '🃏 Сыграть в Блэкджек (21)'),
-        BotCommand('fish', '🎣 Пойти на рыбалку'),
-        BotCommand('hunt', '🏹 Пойти на охоту'),
-        BotCommand('dice', '🎲 Сыграть в кости'),
-        BotCommand('slots', '🎰 Сыграть в слоты'),
-        BotCommand('iq', '🧠 Измерить уровень IQ'),
-        BotCommand('fat', '🥩 Измерить процент жира'),
-        BotCommand('foot', '🦶 Измерить размер пятки'),
-        BotCommand('top', '🏆 Топы участников с кнопками'),
-        BotCommand('settings', '⚙️ Настройки бота (для админов)'),
-        BotCommand('help', 'ℹ️ Полная справка по всем разделам')
+        BotCommand('dice', '🎲 Кости'),
+        BotCommand('slots', '🎰 Слоты'),
+        BotCommand('tasks', '📋 Задания и квесты'),
+        BotCommand('top', '🏆 Таблицы лидеров с кнопками'),
+        BotCommand('history', '📜 История рестов участника'),
+        BotCommand('settings', '⚙️ Настройки бота'),
+        BotCommand('help', 'ℹ️ Полный справочник по всем командам')
     ]
     try:
         bot.set_my_commands(commands)
@@ -507,7 +569,7 @@ def get_market_data():
             old_p = info.get('price', 10.0)
             volatility = info.get('volatility', 0.2)
             pct = random.uniform(-volatility, volatility)
-            new_p = round(max(info.get('min_price', 1.0), min(info.get('max_price', 1000.0), old_p * (1 + pct))), 2)
+            new_p = round(max(info.get('min_price', 1.0), min(info.get('max_price', 3500.0), old_p * (1 + pct))), 2)
             info['old_price'] = old_p
             info['price'] = new_p
             info['last_update'] = now
@@ -544,6 +606,21 @@ def get_account_level(exp):
     filled = int(percent * 8)
     bar = "█" * filled + "░" * (8 - filled)
     return lvl, exp, next_tier_exp, bar
+
+
+def get_user_cd_reduction(econ):
+    reduction = 0.0
+    veh = econ.get('vehicle')
+    if veh and veh in VEHICLES:
+        reduction += VEHICLES[veh]['cd_cut']
+
+    active_t = econ.get('active_title')
+    if active_t and active_t in TITLES:
+        t_info = TITLES[active_t]
+        if t_info.get('buff') == 'cd_reduction':
+            reduction += (t_info['val'] / 100.0)
+
+    return min(0.60, reduction)
 
 
 def update_pet_stats(pet):
@@ -609,12 +686,19 @@ def get_user_econ(user_id=None, user_tag=None):
             'iq': 100,
             'fat': 20,
             'foot_size': 25,
+            'dick_size': 15,
+            'last_dick_time': 0,
+            'fap_count': 0,
+            'fap_date': '',
+            'last_fap_time': 0,
             'chromosomes': 46,
             'last_hourly': 0,
             'last_iq_time': 0,
             'last_fat_time': 0,
             'last_foot_time': 0,
             'last_chromosomes_time': 0,
+            'last_wheel_time': 0,
+            'last_pet_walk': 0,
             'badge': None,
             'inventory': [],
             'titles': [],
@@ -625,7 +709,11 @@ def get_user_econ(user_id=None, user_tag=None):
             'active_ring': None,
             'marriage': None,
             'businesses': {},
+            'biz_levels': {},
             'last_biz_collect': time.time(),
+            'vehicle': None,
+            'equipped_rod': None,
+            'equipped_bow': None,
             'daily_tasks_date': '',
             'daily_progress': {},
             'daily_claimed': [],
@@ -634,6 +722,7 @@ def get_user_econ(user_id=None, user_tag=None):
             'weekly_claimed': [],
             'fish_inventory': {},
             'hunt_inventory': {},
+            'cooked_meals': 0,
             'crypto_portfolio': {},
             'last_fish_time': 0,
             'last_hunt_time': 0,
@@ -664,17 +753,21 @@ def get_user_econ(user_id=None, user_tag=None):
 
     for field, default in [
         ('inventory', []), ('account_exp', 0), ('smeh', 0), ('iq', 100),
-        ('fat', 20), ('foot_size', 25), ('chromosomes', 46), ('last_chromosomes_time', 0),
-        ('rest_rewards_count', 0), ('titles', []), ('active_title', None), ('custom_title', None),
-        ('has_custom_title_cert', False), ('rings', []), ('active_ring', None), ('marriage', None),
-        ('businesses', {}), ('last_biz_collect', time.time()), ('daily_tasks_date', ''),
+        ('fat', 20), ('foot_size', 25), ('dick_size', 15), ('last_dick_time', 0),
+        ('fap_count', 0), ('fap_date', ''), ('last_fap_time', 0),
+        ('chromosomes', 46), ('last_chromosomes_time', 0), ('last_wheel_time', 0),
+        ('last_pet_walk', 0), ('rest_rewards_count', 0), ('titles', []),
+        ('active_title', None), ('custom_title', None), ('has_custom_title_cert', False),
+        ('rings', []), ('active_ring', None), ('marriage', None), ('businesses', {}),
+        ('biz_levels', {}), ('last_biz_collect', time.time()), ('vehicle', None),
+        ('equipped_rod', None), ('equipped_bow', None), ('daily_tasks_date', ''),
         ('daily_progress', {}), ('daily_claimed', []), ('weekly_tasks_yearweek', ''),
         ('weekly_progress', {}), ('weekly_claimed', []), ('fish_inventory', {}),
-        ('hunt_inventory', {}), ('crypto_portfolio', {}), ('last_fish_time', 0),
-        ('last_hunt_time', 0), ('achievements', []), ('stats', {}), ('work_exp', 0),
-        ('last_work_time', 0), ('last_train_time', 0), ('pet', None),
-        ('bank_deposit', 0), ('last_bank_calc', time.time()), ('last_case_time', 0),
-        ('last_rob_time', 0)
+        ('hunt_inventory', {}), ('cooked_meals', 0), ('crypto_portfolio', {}),
+        ('last_fish_time', 0), ('last_hunt_time', 0), ('achievements', []),
+        ('stats', {}), ('work_exp', 0), ('last_work_time', 0), ('last_train_time', 0),
+        ('pet', None), ('bank_deposit', 0), ('last_bank_calc', time.time()),
+        ('last_case_time', 0), ('last_rob_time', 0)
     ]:
         if field not in u_data:
             u_data[field] = default
@@ -695,7 +788,12 @@ def get_user_econ(user_id=None, user_tag=None):
 
 def add_account_exp(user_id, user_tag, exp_amount=1):
     econ = get_user_econ(user_id, user_tag)
-    econ['account_exp'] = econ.get('account_exp', 0) + exp_amount
+    active_t = econ.get('active_title')
+    bonus = 1.0
+    if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'exp_bonus':
+        bonus += (TITLES[active_t]['val'] / 100.0)
+
+    econ['account_exp'] = econ.get('account_exp', 0) + int(exp_amount * bonus)
     save_data(send_backup=False)
 
 
@@ -744,7 +842,7 @@ def log_event(event_type, message_text):
         clean_text = re.sub(r'&lt;b&gt;(.*?)&lt;/b&gt;', r'<b>\1</b>', clean_text)
         clean_text = re.sub(r'&lt;code&gt;(.*?)&lt;/code&gt;', r'<code>\1</code>', clean_text)
         clean_text = re.sub(r'&lt;a href="(.*?)"&gt;(.*?)&lt;/a&gt;', r'<a href="\1">\2</a>', clean_text)
-        
+
         full_msg = f"📌 <b>[{html.escape(event_type)}]</b>\n⏱ <i>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>\n\n{clean_text}"
         bot.send_message(LOG_CHANNEL_ID, full_msg, parse_mode='HTML')
     except Exception as e:
@@ -886,7 +984,10 @@ def format_daily_tasks(user_id, user_tag):
     return '\n'.join(lines)
 
 
-def cooldown_text(last_time, cooldown):
+def cooldown_text(last_time, cooldown, user_econ=None):
+    if user_econ:
+        cooldown = int(cooldown * (1.0 - get_user_cd_reduction(user_econ)))
+
     left = int(cooldown - (time.time() - last_time))
     if left <= 0:
         return None
@@ -1365,7 +1466,7 @@ def apply_rest(chat_id, user_name, duration_text, reason='Не указана', 
 
 
 # ---------------------------------------------------------
-# ФОНОВЫЕ ПОТОКИ: ЛЕТО И СЛУЧАЙНЫЕ ДРОПЫ
+# ФОНОВЫЕ ПОТОКИ: ЛЕТО, ДРОПЫ, ВИКТОРИНЫ, НОВОСТИ БИРЖИ
 # ---------------------------------------------------------
 def summer_music_worker():
     while True:
@@ -1413,14 +1514,14 @@ def summer_music_worker():
 
 def random_chat_drops_worker():
     while True:
-        time.sleep(random.randint(7200, 10800))
+        time.sleep(random.randint(5400, 9000))
         try:
             active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
             if not active_chats:
                 continue
 
             target_chat = int(random.choice(active_chats))
-            reward = random.randint(50, 200)
+            reward = random.randint(60, 250)
             drop_id = f"drop_{int(time.time())}_{random.randint(100, 999)}"
 
             active_drops[drop_id] = {
@@ -1444,14 +1545,96 @@ def random_chat_drops_worker():
             print(f"Ошибка спавна дропа: {e}")
 
 
-def start_background_threads():
-    t1 = threading.Thread(target=summer_music_worker)
-    t1.daemon = True
-    t1.start()
+def market_news_worker():
+    news_templates = [
+        ("🚀 <b>ЭКСТРЕННЫЕ НОВОСТИ БИРЖИ!</b>\nКрупный венчурный фонд инвестировал 10,000,000 в <b>{name}</b>! Курс взлетает!", 'pump', 0.25, 0.45),
+        ("🔥 <b>ПАМП НА НЯ-СТРИТ!</b>\nПопулярный блогер выпустил обзор на <b>{name}</b>! Монета летит на Луну!", 'pump', 0.20, 0.35),
+        ("📉 <b>ОБВАЛ РЫНКА!</b>\nХакеры совершили атаку на смарт-контракт <b>{name}</b>! Панические распродажи!", 'dump', 0.20, 0.35),
+        ("⚠️ <b>РЕГУЛЯТОРЫ В ДЕЛЕ!</b>\nВведены новые ограничения на торговлю <b>{name}</b>! Временная просадка курса!", 'dump', 0.15, 0.30)
+    ]
 
-    t2 = threading.Thread(target=random_chat_drops_worker)
-    t2.daemon = True
-    t2.start()
+    while True:
+        time.sleep(random.randint(7200, 14400))
+        try:
+            market = get_market_data()
+            ticker = random.choice(list(market.keys()))
+            asset = market[ticker]
+            template, mode, min_pct, max_pct = random.choice(news_templates)
+
+            pct = random.uniform(min_pct, max_pct)
+            old_p = asset['price']
+
+            if mode == 'pump':
+                new_p = round(min(asset.get('max_price', 3500.0), old_p * (1 + pct)), 2)
+            else:
+                new_p = round(max(asset.get('min_price', 1.0), old_p * (1 - pct)), 2)
+
+            asset['old_price'] = old_p
+            asset['price'] = new_p
+            asset['last_update'] = time.time()
+            save_data(send_backup=False)
+
+            news_text = template.format(name=asset['name']) + f"\n\n📊 Новый курс <b>{ticker}</b>: <b>{new_p:.2f} 🪙</b> (Было: {old_p:.2f} 🪙)"
+
+            active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
+            for str_chat_id in active_chats:
+                try:
+                    bot.send_message(int(str_chat_id), news_text, parse_mode='HTML')
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"Ошибка в генераторе новостей рынка: {e}")
+
+
+def chat_quiz_worker():
+    quiz_questions = [
+        ("🧮 <b>БЫСТРАЯ МАТЕМАТИКА</b>\nСколько будет: <code>45 + 18 * 3</code>?", "99", 150),
+        ("🧮 <b>БЫСТРАЯ МАТЕМАТИКА</b>\nСколько будет: <code>150 - 45 * 2</code>?", "60", 120),
+        ("🧮 <b>БЫСТРАЯ МАТЕМАТИКА</b>\nСколько будет: <code>12 * 12 + 6</code>?", "150", 140),
+        ("🔤 <b>АНАГРАММА</b>\nСоберите слово из букв: <b>К О И Н Е М Е Т</b>", "экономика", 180),
+        ("🔤 <b>АНАГРАММА</b>\nСоберите слово из букв: <b>Р Е С Т О П У К</b>", "проступок", 180),
+        ("🔤 <b>АНАГРАММА</b>\nСоберите слово из букв: <b>К О Т И К М Я У</b>", "мяукотик", 200),
+        ("🎬 <b>УГАДАЙ ФИЛЬМ ПО ЭМОДЗИ</b>\n🚢 🧊 👩‍❤️‍👨 🎻", "титаник", 180),
+        ("🎬 <b>УГАДАЙ ФИЛЬМ ПО ЭМОДЗИ</b>\n🧙‍♂️ 🧝‍♂️ 💍 🌋 👁", "властелин колец", 220),
+        ("🎬 <b>УГАДАЙ МУЛЬТФИЛЬМ ПО ЭМОДЗИ</b>\n🦁 👑 🐗 🐒 🌅", "король лев", 180),
+        ("🎬 <b>УГАДАЙ ФИЛЬМ ПО ЭМОДЗИ</b>\n⚡️ 🧙‍♂️ 👓 🏰 🚂", "гарри поттер", 180),
+    ]
+
+    while True:
+        time.sleep(random.randint(4800, 8400))
+        try:
+            active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
+            if not active_chats:
+                continue
+
+            target_chat = int(random.choice(active_chats))
+            q_data = random.choice(quiz_questions)
+
+            current_quiz['question'] = q_data[0]
+            current_quiz['answer'] = q_data[1].lower().strip()
+            current_quiz['reward'] = q_data[2]
+            current_quiz['chat_id'] = target_chat
+
+            msg_text = (
+                "⚡️ <b>ЭКСПРЕСС-ВИКТОРИНА В ЧАТЕ!</b>\n"
+                "──────────────────────\n"
+                f"{q_data[0]}\n\n"
+                f"💰 Награда первому верному ответу: <b>+{q_data[2]} Ня-коинов 🪙</b>\n"
+                "──────────────────────\n"
+                "<i>Просто напишите правильный ответ в чат!</i>"
+            )
+            bot.send_message(target_chat, msg_text, parse_mode='HTML')
+
+        except Exception as e:
+            print(f"Ошибка спавна викторины: {e}")
+
+
+def start_background_threads():
+    threading.Thread(target=summer_music_worker, daemon=True).start()
+    threading.Thread(target=random_chat_drops_worker, daemon=True).start()
+    threading.Thread(target=market_news_worker, daemon=True).start()
+    threading.Thread(target=chat_quiz_worker, daemon=True).start()
 
 
 # ---------------------------------------------------------
@@ -1483,29 +1666,29 @@ def goodbye_left_member(message):
 
 
 # ---------------------------------------------------------
-# ИНТЕРАКТИВНОЕ МЕНЮ СПРАВКИ
+# НАВИГАЦИОННОЕ МЕНЮ
 # ---------------------------------------------------------
 def get_main_menu_markup():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🌴 Ресты и Отпуск", callback_data="help_rests"),
-        InlineKeyboardButton("🏢 Бизнес и Доход", callback_data="help_biz")
+        InlineKeyboardButton("🏢 Бизнес 2.0 и Гараж", callback_data="help_biz")
     )
     markup.add(
-        InlineKeyboardButton("🎰 Азартные игры", callback_data="help_games"),
-        InlineKeyboardButton("🏦 Ня-Банк и Вклады", callback_data="help_bank")
+        InlineKeyboardButton("💣 Сапёр и Игры", callback_data="help_games"),
+        InlineKeyboardButton("🏦 Ня-Банк и Депозит", callback_data="help_bank")
     )
     markup.add(
-        InlineKeyboardButton("💍 Семья и Браки", callback_data="help_family"),
+        InlineKeyboardButton("💍 Семья и Подарки", callback_data="help_family"),
         InlineKeyboardButton("📈 Крипто-Биржа", callback_data="help_crypto")
     )
     markup.add(
-        InlineKeyboardButton("🐾 Питомцы и Работа", callback_data="help_pets"),
-        InlineKeyboardButton("🧬 Замеры параметров", callback_data="help_sims")
+        InlineKeyboardButton("🐾 Питомцы и Охота", callback_data="help_pets"),
+        InlineKeyboardButton("🍆 Мемы и Замеры", callback_data="help_sims")
     )
     markup.add(
-        InlineKeyboardButton("🎁 Ивенты и Кейсы", callback_data="help_events"),
-        InlineKeyboardButton("💰 Экономика и Профиль", callback_data="help_econ")
+        InlineKeyboardButton("🎡 Колесо Фортуны", callback_data="help_wheel"),
+        InlineKeyboardButton("💰 Экономика и Квесты", callback_data="help_econ")
     )
     return markup
 
@@ -1522,171 +1705,501 @@ def send_welcome(message):
 
 
 # ---------------------------------------------------------
-# ФУНКЦИИ УХОДА ЗА ПИТОМЦЕМ
+# ИДЕЯ #3: КОЛЕСО ФОРТУНЫ (/wheel, /рулетка)
 # ---------------------------------------------------------
-def feed_pet(user_id, user_tag):
-    econ = get_user_econ(user_id, user_tag)
-    pet = econ.get('pet')
+@bot.message_handler(commands=['wheel', 'рулетка', 'колесо'])
+def cmd_wheel(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
 
-    if not pet:
-        return False, "❌ У вас нет питомца! Купите его в магазине: <code>магазин</code> или <code>/shop</code>."
+    now = time.time()
+    last_spin = econ.get('last_wheel_time', 0)
+    cooldown = 43200
 
-    update_pet_stats(pet)
-
-    if econ['balance'] < 20:
-        return False, "❌ На вкусный корм питомцу нужно <b>20 Ня-коинов</b>!"
-
-    if pet.get('hunger', 100) >= 100:
-        return False, f"😋 <b>{pet['name']}</b> уже полностью сыт(а) (100%)!"
-
-    econ['balance'] -= 20
-    pet['hunger'] = min(100, pet.get('hunger', 100) + 40)
-    check_achievements(user_id, user_tag, 'pet_care', 1)
-    save_data()
-    return True, f"🍖 Вы вкусно покормили <b>{pet['name']}</b>!\nСытость: <b>{pet['hunger']}%</b> (-20 🪙)"
-
-
-def wash_pet(user_id, user_tag):
-    econ = get_user_econ(user_id, user_tag)
-    pet = econ.get('pet')
-
-    if not pet:
-        return False, "❌ У вас нет питомца! Купите его в магазине: <code>магазин</code> или <code>/shop</code>."
-
-    update_pet_stats(pet)
-
-    if econ['balance'] < 15:
-        return False, "❌ На мыльную пену нужно <b>15 Ня-коинов</b>!"
-
-    if pet.get('cleanliness', 100) >= 100:
-        return False, f"✨ <b>{pet['name']}</b> уже чист(а) как стеклышко (100%)!"
-
-    econ['balance'] -= 15
-    pet['cleanliness'] = min(100, pet.get('cleanliness', 100) + 50)
-    check_achievements(user_id, user_tag, 'pet_care', 1)
-    save_data()
-    return True, f"🧼 Вы искупали <b>{pet['name']}</b> в теплой ванне!\nЧистота: <b>{pet['cleanliness']}%</b> (-15 🪙)"
-
-
-# ---------------------------------------------------------
-# ОБРАБОТЧИКИ НАСТРОЕК И ЭКСПОРТА
-# ---------------------------------------------------------
-@bot.message_handler(commands=['settings'])
-def chat_settings_cmd(message):
-    chat_id = message.chat.id
-    if not is_admin(chat_id, message.from_user.id):
-        bot.reply_to(message, '❌ Эта команда доступна только администраторам!')
+    left = cooldown_text(last_spin, cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ <b>Колесо Фортуны доступно раз в 12 часов!</b>\nСледующее бесплатное вращение через: <b>{left}</b>.", parse_mode='HTML')
         return
-    sett = get_chat_settings(chat_id)
+
+    econ['last_wheel_time'] = now
+
+    sectors = [
+        ('coins_100', '💰 100 Ня-коинов', 30),
+        ('coins_300', '💵 300 Ня-коинов', 20),
+        ('jackpot', '💎 ДЖЕКПОТ 1,500 🪙', 5),
+        ('fish', '🐟 Случайный редкий улов', 15),
+        ('beast', '🏹 Охотничий трофей', 15),
+        ('exp', '⭐ +80 Опыта профиля', 10),
+        ('mini_rest', '🌴 Мини-курорт (Рест на 3 минуты)', 5)
+    ]
+
+    weights = [s[2] for s in sectors]
+    win_sector = random.choices(sectors, weights=weights, k=1)[0]
+    win_key = win_sector[0]
+
+    prize_text = ""
+    if win_key == 'coins_100':
+        econ['balance'] += 100
+        prize_text = "💰 Вы выиграли <b>+100 Ня-коинов 🪙</b>!"
+    elif win_key == 'coins_300':
+        econ['balance'] += 300
+        prize_text = "💵 Вы выиграли <b>+300 Ня-коинов 🪙</b>!"
+    elif win_key == 'jackpot':
+        econ['balance'] += 1500
+        prize_text = "💎👑 <b>МЕГА ДЖЕКПОТ! +1,500 Ня-коинов 🪙</b>!"
+        log_event('КОЛЕСО: ДЖЕКПОТ', f'{make_link(message.chat.id, user_name, user_id, ping=False)} сорвал джекпот Колеса Фортуны (1,500 🪙)!')
+    elif win_key == 'fish':
+        trophy = random.choice(FISH_TYPES)[0]
+        add_inventory_item(econ['fish_inventory'], trophy)
+        prize_text = f"🐟 Вы выловили: <b>{trophy}</b>!"
+    elif win_key == 'beast':
+        trophy = random.choice(HUNT_TYPES)[0]
+        add_inventory_item(econ['hunt_inventory'], trophy)
+        prize_text = f"🏹 Вы добыли: <b>{trophy}</b>!"
+    elif win_key == 'exp':
+        add_account_exp(user_id, user_name, 80)
+        prize_text = "⭐ Вы получили <b>+80 EXP опыта профиля</b>!"
+    elif win_key == 'mini_rest':
+        apply_rest(message.chat.id, user_name, "3 минуты", "Выигрыш в Колесе Фортуны", user_id)
+        prize_text = "🌴 Вы выиграли <b>3-минутный шуточный рест на курорте</b>!"
+
+    check_achievements(user_id, user_name, 'wheel_spins', 1, message.chat.id)
+    save_data()
+
+    anim_text = (
+        "🎡 <b>КОЛЕСО ФОРТУНЫ КРУТИТСЯ...</b>\n\n"
+        "▫️ [ 💰 100 🪙 ]\n"
+        "▫️ [ 💵 300 🪙 ]\n"
+        "▫️ [ 💎 ДЖЕКПОТ 1,500 🪙 ]\n"
+        "▫️ [ 🐟 Рыба / 🏹 Дичь ]\n"
+        "▫️ [ 🌴 Мини-Рест ]\n\n"
+        f"🎉 <b>Стрелка остановилась на секторе:</b>\n👉 <b>{win_sector[1]}</b>!\n\n"
+        f"{prize_text}"
+    )
+    bot.reply_to(message, anim_text, parse_mode='HTML')
+
+
+# ---------------------------------------------------------
+# МИНИ-ИГРА: САПЁР / МИНЫ (/mines)
+# ---------------------------------------------------------
+def render_mines_board(game_id):
+    game = active_mines.get(game_id)
+    if not game:
+        return None, None
+
+    markup = InlineKeyboardMarkup(row_width=4)
+    buttons = []
+
+    for i in range(16):
+        if i in game['revealed']:
+            buttons.append(InlineKeyboardButton("💎", callback_data=f"mines_noop_{game_id}"))
+        elif game['finished'] and i in game['bombs']:
+            buttons.append(InlineKeyboardButton("💣", callback_data=f"mines_noop_{game_id}"))
+        elif game['finished']:
+            buttons.append(InlineKeyboardButton("▫️", callback_data=f"mines_noop_{game_id}"))
+        else:
+            buttons.append(InlineKeyboardButton("❓", callback_data=f"mines_open_{game_id}_{i}"))
+
+    for row_idx in range(0, 16, 4):
+        markup.add(*buttons[row_idx:row_idx+4])
+
+    if not game['finished'] and len(game['revealed']) > 0:
+        cashout_amount = int(game['bet'] * game['current_multiplier'])
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x)", callback_data=f"mines_cashout_{game_id}"))
+
     text = (
-        '⚙️ <b>КОНФИГУРАЦИЯ БОТА ДЛЯ ЧАТА:</b>\n'
-        '──────────────────────\n'
-        f"• Макс. срок реста: <b>{sett['max_days']} дней</b>\n"
-        f"• Авто-удаление сообщений тех, кто в ресте: <b>{'Включено' if sett['delete_rest_msg'] else 'Выключено'}</b>\n"
-        f"• Часовой пояс: <b>UTC+{sett['timezone_offset']} (Киев / МСК)</b>\n"
-        f"• Летний музыкальный таймер: <b>{'Включен' if sett.get('summer_music', True) else 'Выключен'}</b>\n"
-        f"• Время напоминания: <b>за {sett['remind_minutes']} мин</b>\n"
-        '──────────────────────'
+        f"💣 <b>САПЁР (ПОЛЕ С МИНАМИ 4х4)</b>\n"
+        f"──────────────────────\n"
+        f"👤 Игрок: {game['user_tag']}\n"
+        f"💰 Ставка: <b>{game['bet']} 🪙</b> | Бомб на поле: <b>{len(game['bombs'])} шт.</b>\n"
+        f"💎 Найдено кристаллов: <b>{len(game['revealed'])}/13</b>\n"
+        f"📈 Множитель: <b>{game['current_multiplier']:.2f}x</b>\n"
+        f"──────────────────────\n"
+        f"<i>Открывайте безопасные клетки или заберите куш!</i>"
     )
+    return text, markup
+
+
+@bot.message_handler(commands=['mines', 'мины', 'сапер'])
+def cmd_mines(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+
+    match = re.search(r'(?:/mines|мины|сапер)\s*(\d+)?', message.text, re.IGNORECASE)
+    bet = int(match.group(1)) if match and match.group(1) else 50
+
+    if bet <= 0:
+        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
+        return
+
+    if econ['balance'] < bet:
+        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙")
+        return
+
+    econ['balance'] -= bet
+    save_data()
+
+    game_id = f"m_{user_id}_{int(time.time())}"
+    bombs = set(random.sample(range(16), 3))
+
+    active_mines[game_id] = {
+        'user_id': user_id,
+        'user_tag': user_name,
+        'bet': bet,
+        'bombs': bombs,
+        'revealed': set(),
+        'current_multiplier': 1.0,
+        'finished': False
+    }
+
+    text, markup = render_mines_board(game_id)
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+
+
+# ---------------------------------------------------------
+# МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
+# ---------------------------------------------------------
+@bot.message_handler(commands=['dick', 'писюн', 'замер'])
+def cmd_dick(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    chat_id = message.chat.id
+    econ = get_user_econ(user_id, user_name)
+
+    now = time.time()
+    last_time = econ.get('last_dick_time', 0)
+    cooldown = 1200
+
+    left = cooldown_text(last_time, cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Замер писюна доступен раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
+        return
+
+    change = random.choice([-2, -1, 1, 1, 2, 3, 4])
+    cur_size = econ.get('dick_size', 15)
+    new_size = max(1, min(45, cur_size + change))
+
+    econ['dick_size'] = new_size
+    econ['last_dick_time'] = now
+    save_data()
+
+    sign = "+" if change >= 0 else ""
+    u_link = make_link(chat_id, user_name, user_id, ping=True)
+
+    if new_size >= 30:
+        comment = "🍆 Настоящий гигант чата! Все трепещут!"
+    elif new_size >= 18:
+        comment = "🔥 Солидный и внушительный размерчик!"
+    elif new_size >= 10:
+        comment = "👌 Классический средний размер."
+    else:
+        comment = "🤏 Кажется, на улице было слишком холодно..."
+
+    bot.reply_to(
+        message,
+        f"🍆 <b>АНАТОМИЧЕСКИЙ ЗАМЕР:</b> {u_link}\n"
+        f"──────────────────────\n"
+        f"Размер писюна: <b>{new_size} см ({sign}{change} см) 📏</b>\n"
+        f"📝 <i>{comment}</i>\n"
+        f"──────────────────────",
+        parse_mode='HTML'
+    )
+
+
+@bot.message_handler(commands=['fap', 'дроч', 'подрочить'])
+def cmd_fap(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+
+    today = daily_task_date()
+    if econ.get('fap_date') != today:
+        econ['fap_date'] = today
+        econ['fap_count'] = 0
+
+    now = time.time()
+    last_fap = econ.get('last_fap_time', 0)
+    cooldown = 600
+
+    left = cooldown_text(last_fap, cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Рука должна отдохнуть! Подождите: <b>{left}</b>.", parse_mode='HTML')
+        return
+
+    econ['fap_count'] = econ.get('fap_count', 0) + 1
+    econ['last_fap_time'] = now
+    count = econ['fap_count']
+    save_data()
+
+    if count == 1:
+        rank = "🌱 Начинающий любитель"
+    elif count <= 3:
+        rank = "🥋 Уверенный практик"
+    elif count <= 6:
+        rank = "🔥 Магистр мозолей"
+    elif count <= 10:
+        rank = "⚡️ Скоростной виртуоз"
+    else:
+        rank = "💀 Кибер-рука (Остановись, отвалится!)"
+
+    u_link = make_link(message.chat.id, user_name, user_id, ping=True)
+    bot.reply_to(
+        message,
+        f"💦 <b>СЕАНС ФАПА УСПЕШНО ЗАВЕРШЕН!</b>\n"
+        f"──────────────────────\n"
+        f"👤 Участник: {u_link}\n"
+        f"📊 Подходов за сегодня: <b>{count} раз(а)</b>\n"
+        f"🎖 Ранг: <b>{rank}</b>\n"
+        f"──────────────────────",
+        parse_mode='HTML'
+    )
+
+
+# ---------------------------------------------------------
+# ГАРАЖ И ТРАНСПОРТ (/garage)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['garage', 'гараж'])
+def cmd_garage(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+
+    cur_veh = econ.get('vehicle')
+    cur_name = VEHICLES[cur_veh]['name'] if cur_veh in VEHICLES else "Пешеход 🚶‍♂️"
+
     markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton('⏳ Лимит дней (14/30/60)', callback_data='set_max_days'),
-        InlineKeyboardButton('🗑 Авто-удаление сообщений', callback_data='toggle_del_msg')
-    )
-    markup.add(
-        InlineKeyboardButton('🎵 Музыка лета (Вкл/Выкл)', callback_data='toggle_summer_music'),
-        InlineKeyboardButton('🔔 Напоминание (10мин/1ч/24ч)', callback_data='set_remind_time')
+    for v_id, v_info in VEHICLES.items():
+        markup.add(InlineKeyboardButton(f"{v_info['name']} — {v_info['price']} 🪙 ({v_info['desc']})", callback_data=f"buy_veh_{v_id}"))
+
+    text = (
+        f"🏎 <b>ЛИЧНЫЙ АВТОГАРАЖ</b>\n"
+        f"──────────────────────\n"
+        f"👤 Владелец: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
+        f"🚘 Текущий транспорт: <b>{cur_name}</b>\n\n"
+        f"<i>Транспорт навсегда снижает все кулдауны на работу, охоту, рыбалку и замеры!</i>\n"
+        f"──────────────────────\n"
+        f"Выберите технику для покупки:"
     )
     bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
 
-@bot.message_handler(commands=['export'])
-def export_csv(message):
-    chat_id = message.chat.id
-    str_chat = str(chat_id)
-    if not is_admin(chat_id, message.from_user.id):
-        return
-    if str_chat not in db['history'] or not db['history'][str_chat]:
-        bot.reply_to(message, '📊 История рестов пуста, нет данных для экспорта.')
+# ---------------------------------------------------------
+# КУЛИНАРИЯ (/cook, приготовить)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['cook', 'кулинария', 'приготовить'])
+def cmd_cook(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+
+    fish_count = sum(econ.get('fish_inventory', {}).values())
+    hunt_count = sum(econ.get('hunt_inventory', {}).values())
+
+    if fish_count == 0 and hunt_count == 0:
+        bot.reply_to(message, "🎒 У вас нет пойманной рыбы или мяса дичи для приготовления!\nСходите на <code>/fish</code> или <code>/hunt</code>.", parse_mode='HTML')
         return
 
-    file_path = f'rests_export_{chat_id}.csv'
-    with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f, delimiter=';')
-        writer.writerow(['Дата', 'Действие', 'Пользователь', 'Длительность', 'Причина', 'User ID'])
-        for u, items in db['history'][str_chat].items():
-            for it in items:
-                writer.writerow([
-                    it.get('date', ''),
-                    it.get('action', 'Рест'),
-                    u,
-                    it.get('duration', ''),
-                    it.get('reason', ''),
-                    it.get('user_id', '')
-                ])
-    with open(file_path, 'rb') as f:
-        bot.send_document(chat_id, f, caption='📊 <b>Полный экспорт истории рестов в CSV</b>', parse_mode='HTML')
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    econ['fish_inventory'] = {}
+    econ['hunt_inventory'] = {}
+    total_items = fish_count + hunt_count
+    econ['cooked_meals'] = econ.get('cooked_meals', 0) + total_items
+
+    if econ.get('pet'):
+        p = econ['pet']
+        p['hunger'] = 100
+        p['cleanliness'] = min(100, p.get('cleanliness', 100) + 20)
+
+    save_data()
+    bot.reply_to(
+        message,
+        f"🍳 <b>КУЛИНАРНЫЙ ШЕДЕВР ГОТОВ!</b>\n"
+        f"──────────────────────\n"
+        f"Вы приготовили <b>{total_items} порций</b> изысканных блюд! 🍲🍖\n"
+        f"🐾 Питомец накормлен до отвала (Сытость: <b>100%</b>) без трат коинов!\n"
+        f"──────────────────────",
+        parse_mode='HTML'
+    )
 
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ ИСТОРИИ РЕСТОВ
+# ПРОГУЛКА ПИТОМЦА (/walk, гулять)
 # ---------------------------------------------------------
-@bot.message_handler(commands=['history', 'история'])
-def cmd_history(message):
-    chat_id = message.chat.id
-    str_chat = str(chat_id)
-    target_user, target_user_id, _ = parse_target_and_args(message, '/history')
-    if not target_user:
-        target_user, target_user_id, _ = parse_target_and_args(message, 'история')
+@bot.message_handler(commands=['walk', 'гулять'])
+def cmd_walk_pet(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+    pet = econ.get('pet')
 
-    if not target_user:
-        target_user = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-        target_user_id = message.from_user.id
-
-    clean_u = clean_tag(target_user)
-    chat_hist = db.get('history', {}).get(str_chat, {})
-
-    found_entries = []
-    for h_user, items in chat_hist.items():
-        if h_user.lower() == clean_u.lower():
-            found_entries = items
-            break
-
-    if not found_entries and target_user_id:
-        for h_user, items in chat_hist.items():
-            for it in items:
-                if it.get('user_id') == target_user_id:
-                    found_entries = items
-                    break
-            if found_entries:
-                break
-
-    u_link = make_link(chat_id, target_user, target_user_id, ping=False)
-    if not found_entries:
-        bot.reply_to(message, f"📜 У пользователя {u_link} пока нет записей в истории рестов этого чата.", parse_mode='HTML')
+    if not pet:
+        bot.reply_to(message, "❌ У вас нет питомца! Купите его в <code>/shop</code>.", parse_mode='HTML')
         return
 
-    lines = [
-        f"📜 <b>ИСТОРИЯ РЕСТОВ: {u_link}</b>",
-        "──────────────────────"
+    now = time.time()
+    last_walk = econ.get('last_pet_walk', 0)
+    cooldown = 10800
+
+    left = cooldown_text(last_walk, cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Питомец устал! На следующую прогулку можно через: <b>{left}</b>.", parse_mode='HTML')
+        return
+
+    econ['last_pet_walk'] = now
+
+    events = [
+        ("coins", "откопал(а) под деревом клад с коинами", random.randint(80, 250)),
+        ("fish", "ловко поймал(а) в ручье рыбу", random.choice(FISH_TYPES)[0]),
+        ("gem", "нашел(ла) сияющий кристалл и продал(а) его", random.randint(150, 400)),
+        ("fun", "погонял(а) бабочек и поднял(а) настроение чату", 50)
     ]
-    for idx, entry in enumerate(found_entries[-10:], 1):
-        act = entry.get('action', 'Рест')
-        dur = entry.get('duration', 'Не указана')
-        reas = entry.get('reason', 'Не указана')
-        dt = entry.get('date', '')
-        lines.append(f"{idx}. <b>[{dt}]</b> {act} — <b>{dur}</b>\n   <i>Причина: {html.escape(reas)}</i>")
 
-    lines.append("──────────────────────")
-    lines.append(f"Всего записей в журнале: <b>{len(found_entries)}</b>")
+    ev_type, ev_desc, ev_val = random.choice(events)
+    res_str = ""
 
-    bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
+    if ev_type in ['coins', 'gem', 'fun']:
+        econ['balance'] += ev_val
+        res_str = f"💰 Прибыль: <b>+{ev_val} Ня-коинов 🪙</b>!"
+    elif ev_type == 'fish':
+        add_inventory_item(econ['fish_inventory'], ev_val)
+        res_str = f"🐟 Находка: <b>{ev_val}</b>!"
+
+    pet['pet_exp'] = pet.get('pet_exp', 0) + 25
+    save_data()
+
+    bot.reply_to(
+        message,
+        f"🦮 <b>ПРОГУЛКА С ПИТОМЦЕМ: {pet['name']}</b>\n"
+        f"──────────────────────\n"
+        f"Во время прогулки питомец {ev_desc}!\n"
+        f"{res_str}\n"
+        f"⭐ Опыт питомца: <b>+25 EXP</b>\n"
+        f"──────────────────────",
+        parse_mode='HTML'
+    )
 
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ БАНКА (НЯ-БАНК)
+# МАГАЗИН СНАСТЕЙ (/gear, удочки, луки)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['gear', 'снасти'])
+def cmd_gear(message):
+    markup = InlineKeyboardMarkup()
+    for r_id, r_info in RODS.items():
+        markup.add(InlineKeyboardButton(f"{r_info['name']} — {r_info['price']} 🪙 (+{r_info['luck']}% удачи)", callback_data=f"buy_rod_{r_id}"))
+
+    for b_id, b_info in BOWS.items():
+        markup.add(InlineKeyboardButton(f"{b_info['name']} — {b_info['price']} 🪙 (+{b_info['luck']}% удачи)", callback_data=f"buy_bow_{b_id}"))
+
+    text = (
+        "🎣 <b>МАГАЗИН ПРОФЕССИОНАЛЬНЫХ СНАСТЕЙ</b>\n"
+        "──────────────────────\n"
+        "Удочки и луки многократно увеличивают шанс поймать редкую, мифическую и божественную добычу!\n"
+        "──────────────────────"
+    )
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+
+
+# ---------------------------------------------------------
+# БИЗНЕСЫ 2.0 (ПРОКАЧКА И ДОХОД)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
+def cmd_business(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+    user_biz = econ.setdefault('businesses', {})
+    biz_levels = econ.setdefault('biz_levels', {})
+
+    markup = InlineKeyboardMarkup()
+    for b_id, b_info in BUSINESSES.items():
+        if b_id in user_biz:
+            lvl = biz_levels.get(b_id, 1)
+            upg_cost = b_info['upgrade_cost'] * lvl
+            if lvl < 5:
+                markup.add(InlineKeyboardButton(f"⭐ Улучшить {b_info['name']} до {lvl+1} ур. ({upg_cost} 🪙)", callback_data=f"upg_biz_{b_id}"))
+            else:
+                markup.add(InlineKeyboardButton(f"👑 {b_info['name']} (МАКС. 5 LVL)", callback_data="noop"))
+        else:
+            markup.add(InlineKeyboardButton(f"Купить {b_info['name']} ({b_info['price']} 🪙)", callback_data=f"buy_biz_{b_id}"))
+
+    markup.add(InlineKeyboardButton("💰 Собрать прибыль", callback_data="collect_biz_profit"))
+
+    text = (
+        "🏢 <b>КОММЕРЧЕСКАЯ НЕДВИЖИМОСТЬ И БИЗНЕСЫ 2.0:</b>\n"
+        "──────────────────────\n"
+        "Каждое предприятие можно прокачать до <b>5 уровня</b>, увеличивая доход!\n"
+        "🌴 <i>В ресте действует курортный бонус: +20% к прибыли!</i>\n"
+        "──────────────────────"
+    )
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+
+
+@bot.message_handler(commands=['collect', 'прибыль'])
+def cmd_collect(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+    user_biz = econ.get('businesses', {})
+    biz_levels = econ.get('biz_levels', {})
+
+    if not user_biz:
+        bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>бизнесы</code> для покупки.", parse_mode='HTML')
+        return
+
+    now = time.time()
+    last_collect = econ.get('last_biz_collect', now)
+    hours_passed = (now - last_collect) / 3600.0
+
+    if hours_passed < 0.1:
+        bot.reply_to(message, "⏳ Прибыль еще не накопилась, загляните чуть позже!")
+        return
+
+    base_profit = 0
+    for b_id in user_biz.keys():
+        if b_id in BUSINESSES:
+            lvl = biz_levels.get(b_id, 1)
+            inc = int(BUSINESSES[b_id]['base_income'] * (1 + (lvl - 1) * 0.45) * hours_passed)
+            base_profit += inc
+
+    if base_profit <= 0:
+        bot.reply_to(message, "⏳ Накоплений пока нет, подождите немного!")
+        return
+
+    # Случайный ивент при сборе прибыли (15% шанс)
+    event_text = ""
+    if random.random() < 0.15:
+        if random.random() < 0.70:
+            boost = int(base_profit * 0.5)
+            base_profit += boost
+            event_text = f"\n🌟 <b>Вирусный мем в TikTok!</b> Приток клиентов дал <b>+{boost} 🪙</b>!"
+        else:
+            tax = int(base_profit * 0.15)
+            base_profit -= tax
+            event_text = f"\n⚠️ <b>Плановый аудит оборудования:</b> расход <b>-{tax} 🪙</b>."
+
+    active_t = econ.get('active_title')
+    if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'biz_bonus':
+        bonus_t = int(base_profit * (TITLES[active_t]['val'] / 100.0))
+        base_profit += bonus_t
+        event_text += f"\n👑 Бонус титула: <b>+{bonus_t} 🪙</b>"
+
+    in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(message.chat.id), {}), user_id=user_id, user_name=user_name)
+    if in_rest:
+        rest_bonus = int(base_profit * 0.20)
+        base_profit += rest_bonus
+        event_text += f"\n🌴 Курортный бонус реста (+20%): <b>+{rest_bonus} 🪙</b>"
+
+    econ['balance'] += base_profit
+    econ['last_biz_collect'] = now
+    save_data()
+
+    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{base_profit} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+
+
+# ---------------------------------------------------------
+# ОБРАБОТЧИКИ БАНКА, КЕЙСА, ЛОТЕРЕИ
 # ---------------------------------------------------------
 def render_bank_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -1739,9 +2252,6 @@ def cmd_bank(message):
     render_bank_view(message.chat.id, message.from_user.id, user_name)
 
 
-# ---------------------------------------------------------
-# ОБРАБОТЧИКИ ЕЖЕДНЕВНОГО КЕЙСА
-# ---------------------------------------------------------
 @bot.message_handler(commands=['case', 'кейс', 'сундук'])
 def cmd_case(message):
     user_id = message.from_user.id
@@ -1752,8 +2262,8 @@ def cmd_case(message):
     last_case = econ.get('last_case_time', 0)
     cooldown = 86400
 
-    if now - last_case < cooldown:
-        left = cooldown_text(last_case, cooldown)
+    left = cooldown_text(last_case, cooldown, econ)
+    if left:
         bot.reply_to(message, f"⏳ Бесплатный кейс доступен раз в 24 часа!\nДо следующего открытия: <b>{left}</b>.", parse_mode='HTML')
         return
 
@@ -1793,9 +2303,6 @@ def cmd_case(message):
     )
 
 
-# ---------------------------------------------------------
-# ОБРАБОТЧИКИ ЛОТЕРЕИ
-# ---------------------------------------------------------
 @bot.message_handler(commands=['lottery', 'лотерея'])
 def cmd_lottery(message):
     lottery = db.setdefault('lottery', {'tickets': {}, 'pot': 0, 'last_draw': 0})
@@ -1824,7 +2331,7 @@ def cmd_lottery(message):
 
 
 # ---------------------------------------------------------
-# КАСТОМНЫЙ ТИТУЛ И ПРОФИЛЬ
+# ПРОФИЛЬ, МАГАЗИН И ТИТУЛЫ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['custom_title', 'set_title'])
 def cmd_custom_title(message):
@@ -1882,8 +2389,11 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
 
     if custom_title:
         current_title = f"🌟 {html.escape(custom_title)} (Кастом)"
+    elif active_title in TITLES:
+        t_obj = TITLES[active_title]
+        current_title = f"{t_obj['text']} ({t_obj['desc']})"
     else:
-        current_title = TITLES.get(active_title, {}).get('text', 'Отсутствует')
+        current_title = 'Отсутствует'
 
     inv = econ.get('inventory', [])
     inv_str = " ".join(inv) if inv else "Пусто"
@@ -1895,7 +2405,10 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     portfolio_str = ', '.join(f'<b>{tick}</b>: {amt:.2f}' for tick, amt in portfolio.items() if amt > 0.0001) or 'Пусто'
 
     user_biz = econ.get('businesses', {})
-    biz_str = ', '.join(BUSINESSES[b_id]['name'] for b_id in user_biz.keys() if b_id in BUSINESSES) or 'Нет'
+    biz_levels = econ.get('biz_levels', {})
+    biz_str = ', '.join(f"{BUSINESSES[b_id]['name']} (ур. {biz_levels.get(b_id, 1)})" for b_id in user_biz.keys() if b_id in BUSINESSES) or 'Нет'
+
+    veh_str = VEHICLES[econ['vehicle']]['name'] if econ.get('vehicle') in VEHICLES else 'Пешеход 🚶‍♂️'
 
     marriage_info = "Холост(а)"
     if econ.get('marriage'):
@@ -1908,13 +2421,10 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     if econ.get('pet'):
         p = econ['pet']
         update_pet_stats(p)
-        pet_info = f"{p['name']} (🍖 {p['hunger']}%, 🧼 {p['cleanliness']}%)"
+        pet_info = f"{p['name']} (🍖 {p['hunger']}%, 🧼 {p['cleanliness']}%, ⭐ {p.get('pet_exp', 0)} EXP)"
 
     unlocked_ach = len(econ.get('achievements', []))
     total_ach = len(ACHIEVEMENTS)
-
-    rest_rewards = econ.get('rest_rewards_count', 0)
-    rest_rewards_str = f"{rest_rewards}/5 (150 🪙)" if rest_rewards < 5 else "5/5 (Лимит исчерпан ⛔️)"
 
     m_st = econ.get('msg_stats', {})
     msg_stats_str = (
@@ -1930,16 +2440,17 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         f"⭐ Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
         f"💵 Баланс на руках: <b>{econ['balance']} Ня-коинов 💸</b>\n"
         f"🏦 В банке: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
+        f"🚘 Транспорт: <b>{veh_str}</b>\n"
         f"💼 Опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n"
         f"💍 Семья: <b>{marriage_info}</b>\n"
         f"🏢 Бизнесы: <b>{biz_str}</b>\n"
         f"🐾 Питомец: <b>{pet_info}</b>\n"
         f"🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b> (/achievements)\n"
         f"──────────────────────\n"
-        f"📊 <b>Биометрия и замеры:</b>\n"
-        f"• 🧬 Хромосомы: <b>{econ.get('chromosomes', 46)}</b>\n"
-        f"• 🧠 IQ: <b>{econ.get('iq', 100)}</b> | 🥩 Жир: <b>{econ.get('fat', 20)}%</b>\n"
-        f"• 🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b> | 😂 Смех: <b>{econ.get('smeh', 0)}</b>\n"
+        f"📊 <b>Биометрия и мемные замеры:</b>\n"
+        f"• 🍆 Писюн: <b>{econ.get('dick_size', 15)} см</b> | 💦 Фап за день: <b>{econ.get('fap_count', 0)}</b>\n"
+        f"• 🧬 Хромосомы: <b>{econ.get('chromosomes', 46)}</b> | 🧠 IQ: <b>{econ.get('iq', 100)}</b>\n"
+        f"• 🥩 Жир: <b>{econ.get('fat', 20)}%</b> | 🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
         f"──────────────────────\n"
         f"📊 <b>Активность сообщений:</b>\n{msg_stats_str}\n"
         f"📈 <b>Крипто-портфель:</b> {portfolio_str}\n"
@@ -1978,9 +2489,10 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton('✨ Значки для профиля', callback_data='shop_cat_badges'))
-    markup.add(InlineKeyboardButton('👑 Титулы и Сертификаты', callback_data='shop_cat_titles'))
+    markup.add(InlineKeyboardButton('👑 Титулы с баффами', callback_data='shop_cat_titles'))
     markup.add(InlineKeyboardButton('💍 Обручальные кольца', callback_data='shop_cat_rings'))
-    markup.add(InlineKeyboardButton('🐾 Магазин Питомцев', callback_data='shop_cat_pets'))
+    markup.add(InlineKeyboardButton('🐾 Магазин Питомцев 2.0', callback_data='shop_cat_pets'))
+    markup.add(InlineKeyboardButton('🏎 Гараж (Транспорт)', callback_data='shop_cat_garage'))
 
     text = (
         "🏪 <b>ГЛОБАЛЬНЫЙ МАГАЗИН НЯ-БОТА</b>\n"
@@ -1997,7 +2509,7 @@ def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
 
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ СЕМЬИ И БРАКОВ
+# БРАКИ, СЕМЬЯ И ПОДАРКИ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['marry', 'брак'])
 def cmd_marry(message):
@@ -2086,12 +2598,50 @@ def cmd_family(message):
         f"⏳ Дней в браке: <b>{days_together} дн.</b>\n"
         f"💰 Семейный сейф: <b>{vault} Ня-коинов 🪙</b>\n"
         f"──────────────────────\n"
-        f"💡 <b>Команды:</b>\n"
+        f"💡 <b>Команды семьи:</b>\n"
+        f"• <code>подарок букет</code> — подарить цветы супругу (100 🪙)\n"
+        f"• <code>подарок конфеты</code> — подарить сладкое (60 🪙)\n"
         f"• <code>семейный сейф положить 100</code>\n"
         f"• <code>семейный сейф снять 100</code>\n"
         f"• <code>развод</code> — расторгнуть брак"
     )
     bot.reply_to(message, text, parse_mode='HTML')
+
+
+@bot.message_handler(commands=['gift', 'подарок'])
+def cmd_gift(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name)
+
+    if not econ.get('marriage'):
+        bot.reply_to(message, "❌ Подарки супругу доступны только тем, кто в браке!")
+        return
+
+    m = econ['marriage']
+    p_id = m.get('partner_id')
+    p_tag = m.get('partner_name')
+
+    cost = 100
+    if econ['balance'] < cost:
+        bot.reply_to(message, f"❌ На роскошный подарок нужно <b>{cost} 🪙</b>!")
+        return
+
+    econ['balance'] -= cost
+    p_econ = get_user_econ(p_id, p_tag)
+    p_econ['balance'] += 80
+    save_data()
+
+    sender_l = make_link(message.chat.id, user_name, user_id, ping=True)
+    partner_l = make_link(message.chat.id, p_tag, p_id, ping=True)
+
+    bot.send_message(
+        message.chat.id,
+        f"💐 <b>РОМАНТИЧЕСКИЙ ПОДАРОК!</b>\n\n"
+        f"{sender_l} преподнес(ла) роскошный букет цветов и сладости для {partner_l}! 💖🍫\n"
+        f"Любовь крепнет с каждым днем! (+80 🪙 на счет любимого человека)",
+        parse_mode='HTML'
+    )
 
 
 @bot.message_handler(commands=['divorce', 'развод'])
@@ -2128,104 +2678,7 @@ def cmd_divorce(message):
 
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ БИЗНЕСОВ И ПАССИВНОГО ДОХОДА
-# ---------------------------------------------------------
-@bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
-def cmd_business(message):
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name)
-    user_biz = econ.setdefault('businesses', {})
-
-    markup = InlineKeyboardMarkup()
-    for b_id, b_info in BUSINESSES.items():
-        status = "✅ Куплен" if b_id in user_biz else f"Купить ({b_info['price']} 🪙)"
-        markup.add(InlineKeyboardButton(f"{b_info['name']} — {status}", callback_data=f"buy_biz_{b_id}"))
-
-    markup.add(InlineKeyboardButton("💰 Собрать прибыль", callback_data="collect_biz_profit"))
-
-    text = (
-        "🏢 <b>КОММЕРЧЕСКАЯ НЕДВИЖИМОСТЬ И БИЗНЕСЫ:</b>\n"
-        "──────────────────────\n"
-        "Предприятия приносят пассивный доход каждый час!\n"
-        "🌴 <i>В ресте действует курортный бонус: +20% к прибыли!</i>\n"
-        "──────────────────────"
-    )
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-
-
-@bot.message_handler(commands=['collect', 'прибыль'])
-def cmd_collect(message):
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name)
-    user_biz = econ.get('businesses', {})
-
-    if not user_biz:
-        bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>бизнесы</code> для покупки.", parse_mode='HTML')
-        return
-
-    now = time.time()
-    last_collect = econ.get('last_biz_collect', now)
-    hours_passed = (now - last_collect) / 3600.0
-
-    if hours_passed < 0.1:
-        bot.reply_to(message, "⏳ Прибыль еще не накопилась, загляните чуть позже!")
-        return
-
-    base_profit = sum(int(BUSINESSES[b_id]['income_per_hour'] * hours_passed) for b_id in user_biz.keys() if b_id in BUSINESSES)
-
-    if base_profit <= 0:
-        bot.reply_to(message, "⏳ Накоплений пока нет, подождите немного!")
-        return
-
-    in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(message.chat.id), {}), user_id=user_id, user_name=user_name)
-    bonus_str = ""
-    total_profit = base_profit
-
-    if in_rest:
-        rest_bonus = int(base_profit * 0.20)
-        total_profit += rest_bonus
-        bonus_str = f" (🌴 Включая бонус реста +20%: +{rest_bonus} 🪙)"
-
-    econ['balance'] += total_profit
-    econ['last_biz_collect'] = now
-    save_data()
-
-    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{total_profit} Ня-коинов 🪙</b>!{bonus_str}\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
-
-
-# ---------------------------------------------------------
-# ОБРАБОТЧИКИ ОПЫТА И ТРЕНИРОВКИ
-# ---------------------------------------------------------
-def train_work_exp(user_id, user_tag):
-    econ = get_user_econ(user_id, user_tag)
-    now = time.time()
-    cooldown = 900
-
-    if now - econ.get('last_train_time', 0) < cooldown:
-        left = int(cooldown - (now - econ.get('last_train_time', 0)))
-        mins, secs = divmod(left, 60)
-        return False, f"⏳ Тренировка доступна раз в 15 минут! Ждать: <b>{mins} мин {secs} сек</b>."
-
-    gain = random.randint(12, 35)
-    econ['work_exp'] = econ.get('work_exp', 0) + gain
-    econ['last_train_time'] = now
-    add_account_exp(user_id, user_tag, gain)
-    save_data()
-    return True, f"🎓 Вы усердно позанимались!\nПолучено: <b>+{gain} EXP</b> опыта работы (Всего: <b>{econ['work_exp']} EXP</b>)."
-
-
-@bot.message_handler(commands=['train', 'опыт'])
-def cmd_train(message):
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    _, text_resp = train_work_exp(user_id, user_name)
-    bot.reply_to(message, text_resp, parse_mode='HTML')
-
-
-# ---------------------------------------------------------
-# ОБРАБОТЧИКИ ИГР (БЛЭКДЖЕК, РПС, КУБИКИ, СЛОТЫ)
+# ИГРЫ: БЛЭКДЖЕК, ЦУЕФА, СЛОТЫ, КОСТИ
 # ---------------------------------------------------------
 def process_bj_game(message, bet):
     chat_id = message.chat.id
@@ -2348,7 +2801,7 @@ def cmd_rps(message):
 
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ КРИПТО-БИРЖИ
+# КРИПТО-БИРЖА
 # ---------------------------------------------------------
 @bot.message_handler(commands=['market', 'биржа', 'crypto', 'крипта'])
 def cmd_market(message):
@@ -2500,29 +2953,26 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
             bot.send_message(chat_id, msg, parse_mode='HTML')
 
 
-@bot.message_handler(commands=['buy_crypto', 'buy_stock'])
-def cmd_buy_crypto(message):
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    parts = message.text.split()
-    if len(parts) >= 3:
-        trade_crypto(message.chat.id, message.from_user.id, user_name, 'buy', parts[1], parts[2], message)
-    else:
-        bot.reply_to(message, "❌ Формат: <code>/buy_crypto NYA 5</code>", parse_mode='HTML')
-
-
-@bot.message_handler(commands=['sell_crypto', 'sell_stock'])
-def cmd_sell_crypto(message):
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    parts = message.text.split()
-    if len(parts) >= 3:
-        trade_crypto(message.chat.id, message.from_user.id, user_name, 'sell', parts[1], parts[2], message)
-    else:
-        bot.reply_to(message, "❌ Формат: <code>/sell_crypto NYA 5</code>", parse_mode='HTML')
-
-
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ СИСТЕМЫ РАБОТЫ И ПИТОМЦЕВ
+# СИСТЕМА РАБОТЫ И ТРЕНИРОВКИ
 # ---------------------------------------------------------
+def train_work_exp(user_id, user_tag):
+    econ = get_user_econ(user_id, user_tag)
+    now = time.time()
+    cooldown = 900
+
+    left = cooldown_text(econ.get('last_train_time', 0), cooldown, econ)
+    if left:
+        return False, f"⏳ Тренировка доступна раз в 15 минут! Ждать: <b>{left}</b>."
+
+    gain = random.randint(15, 40)
+    econ['work_exp'] = econ.get('work_exp', 0) + gain
+    econ['last_train_time'] = now
+    add_account_exp(user_id, user_tag, gain)
+    save_data()
+    return True, f"🎓 Вы усердно позанимались!\nПолучено: <b>+{gain} EXP</b> опыта работы (Всего: <b>{econ['work_exp']} EXP</b>)."
+
+
 @bot.message_handler(commands=['work', 'работа'])
 def cmd_work(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
@@ -2545,54 +2995,12 @@ def cmd_work(message):
     bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
 
-@bot.message_handler(commands=['pet', 'питомец'])
-def cmd_pet(message):
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+@bot.message_handler(commands=['train', 'опыт'])
+def cmd_train(message):
     user_id = message.from_user.id
-    econ = get_user_econ(user_id, user_name)
-    pet = econ.get('pet')
-
-    if not pet:
-        bot.reply_to(message, "❌ У вас еще нет питомца! Купите его в <code>/shop</code>.", parse_mode='HTML')
-        return
-
-    update_pet_stats(pet)
-    save_data()
-
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🍖 Покормить (20 🪙)", callback_data="pet_feed"),
-        InlineKeyboardButton("🧼 Помыть (15 🪙)", callback_data="pet_wash")
-    )
-
-    status_luck = "✅ Бонус к удаче активен!" if pet['hunger'] >= 30 and pet['cleanliness'] >= 30 else "⚠️ Питомец голоден или испачкался!"
-
-    text = (
-        f"🐾 <b>ВАШ ПИТОМЕЦ: {pet['name']}</b>\n"
-        f"──────────────────────\n"
-        f"🍖 Сытость: <b>{pet['hunger']}/100%</b>\n"
-        f"🧼 Чистота: <b>{pet['cleanliness']}/100%</b>\n"
-        f"🌟 Бонус к удаче: <b>+{pet['luck_bonus']}%</b>\n"
-        f"📌 Статус: <b>{status_luck}</b>\n"
-        f"──────────────────────"
-    )
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-
-
-@bot.message_handler(commands=['feed', 'покормить'])
-def cmd_feed(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    user_id = message.from_user.id
-    _, resp = feed_pet(user_id, user_name)
-    bot.reply_to(message, resp, parse_mode='HTML')
-
-
-@bot.message_handler(commands=['wash', 'помыть'])
-def cmd_wash(message):
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    user_id = message.from_user.id
-    _, resp = wash_pet(user_id, user_name)
-    bot.reply_to(message, resp, parse_mode='HTML')
+    _, text_resp = train_work_exp(user_id, user_name)
+    bot.reply_to(message, text_resp, parse_mode='HTML')
 
 
 @bot.message_handler(commands=['sell', 'продать'])
@@ -2669,7 +3077,7 @@ def cmd_balance(message):
     bot.reply_to(message, f"💵 <b>Ваш кошелек:</b> <b>{econ['balance']} Ня-коинов 💸</b>\n🏦 <b>В банке:</b> <b>{econ.get('bank_deposit', 0)} 🪙</b>", parse_mode='HTML')
 
 
-@bot.message_handler(commands=['shop', 'магазин', 'pet_shop'])
+@bot.message_handler(commands=['shop', 'магазин'])
 def cmd_shop(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     send_shop_menu(message.chat.id, message.from_user.id, user_name)
@@ -2682,7 +3090,7 @@ def cmd_tasks(message):
 
 
 # ---------------------------------------------------------
-# СИМУЛЯТОРЫ И ЗАМЕРЫ: IQ, ЖИР, ПЯТКИ, ХРОМОСОМЫ
+# БИОМЕТРИЯ: IQ, ЖИР, ПЯТКА, ХРОМОСОМЫ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['iq'])
 def cmd_iq(message):
@@ -2693,10 +3101,9 @@ def cmd_iq(message):
     now_ts = time.time()
     cooldown = 1800
 
-    if now_ts - econ.get('last_iq_time', 0) < cooldown:
-        left_sec = int(cooldown - (now_ts - econ.get('last_iq_time', 0)))
-        mins, secs = divmod(left_sec, 60)
-        bot.reply_to(message, f"⏳ Тест на IQ доступен раз в 30 минут!\nПодождите: <b>{mins} мин {secs} сек</b>.", parse_mode='HTML')
+    left = cooldown_text(econ.get('last_iq_time', 0), cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Тест на IQ доступен раз в 30 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.randint(-5, 15)
@@ -2720,10 +3127,9 @@ def cmd_fat(message):
     now_ts = time.time()
     cooldown = 1800
 
-    if now_ts - econ.get('last_fat_time', 0) < cooldown:
-        left_sec = int(cooldown - (now_ts - econ.get('last_fat_time', 0)))
-        mins, secs = divmod(left_sec, 60)
-        bot.reply_to(message, f"⏳ Замер жира доступен раз в 30 минут!\nПодождите: <b>{mins} мин {secs} сек</b>.", parse_mode='HTML')
+    left = cooldown_text(econ.get('last_fat_time', 0), cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Замер жира доступен раз в 30 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.randint(-4, 6)
@@ -2747,10 +3153,9 @@ def cmd_foot(message):
     now_ts = time.time()
     cooldown = 1200
 
-    if now_ts - econ.get('last_foot_time', 0) < cooldown:
-        left_sec = int(cooldown - (now_ts - econ.get('last_foot_time', 0)))
-        mins, secs = divmod(left_sec, 60)
-        bot.reply_to(message, f"⏳ Измерить пятку можно раз в 20 минут!\nПодождите: <b>{mins} мин {secs} сек</b>.", parse_mode='HTML')
+    left = cooldown_text(econ.get('last_foot_time', 0), cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Измерить пятку можно раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.randint(-3, 4)
@@ -2771,10 +3176,9 @@ def cmd_chromosomes(message):
     now_ts = time.time()
     cooldown = 1200
 
-    if now_ts - econ.get('last_chromosomes_time', 0) < cooldown:
-        left_sec = int(cooldown - (now_ts - econ.get('last_chromosomes_time', 0)))
-        mins, secs = divmod(left_sec, 60)
-        bot.reply_to(message, f"🧬 Генетический анализ доступен раз в 20 минут!\nПодождите: <b>{mins} мин {secs} сек</b>.", parse_mode='HTML')
+    left = cooldown_text(econ.get('last_chromosomes_time', 0), cooldown, econ)
+    if left:
+        bot.reply_to(message, f"🧬 Генетический анализ доступен раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.choice([-2, -1, 0, 1, 1, 2, 3])
@@ -2786,7 +3190,6 @@ def cmd_chromosomes(message):
 
     completed = track_daily_task(user_id, user_name, 'chromosomes', 1, chat_id)
     check_achievements(user_id, user_name, 'chromosomes_check', 1, chat_id)
-
     sign = "+" if change >= 0 else ""
 
     if new_chr == 46:
@@ -2820,21 +3223,26 @@ def render_top_menu(chat_id, category='rich', message_id=None):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("💰 Богачи", callback_data="top_cat_rich"),
-        InlineKeyboardButton("🧠 IQ", callback_data="top_cat_iq")
+        InlineKeyboardButton("🍆 Писюн", callback_data="top_cat_dick")
     )
     markup.add(
-        InlineKeyboardButton("🥩 Жир", callback_data="top_cat_fat"),
-        InlineKeyboardButton("🦶 Пятки", callback_data="top_cat_foot")
+        InlineKeyboardButton("🧠 IQ", callback_data="top_cat_iq"),
+        InlineKeyboardButton("🥩 Жир", callback_data="top_cat_fat")
     )
     markup.add(
-        InlineKeyboardButton("🧬 Хромосомы", callback_data="top_cat_chr"),
-        InlineKeyboardButton("💬 Актив", callback_data="top_cat_msg")
+        InlineKeyboardButton("🦶 Пятки", callback_data="top_cat_foot"),
+        InlineKeyboardButton("🧬 Хромосомы", callback_data="top_cat_chr")
     )
+    markup.add(InlineKeyboardButton("💬 Актив сообщений", callback_data="top_cat_msg"))
 
     if category == 'rich':
         sorted_data = sorted(econ_items.items(), key=lambda x: (x[1].get('balance', 0) + x[1].get('bank_deposit', 0)), reverse=True)
         title = "🏆 <b>ТОП БОГАЧЕЙ (Карман + Банк)</b>"
         val_formatter = lambda info: f"<b>{info.get('balance', 0) + info.get('bank_deposit', 0)} 🪙</b>"
+    elif category == 'dick':
+        sorted_data = sorted(econ_items.items(), key=lambda x: x[1].get('dick_size', 15), reverse=True)
+        title = "🍆 <b>ТОП ПО РАЗМЕРУ ПИСЮНА</b>"
+        val_formatter = lambda info: f"<b>{info.get('dick_size', 15)} см 📏</b>"
     elif category == 'iq':
         sorted_data = sorted(econ_items.items(), key=lambda x: x[1].get('iq', 100), reverse=True)
         title = "🧠 <b>ТОП ПО УРОВНЮ IQ</b>"
@@ -2893,7 +3301,7 @@ def cmd_top(message):
 
 
 # ---------------------------------------------------------
-# ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ
+# ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -2907,6 +3315,22 @@ def handle_messages(message):
 
     add_message_stat(user_id, user_name)
 
+    # ⚡️ ПРОВЕРКА ОТВЕТА НА ВИКТОРИНУ
+    if current_quiz.get('answer') and current_quiz.get('chat_id') == chat_id:
+        if text_lower == current_quiz['answer']:
+            reward = current_quiz['reward']
+            current_quiz['answer'] = None
+            add_coins(user_id, user_name, reward)
+            add_account_exp(user_id, user_name, 20)
+            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            bot.reply_to(
+                message,
+                f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b>\n\n"
+                f"Первым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!",
+                parse_mode='HTML'
+            )
+            return
+
     # 👑 КОМАНДЫ СОЗДАТЕЛЯ
     is_super_admin = (user_username == ADMIN_USERNAME.lower())
 
@@ -2917,9 +3341,6 @@ def handle_messages(message):
                 "──────────────────────\n"
                 "• <code>/take_coins @username 500</code> — списать коины\n"
                 "• <code>/give_coins @username 1000</code> — выдать коины\n"
-                "• <code>/set_balance @username 1000</code> — установить баланс\n"
-                "• <code>/reset_balance @username</code> — обнулить баланс\n"
-                "• <code>/clear_inventory @username</code> — очистить инвентарь\n"
                 "• <code>/stop_bot</code> — экстренная остановка и бекап\n"
                 "──────────────────────"
             )
@@ -2933,7 +3354,7 @@ def handle_messages(message):
             time.sleep(1)
             os._exit(0)
 
-        m_take = re.match(r'^(?:/take_coins|/take|забрать\s+коины|забрать\s+монеты|списать\s+коины|списать\s+монеты)\s*(.*)', text, re.IGNORECASE)
+        m_take = re.match(r'^(?:/take_coins|/take|забрать\s+коины|списать\s+коины)\s*(.*)', text, re.IGNORECASE)
         if m_take:
             rem = m_take.group(1).strip()
             t_uid, t_uname, t_amt = None, None, 0
@@ -2958,15 +3379,14 @@ def handle_messages(message):
                 return
 
             t_econ = get_user_econ(t_uid, t_uname)
-            old_b = t_econ.get('balance', 0)
-            t_econ['balance'] = max(0, old_b - t_amt)
+            t_econ['balance'] = max(0, t_econ.get('balance', 0) - t_amt)
             save_data()
             u_link = make_link(chat_id, t_uname, t_uid, ping=True)
-            log_event('СПИСАНИЕ КОИНОВ', f'Админ @{user_username} списал {t_amt} 🪙 у {u_link}. Новый баланс: {t_econ["balance"]}')
+            log_event('СПИСАНИЕ КОИНОВ', f'Админ @{user_username} списал {t_amt} 🪙 у {u_link}. Баланс: {t_econ["balance"]}')
             bot.reply_to(message, f"💸 <b>Списано -{t_amt} 🪙</b> у {u_link}!\nБаланс: <b>{t_econ['balance']} 🪙</b>", parse_mode='HTML')
             return
 
-        m_give = re.match(r'^(?:/give_coins|/give|выдать\s+коины|выдать\s+монеты|начислить\s+коины)\s*(.*)', text, re.IGNORECASE)
+        m_give = re.match(r'^(?:/give_coins|/give|выдать\s+коины|начислить\s+коины)\s*(.*)', text, re.IGNORECASE)
         if m_give:
             rem = m_give.group(1).strip()
             t_uid, t_uname, t_amt = None, None, 0
@@ -2991,14 +3411,14 @@ def handle_messages(message):
                 return
 
             t_econ = get_user_econ(t_uid, t_uname)
-            old_b = t_econ.get('balance', 0)
-            t_econ['balance'] = old_b + t_amt
+            t_econ['balance'] = t_econ.get('balance', 0) + t_amt
             save_data()
             u_link = make_link(chat_id, t_uname, t_uid, ping=True)
             log_event('ВЫДАЧА КОИНОВ', f'Админ @{user_username} начислил {t_amt} 🪙 пользователю {u_link}.')
             bot.reply_to(message, f"🎁 <b>Начислено +{t_amt} 🪙</b> для {u_link}!\nБаланс: <b>{t_econ['balance']} 🪙</b>", parse_mode='HTML')
             return
 
+    # ОТСЛЕЖИВАНИЕ СООБЩЕНИЙ
     completed_tasks = track_daily_task(user_id, user_name, 'messages', 1, chat_id)
     if completed_tasks:
         for task_name, reward in completed_tasks:
@@ -3044,8 +3464,10 @@ def handle_messages(message):
 
         econ = get_user_econ(user_id, user_name)
         now = time.time()
-        if now - econ.get('last_rob_time', 0) < 3600:
-            left = cooldown_text(econ['last_rob_time'], 3600)
+        cooldown = 3600
+
+        left = cooldown_text(econ.get('last_rob_time', 0), cooldown, econ)
+        if left:
             bot.reply_to(message, f"⏳ Полиция на хвосте! Ограбление доступно через: <b>{left}</b>.", parse_mode='HTML')
             return
 
@@ -3053,14 +3475,18 @@ def handle_messages(message):
         t_pocket = t_econ.get('balance', 0)
 
         if t_pocket < 50:
-            bot.reply_to(message, "❌ У жертвы меньше 50 коинов на руках! Деньги в банке защищены.", parse_mode='HTML')
+            bot.reply_to(message, "❌ У жертвы меньше 50 коинов на руках! Деньги в банке защищены на 100%.", parse_mode='HTML')
             return
 
         econ['last_rob_time'] = now
         check_achievements(user_id, user_name, 'robs', 1, chat_id)
 
-        if random.random() <= 0.40:
-            stolen = max(10, min(500, int(t_pocket * random.uniform(0.08, 0.15))))
+        rob_chance = 0.40
+        if econ.get('pet') and econ['pet'].get('id') == 'raccoon':
+            rob_chance += 0.20
+
+        if random.random() <= rob_chance:
+            stolen = max(10, min(600, int(t_pocket * random.uniform(0.10, 0.20))))
             t_econ['balance'] -= stolen
             econ['balance'] += stolen
             save_data()
@@ -3075,6 +3501,9 @@ def handle_messages(message):
             )
         else:
             fine = min(econ['balance'], random.randint(30, 90))
+            if econ.get('active_title') == 'shadow_ninja':
+                fine = int(fine * 0.5)
+
             econ['balance'] -= fine
             t_econ['balance'] += fine
             save_data()
@@ -3201,7 +3630,6 @@ def handle_messages(message):
             bot.reply_to(message, f"✅ Пользователь {user_link} сейчас не находится в ресте!", parse_mode='HTML')
         return
 
-    # ТРИГГЕРЫ
     for pattern, responses in ALWAYS_ACTIVE_PATTERNS.items():
         if re.search(pattern, text_lower, re.IGNORECASE):
             bot.reply_to(message, random.choice(responses))
@@ -3251,6 +3679,27 @@ def handle_messages(message):
     elif text_lower in ['пятка', 'пяточка', 'размер пятки', 'пятки']:
         cmd_foot(message)
         return
+    elif text_lower in ['писюн', 'член', 'замер']:
+        cmd_dick(message)
+        return
+    elif text_lower in ['дроч', 'подрочить', 'фап']:
+        cmd_fap(message)
+        return
+    elif text_lower in ['гараж', 'тачки']:
+        cmd_garage(message)
+        return
+    elif text_lower in ['кулинария', 'приготовить']:
+        cmd_cook(message)
+        return
+    elif text_lower in ['гулять', 'погулять']:
+        cmd_walk_pet(message)
+        return
+    elif text_lower in ['рулетка', 'колесо']:
+        cmd_wheel(message)
+        return
+    elif text_lower in ['снасти', 'удочки']:
+        cmd_gear(message)
+        return
     elif text_lower in ['ачивки', 'достижения']:
         cmd_achievements(message)
         return
@@ -3272,9 +3721,20 @@ def handle_messages(message):
     elif text_lower in ['бонус', 'коин', 'взять бонус']:
         econ = get_user_econ(user_id, user_name)
         now_ts = time.time()
-        if now_ts - econ.get('last_hourly', 0) >= 3600:
+        cooldown = 3600
+
+        left = cooldown_text(econ.get('last_hourly', 0), cooldown, econ)
+        if not left:
             lvl, _, _, _ = get_account_level(econ.get('account_exp', 0))
-            reward = random.randint(15, 45) + (lvl * 3)
+            reward = random.randint(20, 50) + (lvl * 3)
+
+            active_t = econ.get('active_title')
+            if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'bonus_coins':
+                reward += TITLES[active_t]['val']
+
+            if econ.get('pet') and econ['pet'].get('id') == 'panda':
+                reward = int(reward * 1.35)
+
             econ['balance'] += reward
             econ['last_hourly'] = now_ts
             add_account_exp(user_id, user_name, 10)
@@ -3283,16 +3743,14 @@ def handle_messages(message):
             completed = track_daily_task(user_id, user_name, 'bonus', 1, chat_id)
             bot.reply_to(
                 message,
-                f"🎲 Вы собрали часовой бонус: <b>+{reward} Ня-коинов 🪙</b> (+{lvl*3} за {lvl} LVL)!\n"
+                f"🎲 Вы собрали часовой бонус: <b>+{reward} Ня-коинов 🪙</b>!\n"
                 f"Баланс: <b>{econ['balance']} 💸</b>",
                 parse_mode='HTML'
             )
             for task_name, task_reward in completed:
                 bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
         else:
-            left_sec = 3600 - (now_ts - econ.get('last_hourly', 0))
-            mins, secs = divmod(int(left_sec), 60)
-            bot.reply_to(message, f"⏳ Бонус доступен каждый час! Ждать: <b>{mins} мин {secs} сек</b>.", parse_mode='HTML')
+            bot.reply_to(message, f"⏳ Бонус доступен каждый час! Ждать: <b>{left}</b>.", parse_mode='HTML')
         return
 
     # КОСТИ
@@ -3383,41 +3841,51 @@ def handle_messages(message):
             bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
         return
 
-    # РЫБАЛКА И ОХОТА
+    # РЫБАЛКА И ОХОТА С УЧЕТОМ СНАСТЕЙ
     elif text_lower in ['рыбалка', '/fish', 'рыба']:
         econ = get_user_econ(user_id, user_name)
-        left = cooldown_text(econ.get('last_fish_time', 0), 7200)
+        cooldown = 7200
+        left = cooldown_text(econ.get('last_fish_time', 0), cooldown, econ)
         if left:
             bot.reply_to(message, f'⏳ Рыбалка доступна раз в 2 часа. Осталось: <b>{left}</b>.', parse_mode='HTML')
             return
 
         luck_bonus = econ['pet'].get('luck_bonus', 0) if econ.get('pet') else 0
+        rod = econ.get('equipped_rod')
+        if rod and rod in RODS:
+            luck_bonus += RODS[rod]['luck']
+
         weights = [max(1, int(f[3] * (1 + luck_bonus / 100.0))) for f in FISH_TYPES]
         caught = random.choices(FISH_TYPES, weights=weights, k=1)[0]
         econ['last_fish_time'] = time.time()
         add_inventory_item(econ['fish_inventory'], caught[0])
-        add_account_exp(user_id, user_name, 5)
+        add_account_exp(user_id, user_name, 8)
         save_data()
         check_achievements(user_id, user_name, 'fish', 1, chat_id)
-        bot.reply_to(message, f'🎣 Вы поймали: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>\n💡 Продать: <code>продать</code>', parse_mode='HTML')
+        bot.reply_to(message, f'🎣 Вы поймали: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
         return
 
     elif text_lower in ['охота', '/hunt']:
         econ = get_user_econ(user_id, user_name)
-        left = cooldown_text(econ.get('last_hunt_time', 0), 7200)
+        cooldown = 7200
+        left = cooldown_text(econ.get('last_hunt_time', 0), cooldown, econ)
         if left:
             bot.reply_to(message, f'⏳ Охота доступна раз в 2 часа. Осталось: <b>{left}</b>.', parse_mode='HTML')
             return
 
         luck_bonus = econ['pet'].get('luck_bonus', 0) if econ.get('pet') else 0
+        bow = econ.get('equipped_bow')
+        if bow and bow in BOWS:
+            luck_bonus += BOWS[bow]['luck']
+
         weights = [max(1, int(h[3] * (1 + luck_bonus / 100.0))) for h in HUNT_TYPES]
         caught = random.choices(HUNT_TYPES, weights=weights, k=1)[0]
         econ['last_hunt_time'] = time.time()
         add_inventory_item(econ['hunt_inventory'], caught[0])
-        add_account_exp(user_id, user_name, 5)
+        add_account_exp(user_id, user_name, 8)
         save_data()
         check_achievements(user_id, user_name, 'hunt', 1, chat_id)
-        bot.reply_to(message, f'🏹 Вы добыли: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>\n💡 Продать: <code>продать</code>', parse_mode='HTML')
+        bot.reply_to(message, f'🏹 Вы добыли: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
         return
 
     # ПЕРЕВОД КОИНОВ
@@ -3534,26 +4002,40 @@ def callback_inline(call):
     user_name = (f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}").strip() or call.from_user.username
 
     if call.data == 'help_main':
-        welcome_text = (
-            "🤖 <b>ГЛАВНЫЙ НАВИГАТОР НЯ-БОТА</b>\n"
-            "──────────────────────\n"
-            "Добро пожаловать в центр управления всеми модулями, играми, бизнесом и отпусками!\n\n"
-            "👇 <i>Выберите интересующий вас раздел:</i>"
-        )
         try:
-            bot.edit_message_text(welcome_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=get_main_menu_markup(), parse_mode='HTML')
+            bot.edit_message_text(
+                "🤖 <b>ГЛАВНЫЙ НАВИГАТОР НЯ-БОТА</b>\n──────────────────────\nВыберите интересующий вас раздел:",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=get_main_menu_markup(),
+                parse_mode='HTML'
+            )
         except Exception:
             pass
 
+    elif call.data == 'help_wheel':
+        text = (
+            "🎡 <b>КОЛЕСО ФОРТУНЫ (/wheel)</b>\n"
+            "──────────────────────\n"
+            "Бесплатное вращение раз в 12 часов!\n\n"
+            "• Призы: монеты, мега-джекпоты (1500 🪙), редкая рыба, дичь, шуточный мини-рест.\n"
+            "──────────────────────"
+        )
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
     elif call.data == 'help_sims':
         text = (
-            "🧬 <b>СИМУЛЯТОРЫ И ЗАМЕРЫ</b>\n"
+            "🍆 <b>МЕМНЫЕ СИМУЛЯТОРЫ И ЗАМЕРЫ</b>\n"
             "──────────────────────\n"
-            "• <code>хромосомы</code> или <code>/chromosomes</code> — анализ ДНК\n"
-            "• <code>iq</code> или <code>/iq</code> — тест на интеллект\n"
-            "• <code>жир</code> или <code>/fat</code> — замер процента жира\n"
-            "• <code>пятка</code> или <code>/foot</code> — замер размера пятки\n"
-            "• <code>топ</code> — интерактивная таблица лидеров чата!\n"
+            "• <code>/dick</code> или <code>писюн</code> — замер размера\n"
+            "• <code>/fap</code> или <code>дроч</code> — счетчик фапа и ранги\n"
+            "• <code>хромосомы</code> — анализ ДНК\n"
+            "• <code>iq</code> — тест интеллекта\n"
+            "• <code>жир</code> — процент жира\n"
+            "• <code>пятка</code> — размер пятки\n"
+            "• <code>топ</code> — интерактивная таблица лидеров!\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3564,12 +4046,11 @@ def callback_inline(call):
         text = (
             "🌴 <b>СИСТЕМА РЕСТОВ И ОТПУСКОВ</b>\n"
             "──────────────────────\n"
-            "• <code>+рест Иван Иванов 3 дня | отпуск</code> — выдать рест\n"
-            "• <code>+рест до 12 августа | сессия</code> — рест до даты\n"
+            "• <code>+рест Иван 3 дня | отпуск</code> — выдать рест\n"
             "• <code>-рест @username</code> — снять рест\n"
-            "• <code>история @username</code> — журнал рестов участника\n"
+            "• <code>история @username</code> — журнал рестов\n"
             "• <code>ресты</code> — список отдыхающих\n"
-            "• <code>кто ты @username</code> — проверить статус реста\n"
+            "• <code>кто ты @username</code> — статус реста\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3578,14 +4059,11 @@ def callback_inline(call):
 
     elif call.data == 'help_biz':
         text = (
-            "🏢 <b>БИЗНЕСЫ И ПАССИВНЫЙ ДОХОД</b>\n"
+            "🏢 <b>БИЗНЕСЫ 2.0 И ГАРАЖ</b>\n"
             "──────────────────────\n"
-            "• <code>бизнесы</code> или <code>/business</code> — покупка предприятий\n"
-            "• <code>собрать прибыль</code> — забрать накопленные коины\n\n"
-            "☕️ Кофейня: 2,400 🪙 (+35 🪙/час)\n"
-            "🥐 Пекарня: 6,000 🪙 (+90 🪙/час)\n"
-            "💻 Крипто-Ферма: 18,000 🪙 (+280 🪙/час)\n"
-            "🏰 Ночной Клуб: 54,000 🪙 (+850 🪙/час)\n"
+            "• <code>/business</code> — покупка и прокачка (1-5 LVL)\n"
+            "• <code>/garage</code> — покупка личного транспорта\n"
+            "• <code>собрать прибыль</code> — сбор дохода с предприятий\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3594,12 +4072,13 @@ def callback_inline(call):
 
     elif call.data == 'help_games':
         text = (
-            "🎰 <b>АЗАРТНЫЕ ИГРЫ И ДУЭЛИ</b>\n"
+            "💣 <b>САПЁР И АЗАРТНЫЕ ИГРЫ</b>\n"
             "──────────────────────\n"
-            "• <code>блэкджек 100</code> или <code>/bj 100</code> — игра в 21 очко\n"
-            "• <code>слоты 100</code> — бафнутый игровой автомат\n"
+            "• <code>/mines 100</code> — игра в Сапёр на поле 4х4\n"
+            "• <code>/bj 100</code> — Блэкджек (21 очко)\n"
+            "• <code>слоты 100</code> — игровой автомат\n"
             "• <code>кости 100</code> — игра в кости\n"
-            "• <code>/rps @username 100</code> — дуэль Цу-е-фа\n"
+            "• <code>/rps @username 100</code> — Цу-е-фа дуэль\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3610,11 +4089,10 @@ def callback_inline(call):
         text = (
             "🏦 <b>НЯ-БАНК И ДЕПОЗИТЫ</b>\n"
             "──────────────────────\n"
-            "• <code>банк</code> или <code>/bank</code> — меню депозита\n"
+            "• <code>/bank</code> — меню депозита\n"
             "• <code>банк положить 500</code> — внести вклад\n"
-            "• <code>банк снять 500</code> — забрать средства\n\n"
-            "📈 <b>Ставка:</b> +1% каждые 6 часов (сложный процент).\n"
-            "🛡 Депозит полностью защищен от грабителей!\n"
+            "• <code>банк снять 500</code> — снять деньги\n"
+            "📈 +1% каждые 6 часов (сложный процент)!\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3623,12 +4101,12 @@ def callback_inline(call):
 
     elif call.data == 'help_family':
         text = (
-            "💍 <b>БРАКИ И СЕМЬЯ</b>\n"
+            "💍 <b>БРАКИ И ПОДАРКИ</b>\n"
             "──────────────────────\n"
             "• <code>брак @username</code> — сделать предложение\n"
-            "• <code>семья</code> — профиль пары и сейф\n"
-            "• <code>семейный сейф положить 100</code> — общий сейф\n"
-            "• <code>развод</code> — расторжение брака\n"
+            "• <code>/family</code> — профиль пары и сейф\n"
+            "• <code>/gift</code> — романтический подарок\n"
+            "• <code>развод</code> — расторгнуть брак\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3651,27 +4129,13 @@ def callback_inline(call):
 
     elif call.data == 'help_pets':
         text = (
-            "🐾 <b>ПИТОМЦЫ И РАБОТА</b>\n"
+            "🐾 <b>ПИТОМЦЫ, КУЛИНАРИЯ И ОХОТА</b>\n"
             "──────────────────────\n"
-            "• <code>работа</code> — выход на смену\n"
-            "• <code>опыт</code> — тренировка опыта\n"
-            "• <code>питомец</code> — статус питомца\n"
+            "• <code>/walk</code> — отправить питомца на прогулку за кладом\n"
+            "• <code>/cook</code> — приготовить добычу для питомца\n"
+            "• <code>/gear</code> — купить удочки и луки\n"
             "• <code>рыбалка</code> / <code>охота</code> — добыча\n"
-            "• <code>продать</code> — продать улов\n"
-            "──────────────────────"
-        )
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
-        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-
-    elif call.data == 'help_events':
-        text = (
-            "🎁 <b>ИВЕНТЫ И СУНДУКИ</b>\n"
-            "──────────────────────\n"
-            "• <code>кейс</code> — бесплатный ежедневный сундук\n"
-            "• <code>лотерея</code> — билеты и джекпот\n"
-            "• <code>ограбить @username</code> — карманная кража\n"
-            "• 📦 Чат-дропы появляются в чате внезапно!\n"
+            "• <code>продать</code> — продать трофеи\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3680,13 +4144,13 @@ def callback_inline(call):
 
     elif call.data == 'help_econ':
         text = (
-            "💰 <b>ЭКОНОМИКА И ПРОФИЛЬ</b>\n"
+            "💰 <b>ЭКОНОМИКА И КВЕСТЫ</b>\n"
             "──────────────────────\n"
-            "• <code>бонус</code> — часовые коины (+3 коина за LVL)\n"
+            "• <code>бонус</code> — часовые коины\n"
             "• <code>баланс</code>, <code>профиль</code> — вся статистика\n"
-            "• <code>передать 100</code> — перевод коинов другу\n"
-            "• <code>ачивки</code> — 40 достижений с наградами\n"
-            "• <code>магазин</code> — значки, кольца, питомцы\n"
+            "• <code>передать 100</code> — перевод коинов\n"
+            "• <code>ачивки</code> — 42 достижения с наградами\n"
+            "• <code>магазин</code> — значки, титулы, питомцы\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -3697,6 +4161,154 @@ def callback_inline(call):
     elif call.data.startswith('top_cat_'):
         cat = call.data.replace('top_cat_', '')
         render_top_menu(chat_id, category=cat, message_id=call.message.message_id)
+
+    # САПЁР
+    elif call.data.startswith('mines_open_'):
+        parts = call.data.split('_')
+        game_id = f"m_{parts[2]}_{parts[3]}"
+        cell_idx = int(parts[4])
+
+        game = active_mines.get(game_id)
+        if not game or game.get('finished'):
+            bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
+            return
+
+        if user_id != game['user_id']:
+            bot.answer_callback_query(call.id, "❌ Это не ваше поле!", show_alert=True)
+            return
+
+        if cell_idx in game['bombs']:
+            game['finished'] = True
+            text, markup = render_mines_board(game_id)
+            loss_text = (
+                f"💥 <b>БАБАХ! ВЫ НАСТУПИЛИ НА МИНУ!</b>\n\n"
+                f"💸 Вы проиграли ставку <b>{game['bet']} Ня-коинов 🪙</b>!"
+            )
+            bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            del active_mines[game_id]
+            return
+        else:
+            game['revealed'].add(cell_idx)
+            safe_opened = len(game['revealed'])
+            mult_map = {1: 1.25, 2: 1.60, 3: 2.10, 4: 2.80, 5: 3.80, 6: 5.20, 7: 7.50, 8: 11.0, 9: 16.0, 10: 25.0, 11: 40.0, 12: 70.0, 13: 150.0}
+            game['current_multiplier'] = mult_map.get(safe_opened, 1.25)
+
+            if safe_opened >= 13:
+                game['finished'] = True
+                win_amt = int(game['bet'] * game['current_multiplier'])
+                add_coins(user_id, user_name, win_amt)
+                add_account_exp(user_id, user_name, 50)
+                check_achievements(user_id, user_name, 'mines_wins', 1, chat_id)
+                save_data()
+                win_text = (
+                    f"🏆 <b>НЕВЕРОЯТНО! ВСЕ КРИСТАЛЛЫ НАЙДЕНЫ!</b>\n\n"
+                    f"💰 Выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> ({game['current_multiplier']:.2f}x)!"
+                )
+                text, markup = render_mines_board(game_id)
+                bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                del active_mines[game_id]
+                return
+
+            text, markup = render_mines_board(game_id)
+            bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif call.data.startswith('mines_cashout_'):
+        game_id = call.data.replace('mines_cashout_', '')
+        game = active_mines.get(game_id)
+        if not game or game.get('finished'):
+            bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
+            return
+
+        if user_id != game['user_id']:
+            bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
+            return
+
+        game['finished'] = True
+        win_amt = int(game['bet'] * game['current_multiplier'])
+        add_coins(user_id, user_name, win_amt)
+        add_account_exp(user_id, user_name, 15)
+        check_achievements(user_id, user_name, 'mines_wins', 1, chat_id)
+        save_data()
+
+        text, markup = render_mines_board(game_id)
+        cash_text = (
+            f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b>\n\n"
+            f"🎉 Начислено: <b>+{win_amt} Ня-коинов 🪙</b> (Коэффициент: <b>{game['current_multiplier']:.2f}x</b>)!"
+        )
+        bot.edit_message_text(cash_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        del active_mines[game_id]
+
+    # ПРОКАЧКА БИЗНЕСА
+    elif call.data.startswith('upg_biz_'):
+        b_id = call.data.replace('upg_biz_', '')
+        if b_id in BUSINESSES:
+            b_info = BUSINESSES[b_id]
+            econ = get_user_econ(user_id, user_name)
+            biz_levels = econ.setdefault('biz_levels', {})
+            cur_lvl = biz_levels.get(b_id, 1)
+
+            if cur_lvl >= 5:
+                bot.answer_callback_query(call.id, "❌ Достигнут максимальный 5-й уровень!", show_alert=True)
+                return
+
+            cost = b_info['upgrade_cost'] * cur_lvl
+            if econ['balance'] < cost:
+                bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙!", show_alert=True)
+                return
+
+            econ['balance'] -= cost
+            biz_levels[b_id] = cur_lvl + 1
+            save_data()
+            bot.answer_callback_query(call.id, f"🎉 Предприятие улучшено до {cur_lvl+1} уровня!", show_alert=True)
+            bot.send_message(chat_id, f"🏢 {make_link(chat_id, user_name, user_id, ping=True)} улучшил(а) <b>{b_info['name']}</b> до <b>{cur_lvl+1} LVL</b>!", parse_mode='HTML')
+
+    # ПОКУПКА ТРАНСПОРТА
+    elif call.data.startswith('buy_veh_'):
+        v_id = call.data.replace('buy_veh_', '')
+        if v_id in VEHICLES:
+            v_info = VEHICLES[v_id]
+            econ = get_user_econ(user_id, user_name)
+
+            if econ.get('vehicle') == v_id:
+                bot.answer_callback_query(call.id, "❌ Этот транспорт уже в вашем гараже!", show_alert=True)
+                return
+
+            if econ['balance'] < v_info['price']:
+                bot.answer_callback_query(call.id, f"❌ Нужно {v_info['price']} 🪙!", show_alert=True)
+                return
+
+            econ['balance'] -= v_info['price']
+            econ['vehicle'] = v_id
+            save_data()
+            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}!", show_alert=True)
+            bot.send_message(chat_id, f"🏎 {make_link(chat_id, user_name, user_id, ping=True)} приобрел(а) новый транспорт — <b>{v_info['name']}</b> ({v_info['desc']})!", parse_mode='HTML')
+
+    # ПОКУПКА СНАСТЕЙ
+    elif call.data.startswith('buy_rod_'):
+        r_id = call.data.replace('buy_rod_', '')
+        if r_id in RODS:
+            r_info = RODS[r_id]
+            econ = get_user_econ(user_id, user_name)
+            if econ['balance'] < r_info['price']:
+                bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙!", show_alert=True)
+                return
+            econ['balance'] -= r_info['price']
+            econ['equipped_rod'] = r_id
+            save_data()
+            bot.answer_callback_query(call.id, f"🎉 Вы экипировали {r_info['name']}!", show_alert=True)
+
+    elif call.data.startswith('buy_bow_'):
+        b_id = call.data.replace('buy_bow_', '')
+        if b_id in BOWS:
+            b_info = BOWS[b_id]
+            econ = get_user_econ(user_id, user_name)
+            if econ['balance'] < b_info['price']:
+                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙!", show_alert=True)
+                return
+            econ['balance'] -= b_info['price']
+            econ['equipped_bow'] = b_id
+            save_data()
+            bot.answer_callback_query(call.id, f"🎉 Вы экипировали {b_info['name']}!", show_alert=True)
 
     # БАНК КНОПКИ
     elif call.data == 'bank_refresh':
@@ -3845,9 +4457,10 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"❌ Нужно минимум {job['req_exp']} EXP опыта!", show_alert=True)
                 return
             now = time.time()
-            if now - econ.get('last_work_time', 0) < 1800:
-                left = int(1800 - (now - econ.get('last_work_time', 0)))
-                bot.answer_callback_query(call.id, f"⏳ Отдохните еще {left // 60} мин {left % 60} сек.", show_alert=True)
+            cooldown = 1800
+            left = cooldown_text(econ.get('last_work_time', 0), cooldown, econ)
+            if left:
+                bot.answer_callback_query(call.id, f"⏳ Отдохните еще: {left}", show_alert=True)
                 return
             econ['last_work_time'] = now
             if random.randint(1, 100) <= job['chance']:
@@ -3865,13 +4478,14 @@ def callback_inline(call):
                 save_data()
                 bot.answer_callback_query(call.id, "❌ Вы ошиблись на смене! Получено +2 EXP.", show_alert=True)
 
-    # ПОКУПКА БИЗНЕСА И СБОР ПРИБЫЛИ
+    # ПОКУПКА БИЗНЕСА И СБОР
     elif call.data.startswith('buy_biz_'):
         b_id = call.data.replace('buy_biz_', '')
         if b_id in BUSINESSES:
             b_info = BUSINESSES[b_id]
             econ = get_user_econ(user_id, user_name)
             user_biz = econ.setdefault('businesses', {})
+            biz_levels = econ.setdefault('biz_levels', {})
             if b_id in user_biz:
                 bot.answer_callback_query(call.id, "❌ Этот бизнес уже приобретен!", show_alert=True)
                 return
@@ -3880,6 +4494,7 @@ def callback_inline(call):
                 return
             econ['balance'] -= b_info['price']
             user_biz[b_id] = time.time()
+            biz_levels[b_id] = 1
             check_achievements(user_id, user_name, 'biz_bought', 1, chat_id)
             save_data()
             bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}!", show_alert=True)
@@ -3888,9 +4503,10 @@ def callback_inline(call):
     elif call.data == 'collect_biz_profit':
         econ = get_user_econ(user_id, user_name)
         user_biz = econ.get('businesses', {})
+        biz_levels = econ.get('biz_levels', {})
         now = time.time()
         hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
-        base_profit = sum(int(BUSINESSES[b]['income_per_hour'] * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
+        base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
         if base_profit <= 0:
             bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась!", show_alert=True)
             return
@@ -4064,59 +4680,6 @@ def callback_inline(call):
             )
             del active_rps_games[game_id]
 
-    # ПИТОМЦЫ
-    elif call.data == 'pet_feed':
-        success, text_resp = feed_pet(user_id, user_name)
-        bot.answer_callback_query(call.id, text_resp.replace('<b>', '').replace('</b>', ''), show_alert=True)
-        if success:
-            econ = get_user_econ(user_id, user_name)
-            pet = econ.get('pet')
-            status_luck = "✅ Бонус к удаче активен!" if pet['hunger'] >= 30 and pet['cleanliness'] >= 30 else "⚠️ Питомец голоден или испачкался!"
-            updated_text = (
-                f"🐾 <b>ВАШ ПИТОМЕЦ: {pet['name']}</b>\n"
-                f"──────────────────────\n"
-                f"🍖 Сытость: <b>{pet['hunger']}/100%</b>\n"
-                f"🧼 Чистота: <b>{pet['cleanliness']}/100%</b>\n"
-                f"🌟 Бонус к удаче: <b>+{pet['luck_bonus']}%</b>\n"
-                f"📌 Статус: <b>{status_luck}</b>\n"
-                f"──────────────────────"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton("🍖 Покормить (20 🪙)", callback_data="pet_feed"),
-                InlineKeyboardButton("🧼 Помыть (15 🪙)", callback_data="pet_wash")
-            )
-            try:
-                bot.edit_message_text(updated_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception:
-                pass
-
-    elif call.data == 'pet_wash':
-        success, text_resp = wash_pet(user_id, user_name)
-        bot.answer_callback_query(call.id, text_resp.replace('<b>', '').replace('</b>', ''), show_alert=True)
-        if success:
-            econ = get_user_econ(user_id, user_name)
-            pet = econ.get('pet')
-            status_luck = "✅ Бонус к удаче активен!" if pet['hunger'] >= 30 and pet['cleanliness'] >= 30 else "⚠️ Питомец голоден или испачкался!"
-            updated_text = (
-                f"🐾 <b>ВАШ ПИТОМЕЦ: {pet['name']}</b>\n"
-                f"──────────────────────\n"
-                f"🍖 Сытость: <b>{pet['hunger']}/100%</b>\n"
-                f"🧼 Чистота: <b>{pet['cleanliness']}/100%</b>\n"
-                f"🌟 Бонус к удаче: <b>+{pet['luck_bonus']}%</b>\n"
-                f"📌 Статус: <b>{status_luck}</b>\n"
-                f"──────────────────────"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton("🍖 Покормить (20 🪙)", callback_data="pet_feed"),
-                InlineKeyboardButton("🧼 Помыть (15 🪙)", callback_data="pet_wash")
-            )
-            try:
-                bot.edit_message_text(updated_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception:
-                pass
-
     # НАСТРОЙКИ
     elif call.data == 'set_max_days':
         if not is_admin(chat_id, user_id):
@@ -4127,7 +4690,6 @@ def callback_inline(call):
         sett['max_days'] = next_opt
         save_data()
         bot.answer_callback_query(call.id, f'✅ Лимит изменен на {next_opt} дней!')
-        chat_settings_cmd(call.message)
 
     elif call.data == 'toggle_del_msg':
         if not is_admin(chat_id, user_id):
@@ -4136,7 +4698,6 @@ def callback_inline(call):
         sett['delete_rest_msg'] = not sett['delete_rest_msg']
         save_data()
         bot.answer_callback_query(call.id, f"✅ Авто-удаление: {'Включено' if sett['delete_rest_msg'] else 'Выключено'}")
-        chat_settings_cmd(call.message)
 
     elif call.data == 'toggle_summer_music':
         if not is_admin(chat_id, user_id):
@@ -4145,7 +4706,6 @@ def callback_inline(call):
         sett['summer_music'] = not sett.get('summer_music', True)
         save_data()
         bot.answer_callback_query(call.id, f"✅ Музыка лета: {'Включена' if sett['summer_music'] else 'Выключена'}")
-        chat_settings_cmd(call.message)
 
     elif call.data == 'set_remind_time':
         if not is_admin(chat_id, user_id):
@@ -4156,28 +4716,21 @@ def callback_inline(call):
         sett['remind_minutes'] = next_opt
         save_data()
         bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин!')
-        chat_settings_cmd(call.message)
 
     # МАГАЗИН КНОПКИ
     elif call.data == 'shop_main':
         send_shop_menu(chat_id, user_id, user_name, call.message.message_id)
 
+    elif call.data == 'shop_cat_garage':
+        cmd_garage(call.message)
+
     elif call.data == 'shop_cat_titles':
         markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton('👑 Кинг (3000 🪙)', callback_data='buy_title_king'),
-            InlineKeyboardButton('💤 Соня (2200 🪙)', callback_data='buy_title_sonya')
-        )
-        markup.add(
-            InlineKeyboardButton('🔥 Легенда (3600 🪙)', callback_data='buy_title_legend'),
-            InlineKeyboardButton('🐉 Дракон (4200 🪙)', callback_data='buy_title_dragon')
-        )
-        markup.add(
-            InlineKeyboardButton('🥐 Булочка (1800 🪙)', callback_data='buy_title_bun'),
-            InlineKeyboardButton('🌟 Кастомный Титул (15000 🪙)', callback_data='buy_cert_custom_title')
-        )
+        for t_key, t_info in list(TITLES.items())[:8]:
+            markup.add(InlineKeyboardButton(f"{t_info['text']} ({t_info['price']} 🪙)", callback_data=f"buy_title_{t_key}"))
+        markup.add(InlineKeyboardButton('🌟 Сертификат Кастом Титула (15000 🪙)', callback_data='buy_cert_custom_title'))
         markup.add(InlineKeyboardButton('🔙 Назад', callback_data='shop_main'))
-        bot.edit_message_text("👑 <b>Категория: Титулы и Сертификаты</b>", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text("👑 <b>Категория: Титулы с пассивными баффами</b>", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
     elif call.data == 'shop_cat_badges':
         markup = InlineKeyboardMarkup()
@@ -4196,9 +4749,9 @@ def callback_inline(call):
     elif call.data == 'shop_cat_pets':
         markup = InlineKeyboardMarkup()
         for p_id, p in PETS_DATA.items():
-            markup.add(InlineKeyboardButton(f"{p['name']} ({p['price']} 🪙)", callback_data=f"buy_pet_{p_id}"))
+            markup.add(InlineKeyboardButton(f"{p['name']} ({p['price']} 🪙) — {p['desc']}", callback_data=f"buy_pet_{p_id}"))
         markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data='shop_main'))
-        bot.edit_message_text("🐾 <b>Магазин Питомцев</b>", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text("🐾 <b>Зоомагазин: Питомцы 2.0</b>", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
     elif call.data == 'buy_cert_custom_title':
         econ = get_user_econ(user_id, user_name)
@@ -4277,6 +4830,7 @@ def callback_inline(call):
                 'luck_bonus': p_data['luck_bonus'],
                 'hunger': 100,
                 'cleanliness': 100,
+                'pet_exp': 0,
                 'last_update': time.time()
             }
             save_data()
@@ -4319,12 +4873,12 @@ def callback_inline(call):
 
 
 # ---------------------------------------------------------
-# ЗАПУСК БОТА
+# СТАРТ И ИНИЦИАЛИЗАЦИЯ
 # ---------------------------------------------------------
 setup_bot_commands()
 restore_timers()
 start_background_threads()
 keep_alive()
 
-print('Бот успешно запущен и работает стабильно...')
+print('Бот успешно запущен и подключен ко всем каналам!')
 bot.infinity_polling()
