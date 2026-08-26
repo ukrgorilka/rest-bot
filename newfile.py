@@ -168,12 +168,55 @@ BOWS = {
     'bow_phoenix': {'name': '🔥 Лук Феникса', 'short': '🔥 Феникс', 'price': 12000, 'luck': 80}
 }
 
+# ---------------------------------------------------------
+# ГАРАЖ 2.0 (С ПРИВЯЗАННЫМИ КАРТИНКАМИ И РАНГАМИ TIER)
+# ---------------------------------------------------------
 VEHICLES = {
-    'scooter': {'name': '🛴 Электросамокат', 'short': '🛴 Самокат', 'price': 1500, 'cd_cut': 0.05, 'desc': '-5% ко всем таймерам'},
-    'bike': {'name': '🏍 Спортбайк Yamaha', 'short': '🏍 Спортбайк', 'price': 7500, 'cd_cut': 0.12, 'desc': '-12% ко всем таймерам'},
-    'bmw': {'name': '🚗 BMW M5 CS', 'short': '🚗 BMW M5', 'price': 30000, 'cd_cut': 0.22, 'desc': '-22% ко всем таймерам'},
-    'ferrari': {'name': '🏎 Ferrari SF90', 'short': '🏎 Ferrari', 'price': 95000, 'cd_cut': 0.35, 'desc': '-35% ко всем таймерам'},
-    'rocket': {'name': '🚀 Ракета SpaceX Starship', 'short': '🚀 Starship', 'price': 350000, 'cd_cut': 0.50, 'desc': '-50% ко всем таймерам'}
+    'scooter': {
+        'name': '🛴 Электросамокат',
+        'short': '🛴 Самокат',
+        'price': 1500,
+        'cd_cut': 0.05,
+        'desc': '-5% ко всем таймерам',
+        'tier': 1,
+        'msg_id': 274
+    },
+    'bike': {
+        'name': '🏍 Спортбайк Yamaha',
+        'short': '🏍 Спортбайк',
+        'price': 7500,
+        'cd_cut': 0.12,
+        'desc': '-12% ко всем таймерам',
+        'tier': 2,
+        'msg_id': 275
+    },
+    'bmw': {
+        'name': '🚗 BMW M5 CS',
+        'short': '🚗 BMW M5',
+        'price': 30000,
+        'cd_cut': 0.22,
+        'desc': '-22% ко всем таймерам',
+        'tier': 3,
+        'msg_id': 276
+    },
+    'ferrari': {
+        'name': '🏎 Ferrari SF90',
+        'short': '🏎 Ferrari',
+        'price': 95000,
+        'cd_cut': 0.35,
+        'desc': '-35% ко всем таймерам',
+        'tier': 4,
+        'msg_id': 277
+    },
+    'rocket': {
+        'name': '🚀 Ракета SpaceX Starship',
+        'short': '🚀 Starship',
+        'price': 350000,
+        'cd_cut': 0.50,
+        'desc': '-50% ко всем таймерам',
+        'tier': 5,
+        'msg_id': 278
+    }
 }
 
 MARKET_DEFAULT = {
@@ -299,7 +342,11 @@ WEEKLY_TASKS = [
     ('dice', 'Сыграть в кости 20 раз', 20, 240),
 ]
 
+# ---------------------------------------------------------
+# БОГАТЫЙ ПАК РП-КОМАНД (ОДИНОЧНЫЕ И ПАРНЫЕ)
+# ---------------------------------------------------------
 RP_ACTIONS = {
+    # Парные (на кого-то)
     'обнять': {'verb': 'крепко и тепло обнял(а)', 'emoji': '🫂✨'},
     'поцеловать': {'verb': 'нежно поцеловал(а) в щечку', 'emoji': '💋🌸'},
     'погладить': {'verb': 'ласково погладил(а) по голове', 'emoji': '🐱💆‍♂️'},
@@ -313,7 +360,40 @@ RP_ACTIONS = {
     'покормить': {'verb': 'заботливо покормил(а) с ложечки вкусняшкой', 'emoji': '🍰🥄'},
     'ущипнуть': {'verb': 'аккуратно ущипнул(а) за бочок', 'emoji': '🤏😏'},
     'утешить': {'verb': 'утешил(а), сказав, что всё обязательно будет хорошо', 'emoji': '🥺🕊'},
-    'чихнуть': {'verb': 'громко чихнул(а) прямо на', 'emoji': '🤧💨'}
+    'чихнуть': {'verb': 'громко чихнул(а) прямо на', 'emoji': '🤧💨'},
+    'задушить в объятиях': {'verb': 'крепко задушил(а) в своих мягких объятиях', 'emoji': '🤗💖'},
+    'дать леща': {'verb': 'выдал(а) звонкого отрезвляющего леща', 'emoji': '🐟👋💥'},
+    'лещ': {'verb': 'отвесил(а) мощного леща', 'emoji': '🐟💥'},
+    'пощекотать': {'verb': 'весело и беспощадно пощекотал(а) за бока', 'emoji': '👐😂'},
+    'укрыть пледом': {'verb': 'заботливо укутал(а) в теплый мягкий плед', 'emoji': '🧶🛏'},
+    'укрыть': {'verb': 'укутал(а) в уютное одеялко', 'emoji': '🛏🧸'},
+    'напоить чаем': {'verb': 'угостил(а) кружечкой согревающего чая с печеньками', 'emoji': '🍵🍪'},
+    'угостить кофе': {'verb': 'приготовил(а) ароматный кофе для', 'emoji': '☕️✨'},
+    'взять за руку': {'verb': 'нежно взял(а) за руку и тепло сжал(а) пальцы', 'emoji': '🤝❤️'},
+    'держать за руку': {'verb': 'крепко держит за руку', 'emoji': '🤝🌸'},
+    'бросить снежок': {'verb': 'слепил(а) круглый снежок и метко запустил(а) в', 'emoji': '❄️🎯'},
+    'плюнуть': {'verb': 'смачно плюнул(а) прямо в лицо', 'emoji': '💦🎯'},
+    'пожать руку': {'verb': 'крепко и с уважением пожал(а) руку', 'emoji': '🤝👔'},
+    'убить': {'verb': 'эпично ликвидировал(а) взглядом и отправил(а) на перерождение', 'emoji': '⚔️💀'}
+}
+
+# Одиночные РП действия (на себя)
+RP_SOLO_ACTIONS = {
+    'умереть': ('трагично упал(а) без сил и сделал(а) вид, что умер(ла)... ⚰️💀', '⚰️'),
+    'сдохнуть': ('испустил(а) дух и лежит без движения 💀🪦', '💀'),
+    'рип': ('отправился(лась) в мир иной. F в чат... 🕯🕊', '🕯'),
+    'грустить': ('сидит в углу комнаты и тихонечко грустит под грустную музыку 🥺💧', '🥺'),
+    'плакать': ('заливается горькими слезками 😭🌧', '😭'),
+    'танцевать': ('вышел(ла) в центр чата и выдал(а) дикий флекс! 💃🕺✨', '💃'),
+    'флексить': ('показывает невероятный стиль и флексит во всю! 🔥😎', '😎'),
+    'спать': ('завернулся(лась) в теплое одеялко и сладко уснул(а) 💤🧸', '💤'),
+    'лечь спать': ('пошел(ла) баиньки. Всем сладких снов! 🌙😴', '😴'),
+    'кушать': ('с аппетитом уплетает вкуснейшую пиццу и сладости 🍕🍰', '🍕'),
+    'жрать': ('с жадностью опустошает холодильник чата 🍔🍟😋', '🍔'),
+    'пить чай': ('наслаждается чашечкой горячего ароматного чая 🍵🫖', '🍵'),
+    'пить кофе': ('бодрится чашечкой крепкого кофе ☕️⚡️', '☕️'),
+    'смущаться': ('мило покраснел(а) до кончиков ушей и спрятал(а) личико 👉👈😳', '😳'),
+    'радоваться': ('прыгает до потолка от безумного счастья! 🎉🥳🎈', '🥳')
 }
 
 ALWAYS_ACTIVE_PATTERNS = {
@@ -376,7 +456,7 @@ active_mines = {}
 current_quiz = {'question': None, 'answer': None, 'reward': 0, 'chat_id': None}
 
 # ---------------------------------------------------------
-# БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ
+# БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ (0% ПОТЕРЬ)
 # ---------------------------------------------------------
 def load_data():
     data = {
@@ -428,7 +508,7 @@ def save_data(send_backup=False):
 
             if send_backup and DB_CHANNEL_ID:
                 with open(DATA_FILE, 'rb') as f:
-                    msg = bot.send_document(DB_CHANNEL_ID, f, caption="💾 Auto-backup rests_data.json")
+                    msg = bot.send_document(DB_CHANNEL_ID, f, caption="💾 Экстренный бекап базы данных")
                     try:
                         bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
                     except Exception:
@@ -443,7 +523,7 @@ def periodic_backup_worker():
         try:
             if DB_CHANNEL_ID and os.path.exists(DATA_FILE):
                 with open(DATA_FILE, 'rb') as f:
-                    msg = bot.send_document(DB_CHANNEL_ID, f, caption=f"💾 Плановый бекап базы данных [{datetime.now().strftime('%d.%m.%Y %H:%M')}]")
+                    msg = bot.send_document(DB_CHANNEL_ID, f, caption=f"💾 Плановый авто-бекап базы данных [{datetime.now().strftime('%d.%m.%Y %H:%M')}]")
                     try:
                         bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
                     except Exception:
@@ -458,7 +538,9 @@ db = load_data()
 def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
-        BotCommand('profile', '👤 Профиль, баланс и транспорт'),
+        BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
+        BotCommand('set_pfp', '🖼 Установить фото в профиль'),
+        BotCommand('del_pfp', '🗑 Удалить фото из профиля'),
         BotCommand('shop', '🏪 Магазин значков, титулов и питомцев'),
         BotCommand('wheel', '🎡 Бесплатное Колесо Фортуны'),
         BotCommand('mines', '💣 Игра Сапёр (Мины)'),
@@ -628,7 +710,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     clean_u = clean_tag(username).lower() if username else None
     clean_d = clean_tag(user_tag) if user_tag else None
 
-    # Если передан username, проверяем, нет ли уже аккаунта с этим username
+    # Если передан username, ищем, нет ли уже аккаунта с этим username
     if not user_id and clean_u:
         for k, v in db['economy'].items():
             if v.get('username') and v['username'].lower() == clean_u and v.get('user_id'):
@@ -663,6 +745,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             'display_name': clean_d or 'Пользователь',
             'username': clean_u,
             'user_id': user_id,
+            'pfp_file_id': None,
             'balance': 50,
             'bank_deposit': 0,
             'last_bank_calc': time.time(),
@@ -742,9 +825,9 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         u_data['user_id'] = user_id
 
     for field, default in [
-        ('username', clean_u), ('inventory', []), ('account_exp', 0), ('smeh', 0), ('iq', 100),
-        ('fat', 20), ('foot_size', 25), ('dick_size', 15), ('last_dick_time', 0),
-        ('fap_count', 0), ('fap_date', ''), ('last_fap_time', 0),
+        ('username', clean_u), ('pfp_file_id', None), ('inventory', []), ('account_exp', 0),
+        ('smeh', 0), ('iq', 100), ('fat', 20), ('foot_size', 25), ('dick_size', 15),
+        ('last_dick_time', 0), ('fap_count', 0), ('fap_date', ''), ('last_fap_time', 0),
         ('chromosomes', 46), ('last_chromosomes_time', 0), ('last_wheel_time', 0),
         ('last_pet_walk', 0), ('last_pet_care', 0), ('rest_rewards_count', 0),
         ('titles', []), ('active_title', None), ('custom_title', None),
@@ -2002,7 +2085,7 @@ def cmd_fap(message):
 
 
 # ---------------------------------------------------------
-# ГАРАЖ И ТРАНСПОРТ (/garage)
+# ГАРАЖ 2.0 (КАРТИНКИ И ЗАЩИТА ОТ ДАУНГРЕЙДА)
 # ---------------------------------------------------------
 def render_garage_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -2033,6 +2116,21 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
             return
         except Exception:
             pass
+
+    if cur_veh and cur_veh in VEHICLES and VEHICLES[cur_veh].get('msg_id'):
+        try:
+            bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=MEDIA_TG_CHAT_ID,
+                message_id=VEHICLES[cur_veh]['msg_id'],
+                caption=text,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        except Exception:
+            pass
+
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 
@@ -2240,13 +2338,10 @@ def cmd_gear(message):
 
 
 # ---------------------------------------------------------
-# БИЗНЕСЫ 2.0 (ПРОКАЧКА И ДОХОД)
+# БИЗНЕСЫ 2.0 (БЕСШОВНОЕ ОБНОВЛЕНИЕ БЕЗ СПАМА)
 # ---------------------------------------------------------
-@bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
-def cmd_business(message):
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+def render_business_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
     user_biz = econ.setdefault('businesses', {})
     biz_levels = econ.setdefault('biz_levels', {})
 
@@ -2275,7 +2370,21 @@ def cmd_business(message):
     lines.append("──────────────────────")
     lines.append("🌴 <i>В ресте действует курортный бонус: +20% к прибыли!</i>")
 
-    bot.reply_to(message, "\n".join(lines), reply_markup=markup, parse_mode='HTML')
+    text = "\n".join(lines)
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+
+@bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
+def cmd_business(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_business_view(message.chat.id, user_id, user_name)
 
 
 # ---------------------------------------------------------
@@ -2609,6 +2718,52 @@ def cmd_settings(message):
 
 
 # ---------------------------------------------------------
+# АВАТАРКА ПРОФИЛЯ (/set_pfp, /del_pfp)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['set_pfp', 'аватарка'])
+def cmd_set_pfp(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+
+    photo_file_id = None
+
+    # 1. Фото прямо в сообщении
+    if message.photo:
+        photo_file_id = message.photo[-1].file_id
+    # 2. Ответ на сообщение с фото
+    elif message.reply_to_message and message.reply_to_message.photo:
+        photo_file_id = message.reply_to_message.photo[-1].file_id
+
+    if not photo_file_id:
+        bot.reply_to(
+            message,
+            "📸 <b>КАК УСТАНОВИТЬ АВАТАРКУ В ПРОФИЛЬ:</b>\n"
+            "──────────────────────\n"
+            "1. Отправьте в чат картинку и в подписи (caption) напишите <code>/set_pfp</code>\n"
+            "2. Либо ответьте командой <code>/set_pfp</code> на любое сообщение с фото!\n"
+            "──────────────────────",
+            parse_mode='HTML'
+        )
+        return
+
+    econ['pfp_file_id'] = photo_file_id
+    save_data()
+    bot.reply_to(message, "✅ <b>Ваша аватарка профиля успешно установлена!</b>\nПосмотреть: <code>/profile</code>", parse_mode='HTML')
+
+
+@bot.message_handler(commands=['del_pfp', 'удалить_аватарку'])
+def cmd_del_pfp(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+
+    econ['pfp_file_id'] = None
+    save_data()
+    bot.reply_to(message, "🗑 <b>Аватарка профиля успешно удалена!</b>", parse_mode='HTML')
+
+
+# ---------------------------------------------------------
 # ПРОФИЛЬ, МАГАЗИН И ТИТУЛЫ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['custom_title', 'set_title'])
@@ -2748,6 +2903,21 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     if message_id_to_edit:
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            try:
+                bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
+                return
+            except Exception:
+                pass
+
+    pfp_id = econ.get('pfp_file_id')
+    if pfp_id:
+        try:
+            if message_to_reply:
+                bot.send_photo(chat_id, pfp_id, caption=text, reply_markup=markup, reply_to_message_id=message_to_reply.message_id, parse_mode='HTML')
+            else:
+                bot.send_photo(chat_id, pfp_id, caption=text, reply_markup=markup, parse_mode='HTML')
             return
         except Exception:
             pass
@@ -3776,7 +3946,7 @@ def handle_messages(message):
                 bot.reply_to(message, chosen_gif)
         return
 
-    # ОГРАБЛЕНИЕ
+    # ОГРАБЛЕНИЕ (С ЗАЩИТОЙ ОТ АБУЗА С 0 БАЛАНСОМ)
     if text_lower.startswith('ограбить'):
         target_user = None
         target_user_id = None
@@ -3903,7 +4073,16 @@ def handle_messages(message):
             bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта!\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
         return
 
-    # РП-ДЕЙСТВИЯ
+    # ОДИНОЧНЫЕ РП ДЕЙСТВИЯ (НА СЕБЯ)
+    for solo_cmd, (solo_text, solo_emoji) in RP_SOLO_ACTIONS.items():
+        if text_lower == solo_cmd or text_lower.startswith(f"{solo_cmd} "):
+            sender_link = make_link(chat_id, user_name, user_id, ping=True)
+            check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
+            add_account_exp(user_id, user_name, 3, username=user_username)
+            bot.send_message(chat_id, f"{solo_emoji} {sender_link} {solo_text}", parse_mode='HTML')
+            return
+
+    # ПАРНЫЕ РП ДЕЙСТВИЯ
     for rp_cmd, rp_data in RP_ACTIONS.items():
         if text_lower.startswith(rp_cmd):
             target_user = None
@@ -4708,7 +4887,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id)
         process_pet_walk(chat_id, user_id, user_name)
 
-    # ПРОКАЧКА БИЗНЕСА
+    # ПРОКАЧКА БИЗНЕСА (БЕЗ СПАМА)
     elif call.data.startswith('upg_biz_'):
         b_id = call.data.replace('upg_biz_', '')
         if b_id in BUSINESSES:
@@ -4729,18 +4908,73 @@ def callback_inline(call):
             econ['balance'] -= cost
             biz_levels[b_id] = cur_lvl + 1
             save_data()
-            bot.answer_callback_query(call.id, f"🎉 Предприятие улучшено до {cur_lvl+1} уровня!", show_alert=True)
-            bot.send_message(chat_id, f"🏢 {make_link(chat_id, user_name, user_id, ping=True)} улучшил(а) <b>{b_info['name']}</b> до <b>{cur_lvl+1} LVL</b>!", parse_mode='HTML')
+            bot.answer_callback_query(call.id, f"🎉 {b_info['short']} улучшен(а) до {cur_lvl+1} уровня!")
+            render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
-    # ПОКУПКА ТРАНСПОРТА
+    # ПОКУПКА БИЗНЕСА (БЕЗ СПАМА)
+    elif call.data.startswith('buy_biz_'):
+        b_id = call.data.replace('buy_biz_', '')
+        if b_id in BUSINESSES:
+            b_info = BUSINESSES[b_id]
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            user_biz = econ.setdefault('businesses', {})
+            biz_levels = econ.setdefault('biz_levels', {})
+            if b_id in user_biz:
+                bot.answer_callback_query(call.id, "❌ Этот бизнес уже приобретен!", show_alert=True)
+                return
+            if econ['balance'] < b_info['price']:
+                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙!", show_alert=True)
+                return
+            econ['balance'] -= b_info['price']
+            user_biz[b_id] = time.time()
+            biz_levels[b_id] = 1
+            check_achievements(user_id, user_name, 'biz_bought', 1, chat_id, username=user_username)
+            save_data()
+            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}!")
+            render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+
+    elif call.data == 'collect_biz_profit':
+        econ = get_user_econ(user_id, user_name, username=user_username)
+        user_biz = econ.get('businesses', {})
+        biz_levels = econ.get('biz_levels', {})
+        now = time.time()
+        hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
+        base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
+        if base_profit <= 0:
+            bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась!", show_alert=True)
+            return
+
+        in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(chat_id), {}), user_id=user_id, user_name=user_name)
+        total_profit = base_profit
+        if in_rest:
+            total_profit += int(base_profit * 0.20)
+
+        econ['balance'] += total_profit
+        econ['last_biz_collect'] = now
+        save_data()
+        bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit} 🪙!", show_alert=True)
+        render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+
+    # ПОКУПКА ТРАНСПОРТА (С ЗАЩИТОЙ ОТ ДАУНГРЕЙДА)
     elif call.data.startswith('buy_veh_'):
         v_id = call.data.replace('buy_veh_', '')
         if v_id in VEHICLES:
             v_info = VEHICLES[v_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
+            cur_veh = econ.get('vehicle')
+            cur_tier = VEHICLES[cur_veh]['tier'] if cur_veh in VEHICLES else 0
+            new_tier = v_info.get('tier', 1)
 
-            if econ.get('vehicle') == v_id:
+            if cur_veh == v_id:
                 bot.answer_callback_query(call.id, "❌ Этот транспорт уже в вашем гараже!", show_alert=True)
+                return
+
+            if cur_tier > new_tier:
+                bot.answer_callback_query(
+                    call.id,
+                    f"❌ У вас уже есть более мощный транспорт ({VEHICLES[cur_veh]['name']})! Даунгрейд заблокирован.",
+                    show_alert=True
+                )
                 return
 
             if econ['balance'] < v_info['price']:
@@ -4751,7 +4985,6 @@ def callback_inline(call):
             econ['vehicle'] = v_id
             save_data()
             bot.answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}!", show_alert=True)
-            bot.send_message(chat_id, f"🏎 {make_link(chat_id, user_name, user_id, ping=True)} приобрел(а) новый транспорт — <b>{v_info['name']}</b> ({v_info['desc']})!", parse_mode='HTML')
             render_garage_view(chat_id, user_id, user_name, call.message.message_id)
 
     # ПОКУПКА СНАСТЕЙ
@@ -4959,49 +5192,6 @@ def callback_inline(call):
                 add_account_exp(user_id, user_name, 2, username=user_username)
                 save_data()
                 bot.answer_callback_query(call.id, "❌ Вы ошиблись на смене! Получено +2 EXP.", show_alert=True)
-
-    # ПОКУПКА БИЗНЕСА И СБОР
-    elif call.data.startswith('buy_biz_'):
-        b_id = call.data.replace('buy_biz_', '')
-        if b_id in BUSINESSES:
-            b_info = BUSINESSES[b_id]
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            user_biz = econ.setdefault('businesses', {})
-            biz_levels = econ.setdefault('biz_levels', {})
-            if b_id in user_biz:
-                bot.answer_callback_query(call.id, "❌ Этот бизнес уже приобретен!", show_alert=True)
-                return
-            if econ['balance'] < b_info['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙!", show_alert=True)
-                return
-            econ['balance'] -= b_info['price']
-            user_biz[b_id] = time.time()
-            biz_levels[b_id] = 1
-            check_achievements(user_id, user_name, 'biz_bought', 1, chat_id, username=user_username)
-            save_data()
-            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}!", show_alert=True)
-            bot.send_message(chat_id, f"🏢 {make_link(chat_id, user_name, user_id, ping=True)} приобрел(а) бизнес — <b>{b_info['name']}</b>!", parse_mode='HTML')
-
-    elif call.data == 'collect_biz_profit':
-        econ = get_user_econ(user_id, user_name, username=user_username)
-        user_biz = econ.get('businesses', {})
-        biz_levels = econ.get('biz_levels', {})
-        now = time.time()
-        hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
-        base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
-        if base_profit <= 0:
-            bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась!", show_alert=True)
-            return
-
-        in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(chat_id), {}), user_id=user_id, user_name=user_name)
-        total_profit = base_profit
-        if in_rest:
-            total_profit += int(base_profit * 0.20)
-
-        econ['balance'] += total_profit
-        econ['last_biz_collect'] = now
-        save_data()
-        bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit} 🪙!", show_alert=True)
 
     # БРАКИ
     elif call.data.startswith('m_yes_') or call.data.startswith('m_no_'):
@@ -5413,4 +5603,4 @@ start_background_threads()
 keep_alive()
 
 print('Бот успешно запущен и подключен ко всем каналам!')
-bot.infinity_polling()
+bot.infinity_polling() 
