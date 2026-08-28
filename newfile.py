@@ -1,6 +1,6 @@
 import ast
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import html
 import json
 import os
@@ -11,6 +11,16 @@ import time
 import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji
 from flask import Flask
+
+# ---------------------------------------------------------
+# ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
+# ---------------------------------------------------------
+MSK_TZ = timezone(timedelta(hours=3))
+
+
+def now_msk():
+    return datetime.now(MSK_TZ)
+
 
 # ---------------------------------------------------------
 # ВЕБ-СЕРВЕР ДЛЯ KEEP-ALIVE (RENDER / REPLIT / VPS)
@@ -40,6 +50,7 @@ def keep_alive():
 TOKEN = "8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g"
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
+db_dirty = False
 
 
 def normalize_tg_id(cid_val):
@@ -62,7 +73,7 @@ DATA_FILE = 'rests_data.json'
 
 ADMIN_USERNAME = 'ukrgorilka'
 
-# Медиа-канал и летнее аудиосообщение (Обновлено на ID 307)
+# Медиа-канал и летнее аудиосообщение
 MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
 WHY_TG_MSG_IDS = [5, 9]
 SUMMER_SONG_MSG_ID = 307
@@ -477,7 +488,8 @@ def load_data():
         'promos': {},
         'market': {},
         'marriages': {},
-        'lottery': {'tickets': {}, 'pot': 0, 'last_draw': 0}
+        'lottery': {'tickets': {}, 'pot': 0, 'last_draw': 0},
+        'bot_active': True
     }
     try:
         if DB_CHANNEL_ID:
@@ -501,6 +513,8 @@ def load_data():
                             data[key] = {'tickets': {}, 'pot': 0, 'last_draw': 0}
                         else:
                             data[key] = {}
+                if 'bot_active' not in data:
+                    data['bot_active'] = True
                 return data
         except Exception as e:
             print(f'Ошибка чтения файла: {e}')
@@ -508,13 +522,20 @@ def load_data():
     return data
 
 
+def mark_dirty():
+    global db_dirty
+    db_dirty = True
+
+
 def save_data(send_backup=False):
+    global db_dirty
     with db_lock:
         try:
             temp_file = f"{DATA_FILE}.tmp"
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(db, f, ensure_ascii=False, indent=4)
             os.replace(temp_file, DATA_FILE)
+            db_dirty = False
 
             if send_backup and DB_CHANNEL_ID:
                 with open(DATA_FILE, 'rb') as f:
@@ -527,13 +548,21 @@ def save_data(send_backup=False):
             print(f"Ошибка при сохранении базы данных: {e}")
 
 
+def auto_save_worker():
+    global db_dirty
+    while True:
+        time.sleep(10)
+        if db_dirty:
+            save_data(send_backup=False)
+
+
 def periodic_backup_worker():
     while True:
         time.sleep(900)
         try:
             if DB_CHANNEL_ID and os.path.exists(DATA_FILE):
                 with open(DATA_FILE, 'rb') as f:
-                    msg = bot.send_document(DB_CHANNEL_ID, f, caption=f"💾 Плановый авто-бекап базы данных [{datetime.now().strftime('%d.%m.%Y %H:%M')}]")
+                    msg = bot.send_document(DB_CHANNEL_ID, f, caption=f"💾 Плановый авто-бекап базы данных [{now_msk().strftime('%d.%m.%Y %H:%M')}]")
                     try:
                         bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
                     except Exception:
@@ -639,7 +668,7 @@ def get_market_data():
             changed = True
 
     if changed:
-        save_data(send_backup=False)
+        mark_dirty()
 
     return market
 
@@ -839,7 +868,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             'last_train_time': 0,
             'pet': None
         }
-        save_data()
+        mark_dirty()
 
     u_data = db['economy'][key]
     if clean_d:
@@ -881,8 +910,8 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             'week_count': 0, 'month_key': '', 'month_count': 0, 'total_count': 0
         }
 
-    # Сброс ежедневных соревновательных показателей
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    # Сброс ежедневных показателей по МСК (UTC+3)
+    today_str = now_msk().strftime('%Y-%m-%d')
     if u_data.get('daily_stats_date') != today_str:
         u_data['daily_stats_date'] = today_str
         u_data['daily_casino_win'] = 0
@@ -904,13 +933,13 @@ def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
         bonus += (TITLES[active_t]['val'] / 100.0)
 
     econ['account_exp'] = econ.get('account_exp', 0) + int(exp_amount * bonus)
-    save_data(send_backup=False)
+    mark_dirty()
 
 
 def add_message_stat(user_id, user_tag, username=None):
     econ = get_user_econ(user_id, user_tag, username)
     m_stats = econ.setdefault('msg_stats', {})
-    now = datetime.now()
+    now = now_msk()
 
     today_str = now.strftime('%Y-%m-%d')
     week_str = f"{now.year}-W{now.isocalendar()[1]}"
@@ -953,7 +982,7 @@ def log_event(event_type, message_text):
         clean_text = re.sub(r'&lt;code&gt;(.*?)&lt;/code&gt;', r'<code>\1</code>', clean_text)
         clean_text = re.sub(r'&lt;a href="(.*?)"&gt;(.*?)&lt;/a&gt;', r'<a href="\1">\2</a>', clean_text)
 
-        full_msg = f"📌 <b>[{html.escape(event_type)}]</b>\n⏱ <i>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>\n\n{clean_text}"
+        full_msg = f"📌 <b>[{html.escape(event_type)}]</b>\n⏱ <i>{now_msk().strftime('%Y-%m-%d %H:%M:%S')}</i>\n\n{clean_text}"
         bot.send_message(LOG_CHANNEL_ID, full_msg, parse_mode='HTML')
     except Exception as e:
         print(f"[LOG ERROR] Не удалось отправить лог: {e}")
@@ -1009,11 +1038,11 @@ def check_achievements(user_id, user_tag, stat_name, amount=1, chat_id=None, use
 
 
 def daily_task_date():
-    return datetime.now().strftime('%Y-%m-%d')
+    return now_msk().strftime('%Y-%m-%d')
 
 
 def weekly_task_key():
-    now = datetime.now()
+    now = now_msk()
     return f"{now.year}-W{now.isocalendar()[1]}"
 
 
@@ -1024,7 +1053,7 @@ def get_daily_tasks(user_id=None, user_tag=None, username=None):
         econ['daily_tasks_date'] = today
         econ['daily_progress'] = {}
         econ['daily_claimed'] = []
-    return DAILY_TASKS[datetime.now().weekday()], econ
+    return DAILY_TASKS[now_msk().weekday()], econ
 
 
 def get_weekly_tasks(user_id=None, user_tag=None, username=None):
@@ -1073,7 +1102,7 @@ def format_daily_tasks(user_id, user_tag):
     weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
 
     lines = [
-        f"📋 <b>ЗАДАНИЯ И КВЕСТЫ — {weekdays[datetime.now().weekday()].upper()}</b>",
+        f"📋 <b>ЗАДАНИЯ И КВЕСТЫ — {weekdays[now_msk().weekday()].upper()}</b>",
         "──────────────────────",
         "☀️ <b>Ежедневные квесты:</b>"
     ]
@@ -1468,14 +1497,14 @@ def parse_duration_to_seconds(duration_str, chat_id=None):
     if match_date:
         day = int(match_date.group(1))
         month = int(match_date.group(2))
-        year = int(match_date.group(3)) if match_date.group(3) else datetime.now().year
+        year = int(match_date.group(3)) if match_date.group(3) else now_msk().year
         if year < 100:
             year += 2000
         try:
-            target_dt = datetime(year, month, day, 23, 59, 59)
-            now = datetime.now()
+            target_dt = datetime(year, month, day, 23, 59, 59, tzinfo=MSK_TZ)
+            now = now_msk()
             if target_dt < now and not match_date.group(3):
-                target_dt = datetime(year + 1, month, day, 23, 59, 59)
+                target_dt = datetime(year + 1, month, day, 23, 59, 59, tzinfo=MSK_TZ)
             diff = (target_dt - now).total_seconds()
             return max(diff, 0)
         except ValueError:
@@ -1487,12 +1516,12 @@ def parse_duration_to_seconds(duration_str, chat_id=None):
         month_str = match_words.group(2)
         if month_str in MONTHS:
             month = MONTHS[month_str]
-            year = datetime.now().year
+            year = now_msk().year
             try:
-                target_dt = datetime(year, month, day, 23, 59, 59)
-                now = datetime.now()
+                target_dt = datetime(year, month, day, 23, 59, 59, tzinfo=MSK_TZ)
+                now = now_msk()
                 if target_dt < now:
-                    target_dt = datetime(year + 1, month, day, 23, 59, 59)
+                    target_dt = datetime(year + 1, month, day, 23, 59, 59, tzinfo=MSK_TZ)
                 diff = (target_dt - now).total_seconds()
                 return max(diff, 0)
             except ValueError:
@@ -1508,37 +1537,46 @@ def add_to_history(chat_str, user, duration_text, reason, user_id=None, action_t
     if clean_user not in db['history'][chat_str]:
         db['history'][chat_str][clean_user] = []
     entry = {
-        'date': time.strftime('%Y-%m-%d %H:%M'),
+        'date': now_msk().strftime('%Y-%m-%d %H:%M'),
         'action': action_type,
         'duration': duration_text,
         'reason': reason,
         'user_id': user_id,
     }
     db['history'][chat_str][clean_user].append(entry)
+    mark_dirty()
 
 
-def schedule_rest_timers(chat_id, user_key, end_timestamp, target_user_id=None):
-    def timer_thread():
-        str_chat = str(chat_id)
-        reminded = False
-        while True:
-            now = time.time()
-            remaining = end_timestamp - now
-            sett = get_chat_settings(chat_id)
-            remind_sec = sett.get('remind_minutes', 60) * 60
+def rest_manager_worker():
+    """Единый фоновый поток для проверки и снятия рестов по таймеру."""
+    notified_reminders = set()
 
-            if remaining <= 0:
-                if str_chat in db.get('rests', {}):
-                    found_key = None
-                    for k, info in list(db['rests'][str_chat].items()):
-                        if k == user_key or (target_user_id and info.get('user_id') == target_user_id):
-                            found_key = k
-                            break
+    while True:
+        time.sleep(10)
+        try:
+            now_ts = time.time()
+            if 'rests' not in db:
+                continue
 
-                    if found_key and db['rests'][str_chat][found_key].get('end_time') == end_timestamp:
-                        u_name = db['rests'][str_chat][found_key].get('user_name', user_key)
-                        del db['rests'][str_chat][found_key]
-                        add_to_history(str_chat, u_name, 'Истек', 'Снятие по таймеру', target_user_id, "Снят рест (авто)")
+            for str_chat_id, rests_dict in list(db['rests'].items()):
+                chat_id = int(str_chat_id)
+                sett = get_chat_settings(chat_id)
+                remind_sec = sett.get('remind_minutes', 60) * 60
+
+                for r_key, info in list(rests_dict.items()):
+                    end_time = info.get('end_time')
+                    if not end_time:
+                        continue
+
+                    remaining = end_time - now_ts
+                    target_user_id = info.get('user_id')
+                    u_name = info.get('user_name', r_key)
+                    remind_id = f"{str_chat_id}_{r_key}_{int(end_time)}"
+
+                    # Авто-снятие реста
+                    if remaining <= 0:
+                        del rests_dict[r_key]
+                        add_to_history(str_chat_id, u_name, 'Истек', 'Снятие по таймеру', target_user_id, "Снят рест (авто)")
                         save_data()
                         u_link = make_link(chat_id, u_name, target_user_id, ping=True)
                         log_event('РЕСТ СНЯТ (АВТО)', f'Чат: <code>{chat_id}</code>\nПользователь: {u_link}\nСтатус: Время реста истекло.')
@@ -1546,32 +1584,20 @@ def schedule_rest_timers(chat_id, user_key, end_timestamp, target_user_id=None):
                             bot.send_message(chat_id, f'⏰ <b>Время реста для {u_link} истекло!</b> Рест автоматически снят.', parse_mode='HTML')
                         except Exception:
                             pass
-                break
+                        continue
 
-            if 0 < remaining <= remind_sec and not reminded:
-                reminded = True
-                mins = int(remind_sec / 60)
-                u_link = make_link(chat_id, user_key, target_user_id, ping=True)
-                try:
-                    bot.send_message(chat_id, f'🔔 <b>Напоминание:</b> Рест у {u_link} закончится через {mins} мин!', parse_mode='HTML')
-                except Exception:
-                    pass
+                    # Напоминание об окончании
+                    if 0 < remaining <= remind_sec and remind_id not in notified_reminders:
+                        notified_reminders.add(remind_id)
+                        mins = int(remind_sec / 60)
+                        u_link = make_link(chat_id, u_name, target_user_id, ping=True)
+                        try:
+                            bot.send_message(chat_id, f'🔔 <b>Напоминание:</b> Рест у {u_link} закончится через {mins} мин!', parse_mode='HTML')
+                        except Exception:
+                            pass
 
-            time.sleep(min(remaining, 30))
-
-    t = threading.Thread(target=timer_thread)
-    t.daemon = True
-    t.start()
-
-
-def restore_timers():
-    for str_chat, users in list(db['rests'].items()):
-        chat_id = int(str_chat)
-        for user_key, info in list(users.items()):
-            end_time = info.get('end_time')
-            u_id = info.get('user_id')
-            if end_time:
-                schedule_rest_timers(chat_id, user_key, end_time, u_id)
+        except Exception as e:
+            print(f"[REST WORKER ERROR] {e}")
 
 
 def apply_rest(chat_id, user_name, duration_text, reason='Не указана', target_user_id=None):
@@ -1614,25 +1640,34 @@ def apply_rest(chat_id, user_name, duration_text, reason='Не указана', 
     check_achievements(target_user_id, clean_user, 'rests', 1, chat_id)
     save_data()
     log_event('РЕСТ ВЫДАН', f'Чат: <code>{chat_id}</code>\nПользователь: {make_link(chat_id, clean_user, target_user_id, ping=False)}\nСрок: <b>{duration_text}</b>\nПричина: {reason}')
-    if end_time:
-        schedule_rest_timers(chat_id, rest_key, end_time, target_user_id)
 
     return reward_given, econ['rest_rewards_count']
 
 
 # ---------------------------------------------------------
-# БЕЗОПАСНЫЙ КАЛЬКУЛЯТОР ДЛЯ ЧАТА
+# БЕЗОПАСНЫЙ КАЛЬКУЛЯТОР ДЛЯ ЧАТА (С ЗАЩИТОЙ ОТ DOS)
 # ---------------------------------------------------------
 def safe_calculate_math(expr_str):
+    if len(expr_str) > 100:
+        return None
+
     clean_expr = expr_str.strip().replace('^', '**').replace('×', '*').replace('÷', '/').replace(':', '/')
     if not re.match(r'^[\d\s\+\-\*\/\%\(\)\.]+$', clean_expr):
         return None
+
     try:
         tree = ast.parse(clean_expr, mode='eval')
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Num, 
                                      ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub, ast.UAdd)):
                 return None
+            # Защита от гигантских степеней (DoS)
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                if isinstance(node.right, ast.Constant) and (not isinstance(node.right.value, (int, float)) or node.right.value > 50):
+                    return None
+                if isinstance(node.left, ast.Constant) and (not isinstance(node.left.value, (int, float)) or abs(node.left.value) > 10000):
+                    return None
+
         res = eval(compile(tree, filename='', mode='eval'), {"__builtins__": None}, {})
         if isinstance(res, (int, float)):
             if abs(res) > 1e14:
@@ -1650,9 +1685,9 @@ def safe_calculate_math(expr_str):
 def summer_music_worker():
     while True:
         try:
-            now_utc3 = datetime.utcnow() + timedelta(hours=3)
+            now_utc3 = now_msk()
             current_year = now_utc3.year
-            end_of_summer = datetime(current_year, 8, 31, 23, 59, 59)
+            end_of_summer = datetime(current_year, 8, 31, 23, 59, 59, tzinfo=MSK_TZ)
 
             if now_utc3 <= end_of_summer and now_utc3.month in [6, 7, 8]:
                 delta = end_of_summer - now_utc3
@@ -1683,7 +1718,7 @@ def summer_music_worker():
                         except Exception:
                             pass
 
-            now_again = datetime.utcnow() + timedelta(hours=3)
+            now_again = now_msk()
             seconds_until_next_hour = (60 - now_again.minute) * 60 - now_again.second
             time.sleep(max(60, seconds_until_next_hour))
 
@@ -1838,6 +1873,8 @@ def start_background_threads():
     threading.Thread(target=chat_quiz_worker, daemon=True).start()
     threading.Thread(target=chat_silence_worker, daemon=True).start()
     threading.Thread(target=periodic_backup_worker, daemon=True).start()
+    threading.Thread(target=auto_save_worker, daemon=True).start()
+    threading.Thread(target=rest_manager_worker, daemon=True).start()
 
 
 # ---------------------------------------------------------
@@ -1871,30 +1908,30 @@ def goodbye_left_member(message):
 # ---------------------------------------------------------
 # ПОЛНЫЙ ИНТЕРАКТИВНЫЙ СПРАВОЧНИК И ИНФО (/help, /info)
 # ---------------------------------------------------------
-def get_main_menu_markup():
+def get_main_menu_markup(owner_id):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🌴 Ресты и Отпуск", callback_data="help_rests"),
-        InlineKeyboardButton("🏢 Бизнес 2.0 и Гараж", callback_data="help_biz")
+        InlineKeyboardButton("🌴 Ресты и Отпуск", callback_data=f"help_rests:{owner_id}"),
+        InlineKeyboardButton("🏢 Бизнес 2.0 и Гараж", callback_data=f"help_biz:{owner_id}")
     )
     markup.add(
-        InlineKeyboardButton("⚽️ Спорт & Казино", callback_data="help_sports"),
-        InlineKeyboardButton("🏦 Ня-Банк (+1%/6ч)", callback_data="help_bank")
+        InlineKeyboardButton("⚽️ Спорт & Казино", callback_data=f"help_sports:{owner_id}"),
+        InlineKeyboardButton("🏦 Ня-Банк (+1%/6ч)", callback_data=f"help_bank:{owner_id}")
     )
     markup.add(
-        InlineKeyboardButton("🎨 Темы и Рюкзак", callback_data="help_themes_buffs"),
-        InlineKeyboardButton("📈 Крипто-Биржа", callback_data="help_crypto")
+        InlineKeyboardButton("🎨 Темы и Рюкзак", callback_data=f"help_themes_buffs:{owner_id}"),
+        InlineKeyboardButton("📈 Крипто-Биржа", callback_data=f"help_crypto:{owner_id}")
     )
     markup.add(
-        InlineKeyboardButton("🐾 Питомцы и Охота", callback_data="help_pets"),
-        InlineKeyboardButton("🍆 Мемы, Шар и IQ", callback_data="help_sims")
+        InlineKeyboardButton("🐾 Питомцы и Охота", callback_data=f"help_pets:{owner_id}"),
+        InlineKeyboardButton("🍆 Мемы, Шар и IQ", callback_data=f"help_sims:{owner_id}")
     )
     markup.add(
-        InlineKeyboardButton("🏆 Ударники Дня", callback_data="help_heroes"),
-        InlineKeyboardButton("💰 Экономика и Квесты", callback_data="help_econ")
+        InlineKeyboardButton("🏆 Ударники Дня", callback_data=f"help_heroes:{owner_id}"),
+        InlineKeyboardButton("💰 Экономика и Квесты", callback_data=f"help_econ:{owner_id}")
     )
     markup.add(
-        InlineKeyboardButton("📖 ПОЛНЫЙ СПРАВОЧНИК (А-Я)", callback_data="help_full_catalog")
+        InlineKeyboardButton("📖 ПОЛНЫЙ СПРАВОЧНИК (А-Я)", callback_data=f"help_full_catalog:{owner_id}")
     )
     return markup
 
@@ -1907,7 +1944,7 @@ def send_welcome(message):
         "Добро пожаловать в центр управления экономикой, спорт-играми, бизнесами, рестами и кланами!\n\n"
         "👇 <i>Выберите интересующий вас раздел из меню ниже:</i>"
     )
-    bot.reply_to(message, welcome_text, reply_markup=get_main_menu_markup(), parse_mode='HTML')
+    bot.reply_to(message, welcome_text, reply_markup=get_main_menu_markup(message.from_user.id), parse_mode='HTML')
 
 
 # ---------------------------------------------------------
@@ -1959,9 +1996,9 @@ def process_sport_dice_game(message, game_type, bet):
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b>\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
         elif val == 2:
-            result_text = "🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b>\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
+            result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b>\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
         else:
-            result_text = "💨 <b>МИМО ВОРОТ!</b>\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
+            result_text = f"💨 <b>МИМО ВОРОТ!</b>\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
 
     elif game_type == 'basketball':
         # Баскетбол (1-5): 4, 5 — Чистый гол
@@ -1972,9 +2009,9 @@ def process_sport_dice_game(message, game_type, bet):
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b>\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
         elif val == 3:
-            result_text = "🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b>\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
+            result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b>\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
         else:
-            result_text = "💨 <b>МИМО ЩИТА!</b>\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
+            result_text = f"💨 <b>МИМО ЩИТА!</b>\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
 
     elif game_type == 'darts':
         # Дартс (1-6): 6 — Яблочко, 5 — Центр
@@ -2190,12 +2227,12 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
 
     markup = InlineKeyboardMarkup()
     if bp.get('energy_drink', 0) > 0:
-        markup.add(InlineKeyboardButton(f"⚡️ Выпить Энергетик ({bp['energy_drink']} шт.)", callback_data="use_item_energy_drink"))
+        markup.add(InlineKeyboardButton(f"⚡️ Выпить Энергетик ({bp['energy_drink']} шт.)", callback_data=f"use_item_energy_drink:{user_id}"))
     if bp.get('luck_clover', 0) > 0:
-        markup.add(InlineKeyboardButton(f"🍀 Активировать Клевер ({bp['luck_clover']} шт.)", callback_data="use_item_luck_clover"))
+        markup.add(InlineKeyboardButton(f"🍀 Активировать Клевер ({bp['luck_clover']} шт.)", callback_data=f"use_item_luck_clover:{user_id}"))
     if bp.get('invis_mask', 0) > 0:
-        markup.add(InlineKeyboardButton(f"🥷 Надеть Невидимку ({bp['invis_mask']} шт.)", callback_data="use_item_invis_mask"))
-    markup.add(InlineKeyboardButton("🏪 Купить расходники в Магазине", callback_data="shop_cat_buffs"))
+        markup.add(InlineKeyboardButton(f"🥷 Надеть Невидимку ({bp['invis_mask']} шт.)", callback_data=f"use_item_invis_mask:{user_id}"))
+    markup.add(InlineKeyboardButton("🏪 Купить расходники в Магазине", callback_data=f"shop_cat_buffs:{user_id}"))
 
     clover_status = "✅ Активен" if econ.get('luck_clover_until', 0) > time.time() else "❌ Не активен"
     invis_status = "✅ Включена" if econ.get('invis_until', 0) > time.time() else "❌ Выключена"
@@ -2502,7 +2539,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
     for v_id, v_info in VEHICLES.items():
         is_owned = " (Куплено)" if cur_veh == v_id else ""
         lines.append(f"• <b>{v_info['name']}</b> — <code>{v_info['price']} 🪙</code> ({v_info['desc']}){is_owned}")
-        markup.add(InlineKeyboardButton(f"{v_info['short']} — {v_info['price']} 🪙", callback_data=f"buy_veh_{v_id}"))
+        markup.add(InlineKeyboardButton(f"{v_info['short']} — {v_info['price']} 🪙", callback_data=f"buy_veh_{v_id}:{user_id}"))
 
     lines.append("──────────────────────")
     text = "\n".join(lines)
@@ -2585,7 +2622,7 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
 
     if not pet:
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🐾 Открыть Зоомагазин", callback_data="shop_cat_pets"))
+        markup.add(InlineKeyboardButton("🐾 Открыть Зоомагазин", callback_data=f"shop_cat_pets:{user_id}"))
         text = (
             f"🐾 <b>У вас пока нет питомца!</b>\n\n"
             f"Купите верного друга в зоомагазине, чтобы получать бонусы к удаче, охоте и часовому доходу!"
@@ -2600,19 +2637,19 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
         return
 
     update_pet_stats(pet)
-    save_data(send_backup=False)
+    mark_dirty()
 
     hunger_bar = "🍗" * (pet.get('hunger', 100) // 20)
     clean_bar = "🧼" * (pet.get('cleanliness', 100) // 20)
 
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🍖 Покормить (30 🪙)", callback_data="pet_feed"),
-        InlineKeyboardButton("🧼 Искупать (20 🪙)", callback_data="pet_wash")
+        InlineKeyboardButton("🍖 Покормить (30 🪙)", callback_data=f"pet_feed:{user_id}"),
+        InlineKeyboardButton("🧼 Искупать (20 🪙)", callback_data=f"pet_wash:{user_id}")
     )
     markup.add(
-        InlineKeyboardButton("🦮 Отправить гулять", callback_data="pet_walk_btn"),
-        InlineKeyboardButton("🐾 Зоомагазин", callback_data="shop_cat_pets")
+        InlineKeyboardButton("🦮 Отправить гулять", callback_data=f"pet_walk_btn:{user_id}"),
+        InlineKeyboardButton("🐾 Зоомагазин", callback_data=f"shop_cat_pets:{user_id}")
     )
 
     text = (
@@ -2711,6 +2748,7 @@ def cmd_walk_pet(message):
 # ---------------------------------------------------------
 @bot.message_handler(commands=['gear', 'снасти'])
 def cmd_gear(message):
+    user_id = message.from_user.id
     lines = [
         "🎣 <b>МАГАЗИН ПРОФЕССИОНАЛЬНЫХ СНАСТЕЙ</b>",
         "──────────────────────",
@@ -2724,8 +2762,8 @@ def cmd_gear(message):
     lines.append("──────────────────────")
 
     markup = InlineKeyboardMarkup(row_width=2)
-    rod_btns = [InlineKeyboardButton(f"{r_info['short']} — {r_info['price']} 🪙", callback_data=f"buy_rod_{r_id}") for r_id, r_info in RODS.items()]
-    bow_btns = [InlineKeyboardButton(f"{b_info['short']} — {b_info['price']} 🪙", callback_data=f"buy_bow_{b_id}") for b_id, b_info in BOWS.items()]
+    rod_btns = [InlineKeyboardButton(f"{r_info['short']} — {r_info['price']} 🪙", callback_data=f"buy_rod_{r_id}:{user_id}") for r_id, r_info in RODS.items()]
+    bow_btns = [InlineKeyboardButton(f"{b_info['short']} — {b_info['price']} 🪙", callback_data=f"buy_bow_{b_id}:{user_id}") for b_id, b_info in BOWS.items()]
     markup.add(*rod_btns[:2])
     markup.add(rod_btns[2])
     markup.add(*bow_btns[:2])
@@ -2756,14 +2794,14 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
             upg_cost = b_info['upgrade_cost'] * lvl
             lines.append(f"• <b>{b_info['name']}</b>: Уровень <b>{lvl}/5</b> (Доход: ~{int(b_info['base_income'] * (1 + (lvl-1)*0.45))} 🪙/ч)")
             if lvl < 5:
-                markup.add(InlineKeyboardButton(f"⭐ Ап {b_info['short']} (ур. {lvl+1}) — {upg_cost} 🪙", callback_data=f"upg_biz_{b_id}"))
+                markup.add(InlineKeyboardButton(f"⭐ Ап {b_info['short']} (ур. {lvl+1}) — {upg_cost} 🪙", callback_data=f"upg_biz_{b_id}:{user_id}"))
             else:
                 markup.add(InlineKeyboardButton(f"👑 {b_info['short']} (МАКС 5 LVL)", callback_data="noop"))
         else:
             lines.append(f"• <b>{b_info['name']}</b> — <code>{b_info['price']} 🪙</code> (Базовый: {b_info['base_income']} 🪙/ч)")
-            markup.add(InlineKeyboardButton(f"Купить {b_info['short']} — {b_info['price']} 🪙", callback_data=f"buy_biz_{b_id}"))
+            markup.add(InlineKeyboardButton(f"Купить {b_info['short']} — {b_info['price']} 🪙", callback_data=f"buy_biz_{b_id}:{user_id}"))
 
-    markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data="collect_biz_profit"))
+    markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data=f"collect_biz_profit:{user_id}"))
     lines.append("──────────────────────")
     lines.append("🌴 <i>В ресте действует курортный бонус: +20% к прибыли!</i>")
 
@@ -2796,7 +2834,7 @@ def cmd_miner(message):
 
     if not has_farm:
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("💻 Купить Крипто-Ферму (18,000 🪙)", callback_data="buy_biz_crypto_farm"))
+        markup.add(InlineKeyboardButton("💻 Купить Крипто-Ферму (18,000 🪙)", callback_data=f"buy_biz_crypto_farm:{user_id}"))
         text = (
             "💻 <b>КРИПТО-МАЙНИНГ СТАНЦИЯ</b>\n"
             "──────────────────────\n"
@@ -2814,8 +2852,8 @@ def cmd_miner(message):
     markup = InlineKeyboardMarkup()
     if lvl < 5:
         upg_cost = BUSINESSES['crypto_farm']['upgrade_cost'] * lvl
-        markup.add(InlineKeyboardButton(f"⭐ Улучшить видеокарты (ур. {lvl+1}) — {upg_cost} 🪙", callback_data="upg_biz_crypto_farm"))
-    markup.add(InlineKeyboardButton("💰 Собрать прибыль с фермы", callback_data="collect_biz_profit"))
+        markup.add(InlineKeyboardButton(f"⭐ Улучшить видеокарты (ур. {lvl+1}) — {upg_cost} 🪙", callback_data=f"upg_biz_crypto_farm:{user_id}"))
+    markup.add(InlineKeyboardButton("💰 Собрать прибыль с фермы", callback_data=f"collect_biz_profit:{user_id}"))
 
     text = (
         f"💻 <b>ВАША КРИПТО-ФЕРМА (УРОВЕНЬ {lvl}/5)</b>\n"
@@ -2897,21 +2935,21 @@ def cmd_collect(message):
 def render_bank_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     interest_earned = update_bank_interest(econ)
-    save_data(send_backup=False)
+    mark_dirty()
 
     deposit = econ.get('bank_deposit', 0)
     pocket = econ.get('balance', 0)
 
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📥 Внести 100 🪙", callback_data="bank_dep_100"),
-        InlineKeyboardButton("📥 Внести всё", callback_data="bank_dep_all")
+        InlineKeyboardButton("📥 Внести 100 🪙", callback_data=f"bank_dep_100:{user_id}"),
+        InlineKeyboardButton("📥 Внести всё", callback_data=f"bank_dep_all:{user_id}")
     )
     markup.add(
-        InlineKeyboardButton("📤 Снять 100 🪙", callback_data="bank_wd_100"),
-        InlineKeyboardButton("📤 Снять всё", callback_data="bank_wd_all")
+        InlineKeyboardButton("📤 Снять 100 🪙", callback_data=f"bank_wd_100:{user_id}"),
+        InlineKeyboardButton("📤 Снять всё", callback_data=f"bank_wd_all:{user_id}")
     )
-    markup.add(InlineKeyboardButton("🔄 Обновить баланс", callback_data="bank_refresh"))
+    markup.add(InlineKeyboardButton("🔄 Обновить баланс", callback_data=f"bank_refresh:{user_id}"))
 
     text = (
         f"🏦 <b>НЯ-БАНК | НАКОПИТЕЛЬНЫЙ СЧЁТ</b>\n"
@@ -3004,8 +3042,8 @@ def render_lottery_view(chat_id, user_id, user_name, message_id=None):
 
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🎟 Купить 1 билет (100 🪙)", callback_data="buy_ticket_1"),
-        InlineKeyboardButton("🎟 Купить 5 билетов (500 🪙)", callback_data="buy_ticket_5")
+        InlineKeyboardButton("🎟 Купить 1 билет (100 🪙)", callback_data=f"buy_ticket_1:{user_id}"),
+        InlineKeyboardButton("🎟 Купить 5 билетов (500 🪙)", callback_data=f"buy_ticket_5:{user_id}")
     )
 
     my_tickets = tickets.get(str(user_id), 0)
@@ -3069,16 +3107,17 @@ def cmd_history(message):
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
 
-def render_settings_view(chat_id, message_id=None):
+def render_settings_view(chat_id, user_id=None, message_id=None):
     sett = get_chat_settings(chat_id)
     del_msg_status = "✅ Включено" if sett.get('delete_rest_msg', False) else "❌ Выключено"
     summer_status = "✅ Включена" if sett.get('summer_music', True) else "❌ Выключена"
 
+    uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"⏳ Макс. дней реста: {sett['max_days']} дн.", callback_data="set_max_days"))
-    markup.add(InlineKeyboardButton(f"🗑 Авто-удаление смс в ресте: {del_msg_status}", callback_data="toggle_del_msg"))
-    markup.add(InlineKeyboardButton(f"☀️ Музыка лета каждый час: {summer_status}", callback_data="toggle_summer_music"))
-    markup.add(InlineKeyboardButton(f"🔔 Напоминание за: {sett.get('remind_minutes', 60)} мин.", callback_data="set_remind_time"))
+    markup.add(InlineKeyboardButton(f"⏳ Макс. дней реста: {sett['max_days']} дн.", callback_data=f"set_max_days{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🗑 Авто-удаление смс в ресте: {del_msg_status}", callback_data=f"toggle_del_msg{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"☀️ Музыка лета каждый час: {summer_status}", callback_data=f"toggle_summer_music{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🔔 Напоминание за: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
 
     text = (
         f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b>\n"
@@ -3105,7 +3144,7 @@ def cmd_settings(message):
     if not is_admin(message.chat.id, message.from_user.id):
         bot.reply_to(message, "❌ Настройки доступны только администраторам чата!")
         return
-    render_settings_view(message.chat.id)
+    render_settings_view(message.chat.id, message.from_user.id)
 
 
 # ---------------------------------------------------------
@@ -3203,16 +3242,16 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     if purchased_titles:
         for title_key in purchased_titles:
             if title_key in TITLES and title_key != active_title:
-                markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}"))
+                markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}:{user_id}"))
         if active_title or custom_title:
-            markup.add(InlineKeyboardButton('❌ Снять текущий титул', callback_data='remove_title'))
+            markup.add(InlineKeyboardButton('❌ Снять текущий титул', callback_data=f'remove_title:{user_id}'))
 
     purchased_themes = econ.get('purchased_themes', ['default'])
     if len(purchased_themes) > 1:
         theme_row = []
         for t_k in purchased_themes:
             if t_k != theme_key and t_k in THEMES:
-                theme_row.append(InlineKeyboardButton(f"Стиль: {THEMES[t_k]['name']}", callback_data=f"set_theme_{t_k}"))
+                theme_row.append(InlineKeyboardButton(f"Стиль: {THEMES[t_k]['name']}", callback_data=f"set_theme_{t_k}:{user_id}"))
         if theme_row:
             markup.add(*theme_row)
 
@@ -3296,14 +3335,14 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         row = []
         for emoji in inv:
             if emoji != current_badge:
-                row.append(InlineKeyboardButton(f"Надеть {emoji}", callback_data=f"set_badge_{emoji}"))
+                row.append(InlineKeyboardButton(f"Надеть {emoji}", callback_data=f"set_badge_{emoji}:{user_id}"))
                 if len(row) == 3:
                     markup.add(*row)
                     row = []
         if row:
             markup.add(*row)
         if current_badge != "Отсутствует":
-            markup.add(InlineKeyboardButton("❌ Снять значок", callback_data="remove_badge"))
+            markup.add(InlineKeyboardButton("❌ Снять значок", callback_data=f"remove_badge:{user_id}"))
 
     if message_id_to_edit:
         try:
@@ -3336,18 +3375,18 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton('✨ Значки для профиля', callback_data='shop_cat_badges'),
-        InlineKeyboardButton('👑 Титулы с баффами', callback_data='shop_cat_titles')
+        InlineKeyboardButton('✨ Значки для профиля', callback_data=f'shop_cat_badges:{user_id}'),
+        InlineKeyboardButton('👑 Титулы с баффами', callback_data=f'shop_cat_titles:{user_id}')
     )
     markup.add(
-        InlineKeyboardButton('🎨 Темы профиля', callback_data='shop_cat_themes'),
-        InlineKeyboardButton('🧰 Расходники и баффы', callback_data='shop_cat_buffs')
+        InlineKeyboardButton('🎨 Темы профиля', callback_data=f'shop_cat_themes:{user_id}'),
+        InlineKeyboardButton('🧰 Расходники и баффы', callback_data=f'shop_cat_buffs:{user_id}')
     )
     markup.add(
-        InlineKeyboardButton('💍 Кольца для брака', callback_data='shop_cat_rings'),
-        InlineKeyboardButton('🐾 Зоомагазин (Питомцы)', callback_data='shop_cat_pets')
+        InlineKeyboardButton('💍 Кольца для брака', callback_data=f'shop_cat_rings:{user_id}'),
+        InlineKeyboardButton('🐾 Зоомагазин (Питомцы)', callback_data=f'shop_cat_pets:{user_id}')
     )
-    markup.add(InlineKeyboardButton('🏎 Автосалон (Гараж)', callback_data='shop_cat_garage'))
+    markup.add(InlineKeyboardButton('🏎 Автосалон (Гараж)', callback_data=f'shop_cat_garage:{user_id}'))
 
     text = (
         "🏪 <b>ГЛОБАЛЬНЫЙ МАГАЗИН НЯ-БОТА</b>\n"
@@ -3856,9 +3895,9 @@ def cmd_work(message):
     markup = InlineKeyboardMarkup()
     for job_id, job in JOBS.items():
         btn_text = f"{job['name']} ({job['req_exp']} EXP)"
-        markup.add(InlineKeyboardButton(btn_text, callback_data=f"do_job_{job_id}"))
+        markup.add(InlineKeyboardButton(btn_text, callback_data=f"do_job_{job_id}:{user_id}"))
 
-    markup.add(InlineKeyboardButton("🎓 Пройти тренировку (+EXP)", callback_data="train_exp_btn"))
+    markup.add(InlineKeyboardButton("🎓 Пройти тренировку (+EXP)", callback_data=f"train_exp_btn:{user_id}"))
     bot.reply_to(message, "\n".join(lines), reply_markup=markup, parse_mode='HTML')
 
 
@@ -4085,23 +4124,24 @@ def cmd_chromosomes(message):
 # ---------------------------------------------------------
 # ИНТЕРАКТИВНЫЕ ТОПЫ С КНОПКАМИ
 # ---------------------------------------------------------
-def render_top_menu(chat_id, category='rich', message_id=None):
+def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     econ_items = db.get('economy', {})
     now = time.time()
+    uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("💰 Богачи", callback_data="top_cat_rich"),
-        InlineKeyboardButton("🍆 Писюн", callback_data="top_cat_dick")
+        InlineKeyboardButton("💰 Богачи", callback_data=f"top_cat_rich{uid_tag}"),
+        InlineKeyboardButton("🍆 Писюн", callback_data=f"top_cat_dick{uid_tag}")
     )
     markup.add(
-        InlineKeyboardButton("🧠 IQ", callback_data="top_cat_iq"),
-        InlineKeyboardButton("🥩 Жир", callback_data="top_cat_fat")
+        InlineKeyboardButton("🧠 IQ", callback_data=f"top_cat_iq{uid_tag}"),
+        InlineKeyboardButton("🥩 Жир", callback_data=f"top_cat_fat{uid_tag}")
     )
     markup.add(
-        InlineKeyboardButton("🦶 Пятки", callback_data="top_cat_foot"),
-        InlineKeyboardButton("🧬 Хромосомы", callback_data="top_cat_chr")
+        InlineKeyboardButton("🦶 Пятки", callback_data=f"top_cat_foot{uid_tag}"),
+        InlineKeyboardButton("🧬 Хромосомы", callback_data=f"top_cat_chr{uid_tag}")
     )
-    markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data="top_cat_msg"))
+    markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg{uid_tag}"))
 
     # Фильтрация игроков под маской-невидимкой
     visible_items = {k: v for k, v in econ_items.items() if category in ['rich', 'msg'] or v.get('invis_until', 0) <= now}
@@ -4168,7 +4208,7 @@ def render_top_menu(chat_id, category='rich', message_id=None):
 
 @bot.message_handler(commands=['top', 'топ'])
 def cmd_top(message):
-    render_top_menu(message.chat.id, category='rich')
+    render_top_menu(message.chat.id, user_id=message.from_user.id, category='rich')
 
 
 # ---------------------------------------------------------
@@ -4184,6 +4224,22 @@ def handle_messages(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
     text_lower = text.lower()
     now_ts = time.time()
+
+    is_super_admin = (user_username == ADMIN_USERNAME.lower())
+
+    # 🛑 ПРОВЕРКА РЕЖИМА ОБСЛУЖИВАНИЯ / СНА
+    bot_is_active = db.get('bot_active', True)
+    if not bot_is_active:
+        if is_super_admin and text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
+            db['bot_active'] = True
+            save_data()
+            log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде @{user_username}')
+            bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b>", parse_mode='HTML')
+            return
+        elif is_super_admin:
+            pass  # Супер-админ может пользоваться командами
+        else:
+            return  # Для обычных пользователей бот спит
 
     last_chat_activity[chat_id] = now_ts
 
@@ -4242,27 +4298,33 @@ def handle_messages(message):
             return
 
     # 👑 КОМАНДЫ СОЗДАТЕЛЯ
-    is_super_admin = (user_username == ADMIN_USERNAME.lower())
-
     if is_super_admin:
         if text_lower in ['/admin', '/admin_help', 'админ', 'админка']:
             admin_help_text = (
                 "👑 <b>ПАНЕЛЬ УПРАВЛЕНИЯ СОЗДАТЕЛЯ (@ukrgorilka):</b>\n"
                 "──────────────────────\n"
+                "• <code>/stop_bot</code> — перевести бота в спящий режим (техработы)\n"
+                "• <code>/start_bot</code> — возобновить работу бота\n"
                 "• <code>/take_coins @username 500</code> — списать коины\n"
                 "• <code>/give_coins @username 1000</code> — выдать коины\n"
-                "• <code>/stop_bot</code> — экстренная остановка и бекап\n"
                 "──────────────────────"
             )
             bot.reply_to(message, admin_help_text, parse_mode='HTML')
             return
 
         if text_lower in ['/stop_bot', '/shutdown', 'выключить бота', 'остановить бота']:
-            bot.reply_to(message, "🛑 <b>Бот экстренно останавливается...</b>\nДанные сохранены!", parse_mode='HTML')
+            db['bot_active'] = False
             save_data(send_backup=True)
-            log_event('ВЫКЛЮЧЕНИЕ', f'Бот остановлен администратором @{user_username}')
-            time.sleep(1)
-            os._exit(0)
+            log_event('ОСТАНОВКА', f'Бот переведён в спящий режим администратором @{user_username}')
+            bot.reply_to(message, "🛑 <b>Бот переведён в спящий режим (технические работы).</b>\nКоманды приостановлены. Для включения введите: <code>/start_bot</code>", parse_mode='HTML')
+            return
+
+        if text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
+            db['bot_active'] = True
+            save_data()
+            log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде @{user_username}')
+            bot.reply_to(message, "🟢 <b>Бот успешно запущен и готов к работе!</b>", parse_mode='HTML')
+            return
 
         m_take = re.match(r'^(?:/take_coins|/take|забрать\s+коины|списать\s+коины)\s*(.*)', text, re.IGNORECASE)
         if m_take:
@@ -4762,28 +4824,28 @@ def handle_messages(message):
 
     # ТОПЫ ТЕКСТОМ
     elif text_lower in ['топ', 'топы', 'лидеры']:
-        render_top_menu(chat_id, category='rich')
+        render_top_menu(chat_id, user_id=user_id, category='rich')
         return
     elif text_lower in ['топ богачей', 'топ баланс', 'топ денег']:
-        render_top_menu(chat_id, category='rich')
+        render_top_menu(chat_id, user_id=user_id, category='rich')
         return
     elif text_lower in ['топ писюнов', 'топ писюн', 'топ член']:
-        render_top_menu(chat_id, category='dick')
+        render_top_menu(chat_id, user_id=user_id, category='dick')
         return
     elif text_lower in ['топ айкью', 'топ iq', 'топ умных']:
-        render_top_menu(chat_id, category='iq')
+        render_top_menu(chat_id, user_id=user_id, category='iq')
         return
     elif text_lower in ['топ жир', 'топ жира', 'топ жирных']:
-        render_top_menu(chat_id, category='fat')
+        render_top_menu(chat_id, user_id=user_id, category='fat')
         return
     elif text_lower in ['топ пяток', 'топ пятка']:
-        render_top_menu(chat_id, category='foot')
+        render_top_menu(chat_id, user_id=user_id, category='foot')
         return
     elif text_lower in ['топ хромосом', 'топ хромосомы']:
-        render_top_menu(chat_id, category='chr')
+        render_top_menu(chat_id, user_id=user_id, category='chr')
         return
     elif text_lower in ['топ сообщений', 'топ актива', 'топ смс']:
-        render_top_menu(chat_id, category='msg')
+        render_top_menu(chat_id, user_id=user_id, category='msg')
         return
 
     # СПОРТ-ИГРЫ ТЕКСТОМ
@@ -5082,7 +5144,7 @@ def handle_messages(message):
 
 
 # ---------------------------------------------------------
-# ОБРАБОТКА CALLBACK КНОПОК
+# ОБРАБОТКА CALLBACK КНОПОК (С ЗАЩИТОЙ ОТ ЧУЖИХ НАЖАТИЙ)
 # ---------------------------------------------------------
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
@@ -5091,24 +5153,53 @@ def callback_inline(call):
     user_name = (f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}").strip() or call.from_user.username
     user_username = (call.from_user.username or '').lower()
 
+    # 🛑 ПРОВЕРКА РЕЖИМА СНА
+    bot_is_active = db.get('bot_active', True)
+    is_super_admin = (user_username == ADMIN_USERNAME.lower())
+    if not bot_is_active and not is_super_admin:
+        bot.answer_callback_query(call.id, "⏳ Бот временно на техобслуживании!", show_alert=True)
+        return
+
     if call.data == 'noop':
         bot.answer_callback_query(call.id)
         return
 
+    # Вспомогательная функция извлечения owner_id из callback_data (формат "action:owner_id")
+    raw_data = call.data
+    owner_id = None
+    action_data = raw_data
+
+    if ':' in raw_data:
+        parts = raw_data.rsplit(':', 1)
+        if parts[1].isdigit():
+            action_data = parts[0]
+            owner_id = int(parts[1])
+
+    # Проверка владельца меню (если вшит owner_id)
+    if owner_id and owner_id != user_id:
+        # Для настроек чата даем доступ любому админу
+        if action_data in ['set_max_days', 'toggle_del_msg', 'toggle_summer_music', 'set_remind_time']:
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Настройки доступны только администраторам!", show_alert=True)
+                return
+        else:
+            bot.answer_callback_query(call.id, "❌ Это меню открыто другим пользователем!", show_alert=True)
+            return
+
     # НАВИГАЦИЯ СПРАВОЧНИКА
-    if call.data == 'help_main':
+    if action_data == 'help_main':
         try:
             bot.edit_message_text(
                 "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b>\n──────────────────────\nВыберите интересующий вас раздел:",
                 chat_id=chat_id,
                 message_id=call.message.message_id,
-                reply_markup=get_main_menu_markup(),
+                reply_markup=get_main_menu_markup(user_id),
                 parse_mode='HTML'
             )
         except Exception:
             pass
 
-    elif call.data == 'help_sports':
+    elif action_data == 'help_sports':
         text = (
             "⚽️ <b>СПОРТИВНЫЕ ИГРЫ И КАЗИНО TELEGRAM</b>\n"
             "──────────────────────\n"
@@ -5122,10 +5213,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_themes_buffs':
+    elif action_data == 'help_themes_buffs':
         text = (
             "🎨 <b>ТЕМЫ ПРОФИЛЯ И РАСХОДНИКИ</b>\n"
             "──────────────────────\n"
@@ -5138,10 +5229,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_heroes':
+    elif action_data == 'help_heroes':
         text = (
             "🏆 <b>УДАРНИКИ И ГЕРОИ ДНЯ</b>\n"
             "──────────────────────\n"
@@ -5153,10 +5244,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_sims':
+    elif action_data == 'help_sims':
         text = (
             "🍆 <b>МЕМНЫЕ СИМУЛЯТОРЫ, ШАР И ЗАМЕРЫ</b>\n"
             "──────────────────────\n"
@@ -5170,10 +5261,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_rests':
+    elif action_data == 'help_rests':
         text = (
             "🌴 <b>СИСТЕМА РЕСТОВ И ОТПУСКОВ</b>\n"
             "──────────────────────\n"
@@ -5185,10 +5276,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_biz':
+    elif action_data == 'help_biz':
         text = (
             "🏢 <b>БИЗНЕСЫ 2.0 И ГАРАЖ</b>\n"
             "──────────────────────\n"
@@ -5199,10 +5290,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_bank':
+    elif action_data == 'help_bank':
         text = (
             "🏦 <b>НЯ-БАНК И ДЕПОЗИТЫ</b>\n"
             "──────────────────────\n"
@@ -5213,10 +5304,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_crypto':
+    elif action_data == 'help_crypto':
         text = (
             "📈 <b>КРИПТО-БИРЖА</b>\n"
             "──────────────────────\n"
@@ -5227,10 +5318,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_pets':
+    elif action_data == 'help_pets':
         text = (
             "🐾 <b>ПИТОМЦЫ, КУЛИНАРИЯ И ОХОТА</b>\n"
             "──────────────────────\n"
@@ -5243,10 +5334,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_econ':
+    elif action_data == 'help_econ':
         text = (
             "💰 <b>ЭКОНОМИКА И КВЕСТЫ</b>\n"
             "──────────────────────\n"
@@ -5259,10 +5350,10 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'help_full_catalog':
+    elif action_data == 'help_full_catalog':
         text = (
             "📖 <b>ПОЛНЫЙ АЛФАВИТНЫЙ СПРАВОЧНИК КОМАНД:</b>\n"
             "──────────────────────\n"
@@ -5289,11 +5380,11 @@ def callback_inline(call):
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data="help_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
     # ИСПОЛЬЗОВАНИЕ РАСХОДНИКОВ ИЗ РЮКЗАКА
-    elif call.data == 'use_item_energy_drink':
+    elif action_data == 'use_item_energy_drink':
         econ = get_user_econ(user_id, user_name, username=user_username)
         bp = econ.setdefault('backpack', {})
         if bp.get('energy_drink', 0) <= 0:
@@ -5313,7 +5404,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "⚡️ Энергетик выпит! Все таймеры мгновенно сброшены!", show_alert=True)
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'use_item_luck_clover':
+    elif action_data == 'use_item_luck_clover':
         econ = get_user_econ(user_id, user_name, username=user_username)
         bp = econ.setdefault('backpack', {})
         if bp.get('luck_clover', 0) <= 0:
@@ -5325,7 +5416,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "🍀 Клевер активирован! +15% к удаче в играх на 1 час!", show_alert=True)
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'use_item_invis_mask':
+    elif action_data == 'use_item_invis_mask':
         econ = get_user_econ(user_id, user_name, username=user_username)
         bp = econ.setdefault('backpack', {})
         if bp.get('invis_mask', 0) <= 0:
@@ -5338,7 +5429,7 @@ def callback_inline(call):
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
     # МАГАЗИН: ТЕМЫ И БАФФЫ
-    elif call.data == 'shop_cat_buffs':
+    elif action_data == 'shop_cat_buffs':
         lines = [
             "🧰 <b>МАГАЗИН РАСХОДНИКОВ И БАФФОВ</b>",
             "──────────────────────",
@@ -5349,13 +5440,13 @@ def callback_inline(call):
         lines.append("──────────────────────")
 
         markup = InlineKeyboardMarkup(row_width=2)
-        btns = [InlineKeyboardButton(f"{b['short']} • {b['price']} 🪙", callback_data=f"buy_buff_{b_id}") for b_id, b in BUFF_ITEMS.items()]
+        btns = [InlineKeyboardButton(f"{b['short']} • {b['price']} 🪙", callback_data=f"buy_buff_{b_id}:{user_id}") for b_id, b in BUFF_ITEMS.items()]
         markup.add(*btns)
-        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data="shop_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data.startswith('buy_buff_'):
-        b_id = call.data.replace('buy_buff_', '')
+    elif action_data.startswith('buy_buff_'):
+        b_id = action_data.replace('buy_buff_', '')
         if b_id in BUFF_ITEMS:
             item = BUFF_ITEMS[b_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5368,7 +5459,7 @@ def callback_inline(call):
             save_data()
             bot.answer_callback_query(call.id, f"🎉 Куплен предмет: {item['short']}! Откройте /backpack", show_alert=True)
 
-    elif call.data == 'shop_cat_themes':
+    elif action_data == 'shop_cat_themes':
         lines = [
             "🎨 <b>КАТАЛОГ ТЕМ ОФОРМЛЕНИЯ ПРОФИЛЯ</b>",
             "──────────────────────",
@@ -5380,13 +5471,13 @@ def callback_inline(call):
         lines.append("──────────────────────")
 
         markup = InlineKeyboardMarkup(row_width=2)
-        btns = [InlineKeyboardButton(f"{t_v['name']} • {t_v['price']} 🪙", callback_data=f"buy_theme_{t_k}") for t_k, t_v in THEMES.items() if t_k != 'default']
+        btns = [InlineKeyboardButton(f"{t_v['name']} • {t_v['price']} 🪙", callback_data=f"buy_theme_{t_k}:{user_id}") for t_k, t_v in THEMES.items() if t_k != 'default']
         markup.add(*btns)
-        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data="shop_main"))
+        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data.startswith('buy_theme_'):
-        t_key = call.data.replace('buy_theme_', '')
+    elif action_data.startswith('buy_theme_'):
+        t_key = action_data.replace('buy_theme_', '')
         if t_key in THEMES:
             theme = THEMES[t_key]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5404,8 +5495,8 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"🎉 Куплена и активирована тема {theme['name']}!", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
-    elif call.data.startswith('set_theme_'):
-        t_key = call.data.replace('set_theme_', '')
+    elif action_data.startswith('set_theme_'):
+        t_key = action_data.replace('set_theme_', '')
         econ = get_user_econ(user_id, user_name, username=user_username)
         if t_key in econ.get('purchased_themes', ['default']):
             econ['profile_theme'] = t_key
@@ -5414,13 +5505,13 @@ def callback_inline(call):
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     # ПЕРЕКЛЮЧЕНИЕ ТОПОВ
-    elif call.data.startswith('top_cat_'):
-        cat = call.data.replace('top_cat_', '')
-        render_top_menu(chat_id, category=cat, message_id=call.message.message_id)
+    elif action_data.startswith('top_cat_'):
+        cat = action_data.replace('top_cat_', '')
+        render_top_menu(chat_id, user_id=user_id, category=cat, message_id=call.message.message_id)
 
     # САПЁР
-    elif call.data.startswith('mines_open_'):
-        m_match = re.match(r"^mines_open_(m_\d+_\d+)_(\d+)$", call.data)
+    elif action_data.startswith('mines_open_'):
+        m_match = re.match(r"^mines_open_(m_\d+_\d+)_(\d+)$", action_data)
         if not m_match:
             bot.answer_callback_query(call.id, "❌ Ошибка данных игры!", show_alert=True)
             return
@@ -5474,8 +5565,8 @@ def callback_inline(call):
             text_board, markup = render_mines_board(game_id)
             bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data.startswith('mines_cashout_'):
-        game_id = call.data.replace('mines_cashout_', '')
+    elif action_data.startswith('mines_cashout_'):
+        game_id = action_data.replace('mines_cashout_', '')
         game = active_mines.get(game_id)
         if not game or game.get('finished'):
             bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
@@ -5502,7 +5593,7 @@ def callback_inline(call):
         del active_mines[game_id]
 
     # УХОД ЗА ПИТОМЦЕМ
-    elif call.data == 'pet_feed':
+    elif action_data == 'pet_feed':
         econ = get_user_econ(user_id, user_name, username=user_username)
         pet = econ.get('pet')
         if not pet:
@@ -5522,7 +5613,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "🍖 Питомец вкусно покушал (+10 EXP)!")
         render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'pet_wash':
+    elif action_data == 'pet_wash':
         econ = get_user_econ(user_id, user_name, username=user_username)
         pet = econ.get('pet')
         if not pet:
@@ -5542,13 +5633,13 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "🧼 Питомец искупан до блеска (+10 EXP)!")
         render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'pet_walk_btn':
+    elif action_data == 'pet_walk_btn':
         bot.answer_callback_query(call.id)
         process_pet_walk(chat_id, user_id, user_name)
 
     # ПРОКАЧКА БИЗНЕСА
-    elif call.data.startswith('upg_biz_'):
-        b_id = call.data.replace('upg_biz_', '')
+    elif action_data.startswith('upg_biz_'):
+        b_id = action_data.replace('upg_biz_', '')
         if b_id in BUSINESSES:
             b_info = BUSINESSES[b_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5571,8 +5662,8 @@ def callback_inline(call):
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
     # ПОКУПКА БИЗНЕСА
-    elif call.data.startswith('buy_biz_'):
-        b_id = call.data.replace('buy_biz_', '')
+    elif action_data.startswith('buy_biz_'):
+        b_id = action_data.replace('buy_biz_', '')
         if b_id in BUSINESSES:
             b_info = BUSINESSES[b_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5592,7 +5683,7 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}!")
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
-    elif call.data == 'collect_biz_profit':
+    elif action_data == 'collect_biz_profit':
         econ = get_user_econ(user_id, user_name, username=user_username)
         user_biz = econ.get('businesses', {})
         biz_levels = econ.get('biz_levels', {})
@@ -5615,8 +5706,8 @@ def callback_inline(call):
         render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
     # ПОКУПКА ТРАНСПОРТА
-    elif call.data.startswith('buy_veh_'):
-        v_id = call.data.replace('buy_veh_', '')
+    elif action_data.startswith('buy_veh_'):
+        v_id = action_data.replace('buy_veh_', '')
         if v_id in VEHICLES:
             v_info = VEHICLES[v_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5647,8 +5738,8 @@ def callback_inline(call):
             render_garage_view(chat_id, user_id, user_name, call.message.message_id)
 
     # ПОКУПКА СНАСТЕЙ
-    elif call.data.startswith('buy_rod_'):
-        r_id = call.data.replace('buy_rod_', '')
+    elif action_data.startswith('buy_rod_'):
+        r_id = action_data.replace('buy_rod_', '')
         if r_id in RODS:
             r_info = RODS[r_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5660,8 +5751,8 @@ def callback_inline(call):
             save_data()
             bot.answer_callback_query(call.id, f"🎉 Вы экипировали {r_info['name']}!", show_alert=True)
 
-    elif call.data.startswith('buy_bow_'):
-        b_id = call.data.replace('buy_bow_', '')
+    elif action_data.startswith('buy_bow_'):
+        b_id = action_data.replace('buy_bow_', '')
         if b_id in BOWS:
             b_info = BOWS[b_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5674,10 +5765,10 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"🎉 Вы экипировали {b_info['name']}!", show_alert=True)
 
     # БАНК КНОПКИ
-    elif call.data == 'bank_refresh':
+    elif action_data == 'bank_refresh':
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'bank_dep_100':
+    elif action_data == 'bank_dep_100':
         econ = get_user_econ(user_id, user_name, username=user_username)
         if econ['balance'] < 100:
             bot.answer_callback_query(call.id, "❌ Недостаточно средств на руках!", show_alert=True)
@@ -5689,7 +5780,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "✅ Внесено 100 🪙 на депозит!")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'bank_dep_all':
+    elif action_data == 'bank_dep_all':
         econ = get_user_econ(user_id, user_name, username=user_username)
         b = econ.get('balance', 0)
         if b <= 0:
@@ -5702,7 +5793,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, f"✅ Внесено {b} 🪙 на депозит!")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'bank_wd_100':
+    elif action_data == 'bank_wd_100':
         econ = get_user_econ(user_id, user_name, username=user_username)
         if econ.get('bank_deposit', 0) < 100:
             bot.answer_callback_query(call.id, "❌ В банке меньше 100 🪙!", show_alert=True)
@@ -5713,7 +5804,7 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "✅ Снято 100 🪙 с депозита!")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'bank_wd_all':
+    elif action_data == 'bank_wd_all':
         econ = get_user_econ(user_id, user_name, username=user_username)
         dep = econ.get('bank_deposit', 0)
         if dep <= 0:
@@ -5726,8 +5817,8 @@ def callback_inline(call):
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
     # ЛОТЕРЕЯ
-    elif call.data in ['buy_ticket_1', 'buy_ticket_5']:
-        count = 1 if call.data == 'buy_ticket_1' else 5
+    elif action_data in ['buy_ticket_1', 'buy_ticket_5']:
+        count = 1 if action_data == 'buy_ticket_1' else 5
         cost = count * 100
         econ = get_user_econ(user_id, user_name, username=user_username)
 
@@ -5766,9 +5857,9 @@ def callback_inline(call):
             save_data()
             render_lottery_view(chat_id, user_id, user_name, call.message.message_id)
 
-    # ЧАТ-ДРОПЫ
-    elif call.data.startswith('claim_drop_'):
-        drop_id = call.data.replace('claim_', '')
+    # ЧАТ-ДРОПЫ (ОБЩЕДОСТУПНЫЕ)
+    elif raw_data.startswith('claim_drop_') or action_data.startswith('claim_drop_'):
+        drop_id = raw_data.replace('claim_', '').split(':')[0]
         drop = active_drops.get(drop_id)
         if not drop or drop.get('claimed'):
             bot.answer_callback_query(call.id, "❌ Этот подарок уже кто-то забрал!", show_alert=True)
@@ -5789,7 +5880,7 @@ def callback_inline(call):
         )
 
     # ТРЕНИРОВКА ОПЫТА
-    elif call.data == 'train_exp_btn':
+    elif action_data == 'train_exp_btn':
         success, text_resp = train_work_exp(user_id, user_name, username=user_username)
         bot.answer_callback_query(call.id, text_resp.replace('<b>', '').replace('</b>', ''), show_alert=True)
         if success:
@@ -5807,9 +5898,9 @@ def callback_inline(call):
             markup = InlineKeyboardMarkup()
             for job_id, job in JOBS.items():
                 btn_text = f"{job['name']} ({job['req_exp']} EXP)"
-                markup.add(InlineKeyboardButton(btn_text, callback_data=f"do_job_{job_id}"))
+                markup.add(InlineKeyboardButton(btn_text, callback_data=f"do_job_{job_id}:{user_id}"))
 
-            markup.add(InlineKeyboardButton("🎓 Пройти тренировку (+EXP)", callback_data="train_exp_btn"))
+            markup.add(InlineKeyboardButton("🎓 Пройти тренировку (+EXP)", callback_data=f"train_exp_btn:{user_id}"))
             try:
                 bot.edit_message_text(
                     "\n".join(lines),
@@ -5822,8 +5913,8 @@ def callback_inline(call):
                 pass
 
     # РАБОТА
-    elif call.data.startswith('do_job_'):
-        job_id = call.data.replace('do_job_', '')
+    elif action_data.startswith('do_job_'):
+        job_id = action_data.replace('do_job_', '')
         if job_id in JOBS:
             job = JOBS[job_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5853,8 +5944,8 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "❌ Вы ошиблись на смене! Получено +2 EXP.", show_alert=True)
 
     # БРАКИ
-    elif call.data.startswith('m_yes_') or call.data.startswith('m_no_'):
-        prop_id = call.data[6:]
+    elif raw_data.startswith('m_yes_') or raw_data.startswith('m_no_'):
+        prop_id = raw_data[6:].split(':')[0]
         prop = pending_marriages.get(prop_id)
         if not prop:
             bot.answer_callback_query(call.id, "❌ Предложение устарело!", show_alert=True)
@@ -5866,7 +5957,7 @@ def callback_inline(call):
         from_econ = get_user_econ(prop['from_id'], prop['from_tag'])
         to_econ = get_user_econ(user_id, user_name, username=user_username)
 
-        if call.data.startswith('m_yes_'):
+        if raw_data.startswith('m_yes_'):
             m_time = time.time()
             from_econ['marriage'] = {
                 'partner_id': user_id,
@@ -5904,8 +5995,8 @@ def callback_inline(call):
         del pending_marriages[prop_id]
 
     # БЛЭКДЖЕК
-    elif call.data.startswith('bj_hit_') or call.data.startswith('bj_stand_'):
-        game_id = call.data.split('_', 2)[2]
+    elif action_data.startswith('bj_hit_') or action_data.startswith('bj_stand_'):
+        game_id = action_data.split('_', 2)[2]
         game = active_bj_games.get(game_id)
         if not game or game.get('finished'):
             bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
@@ -5914,7 +6005,7 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
             return
 
-        if call.data.startswith('bj_hit_'):
+        if action_data.startswith('bj_hit_'):
             game['p_cards'].append(game['deck'].pop())
             p_score = calculate_bj_score(game['p_cards'])
             if p_score > 21:
@@ -5966,8 +6057,8 @@ def callback_inline(call):
             del active_bj_games[game_id]
 
     # РПС (ЦУЕФА)
-    elif call.data.startswith('rps_'):
-        m_rps = re.match(r"^rps_([rsp])_(rps_\d+_\d+_\d+)$", call.data)
+    elif action_data.startswith('rps_'):
+        m_rps = re.match(r"^rps_([rsp])_(rps_\d+_\d+_\d+)$", action_data)
         if not m_rps:
             bot.answer_callback_query(call.id, "❌ Ошибка данных дуэли!", show_alert=True)
             return
@@ -6016,7 +6107,7 @@ def callback_inline(call):
             del active_rps_games[game_id]
 
     # НАСТРОЙКИ (КНОПКИ)
-    elif call.data == 'set_max_days':
+    elif action_data == 'set_max_days':
         if not is_admin(chat_id, user_id):
             bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
             return
@@ -6026,9 +6117,9 @@ def callback_inline(call):
         sett['max_days'] = next_opt
         save_data()
         bot.answer_callback_query(call.id, f'✅ Лимит изменен на {next_opt} дней!')
-        render_settings_view(chat_id, call.message.message_id)
+        render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
-    elif call.data == 'toggle_del_msg':
+    elif action_data == 'toggle_del_msg':
         if not is_admin(chat_id, user_id):
             bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
             return
@@ -6036,9 +6127,9 @@ def callback_inline(call):
         sett['delete_rest_msg'] = not sett['delete_rest_msg']
         save_data()
         bot.answer_callback_query(call.id, f"✅ Авто-удаление: {'Включено' if sett['delete_rest_msg'] else 'Выключено'}")
-        render_settings_view(chat_id, call.message.message_id)
+        render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
-    elif call.data == 'toggle_summer_music':
+    elif action_data == 'toggle_summer_music':
         if not is_admin(chat_id, user_id):
             bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
             return
@@ -6046,9 +6137,9 @@ def callback_inline(call):
         sett['summer_music'] = not sett.get('summer_music', True)
         save_data()
         bot.answer_callback_query(call.id, f"✅ Музыка лета: {'Включена' if sett['summer_music'] else 'Выключена'}")
-        render_settings_view(chat_id, call.message.message_id)
+        render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
-    elif call.data == 'set_remind_time':
+    elif action_data == 'set_remind_time':
         if not is_admin(chat_id, user_id):
             bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
             return
@@ -6058,16 +6149,16 @@ def callback_inline(call):
         sett['remind_minutes'] = next_opt
         save_data()
         bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин!')
-        render_settings_view(chat_id, call.message.message_id)
+        render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
     # МАГАЗИН КАТАЛОГИ
-    elif call.data == 'shop_main':
+    elif action_data == 'shop_main':
         send_shop_menu(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'shop_cat_garage':
+    elif action_data == 'shop_cat_garage':
         render_garage_view(chat_id, user_id, user_name, call.message.message_id)
 
-    elif call.data == 'shop_cat_titles':
+    elif action_data == 'shop_cat_titles':
         lines = [
             "👑 <b>КАТАЛОГ ТИТУЛОВ С ПАССИВНЫМИ БАФФАМИ</b>",
             "──────────────────────",
@@ -6079,13 +6170,13 @@ def callback_inline(call):
         lines.append("──────────────────────")
 
         markup = InlineKeyboardMarkup(row_width=2)
-        btns = [InlineKeyboardButton(f"{t_info['text']} • {t_info['price']} 🪙", callback_data=f"buy_title_{t_key}") for t_key, t_info in TITLES.items()]
+        btns = [InlineKeyboardButton(f"{t_info['text']} • {t_info['price']} 🪙", callback_data=f"buy_title_{t_key}:{user_id}") for t_key, t_info in TITLES.items()]
         markup.add(*btns)
-        markup.add(InlineKeyboardButton('🌟 Сертификат Своего Титула (15к 🪙)', callback_data='buy_cert_custom_title'))
-        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data='shop_main'))
+        markup.add(InlineKeyboardButton('🌟 Сертификат Своего Титула (15к 🪙)', callback_data=f'buy_cert_custom_title:{user_id}'))
+        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'shop_cat_badges':
+    elif action_data == 'shop_cat_badges':
         lines = [
             "✨ <b>КАТАЛОГ ЗНАЧКОВ ДЛЯ ПРОФИЛЯ</b>",
             "──────────────────────",
@@ -6096,12 +6187,12 @@ def callback_inline(call):
         lines.append("──────────────────────")
 
         markup = InlineKeyboardMarkup(row_width=3)
-        btns = [InlineKeyboardButton(f"{b_info['emoji']} {b_info['price']} 🪙", callback_data=f"buy_badge_{b_key}") for b_key, b_info in BADGES.items()]
+        btns = [InlineKeyboardButton(f"{b_info['emoji']} {b_info['price']} 🪙", callback_data=f"buy_badge_{b_key}:{user_id}") for b_key, b_info in BADGES.items()]
         markup.add(*btns)
-        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data='shop_main'))
+        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'shop_cat_rings':
+    elif action_data == 'shop_cat_rings':
         lines = [
             "💍 <b>КАТАЛОГ ОБРУЧАЛЬНЫХ КОЛЕЦ</b>",
             "──────────────────────",
@@ -6112,12 +6203,12 @@ def callback_inline(call):
         lines.append("──────────────────────")
 
         markup = InlineKeyboardMarkup(row_width=2)
-        btns = [InlineKeyboardButton(f"{r_info['emoji']} {r_info['name']} • {r_info['price']} 🪙", callback_data=f"buy_ring_{r_id}") for r_id, r_info in RINGS.items()]
+        btns = [InlineKeyboardButton(f"{r_info['emoji']} {r_info['name']} • {r_info['price']} 🪙", callback_data=f"buy_ring_{r_id}:{user_id}") for r_id, r_info in RINGS.items()]
         markup.add(*btns)
-        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data='shop_main'))
+        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'shop_cat_pets':
+    elif action_data == 'shop_cat_pets':
         lines = [
             "🐾 <b>ЗОМАГАЗИН: ПИТОМЦЫ 2.0</b>",
             "──────────────────────",
@@ -6128,12 +6219,12 @@ def callback_inline(call):
         lines.append("──────────────────────")
 
         markup = InlineKeyboardMarkup(row_width=2)
-        btns = [InlineKeyboardButton(f"{p['short']} — {p['price']} 🪙", callback_data=f"buy_pet_{p_id}") for p_id, p in PETS_DATA.items()]
+        btns = [InlineKeyboardButton(f"{p['short']} — {p['price']} 🪙", callback_data=f"buy_pet_{p_id}:{user_id}") for p_id, p in PETS_DATA.items()]
         markup.add(*btns)
-        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data='shop_main'))
+        markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif call.data == 'buy_cert_custom_title':
+    elif action_data == 'buy_cert_custom_title':
         econ = get_user_econ(user_id, user_name, username=user_username)
         if econ.get('has_custom_title_cert', False):
             bot.answer_callback_query(call.id, '❌ Сертификат уже куплен! Введите /custom_title', show_alert=True)
@@ -6146,8 +6237,8 @@ def callback_inline(call):
         save_data()
         bot.answer_callback_query(call.id, '🎉 Сертификат приобретен! Установите титул: /custom_title Ваш Титул', show_alert=True)
 
-    elif call.data.startswith('buy_ring_'):
-        r_id = call.data.replace('buy_ring_', '')
+    elif action_data.startswith('buy_ring_'):
+        r_id = action_data.replace('buy_ring_', '')
         if r_id in RINGS:
             r_info = RINGS[r_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -6159,8 +6250,8 @@ def callback_inline(call):
             save_data()
             bot.answer_callback_query(call.id, f"🎉 Вы приобрели {r_info['name']}!", show_alert=True)
 
-    elif call.data.startswith('buy_title_'):
-        title_key = call.data.replace('buy_title_', '')
+    elif action_data.startswith('buy_title_'):
+        title_key = action_data.replace('buy_title_', '')
         if title_key in TITLES:
             item = TITLES[title_key]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -6178,8 +6269,8 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"🎉 Куплен титул {item['text']}!", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
-    elif call.data.startswith('buy_badge_'):
-        badge_key = call.data.replace('buy_badge_', '')
+    elif action_data.startswith('buy_badge_'):
+        badge_key = action_data.replace('buy_badge_', '')
         if badge_key in BADGES:
             item = BADGES[badge_key]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -6195,8 +6286,8 @@ def callback_inline(call):
             save_data()
             bot.answer_callback_query(call.id, f"🎉 Куплен значок {item['emoji']}!", show_alert=True)
 
-    elif call.data.startswith('buy_pet_'):
-        pet_id = call.data.replace('buy_pet_', '')
+    elif action_data.startswith('buy_pet_'):
+        pet_id = action_data.replace('buy_pet_', '')
         if pet_id in PETS_DATA:
             p_data = PETS_DATA[pet_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -6218,8 +6309,8 @@ def callback_inline(call):
             render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
     # УПРАВЛЕНИЕ ПРОФИЛЕМ (ТИТУЛЫ И ЗНАЧКИ)
-    elif call.data.startswith('set_title_'):
-        title_key = call.data.replace('set_title_', '')
+    elif action_data.startswith('set_title_'):
+        title_key = action_data.replace('set_title_', '')
         econ = get_user_econ(user_id, user_name, username=user_username)
         if title_key in econ.get('titles', []) and title_key in TITLES:
             econ['active_title'] = title_key
@@ -6228,7 +6319,7 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"✅ Надет титул {TITLES[title_key]['text']}!", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
-    elif call.data == 'remove_title':
+    elif action_data == 'remove_title':
         econ = get_user_econ(user_id, user_name, username=user_username)
         econ['active_title'] = None
         econ['custom_title'] = None
@@ -6236,8 +6327,8 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, '❌ Титул снят!', show_alert=True)
         send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
-    elif call.data.startswith('set_badge_'):
-        selected_emoji = call.data.replace('set_badge_', '')
+    elif action_data.startswith('set_badge_'):
+        selected_emoji = action_data.replace('set_badge_', '')
         econ = get_user_econ(user_id, user_name, username=user_username)
         if selected_emoji in econ.get('inventory', []):
             econ['badge'] = selected_emoji
@@ -6245,7 +6336,7 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"✅ Надет значок {selected_emoji}!", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
-    elif call.data == 'remove_badge':
+    elif action_data == 'remove_badge':
         econ = get_user_econ(user_id, user_name, username=user_username)
         econ['badge'] = None
         save_data()
@@ -6257,9 +6348,8 @@ def callback_inline(call):
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ
 # ---------------------------------------------------------
 setup_bot_commands()
-restore_timers()
 start_background_threads()
 keep_alive()
 
-print('Бот успешно запущен со всеми обновлениями и подключен ко всем каналам!')
+print('Бот успешно запущен со всеми обновлениями и защитой от перехвата кнопок!')
 bot.infinity_polling()
