@@ -66,9 +66,10 @@ def normalize_tg_id(cid_val):
         return 0
 
 
-# ID каналов
+# ID каналов и чатов
 DB_CHANNEL_ID = normalize_tg_id(os.environ.get('DB_CHANNEL_ID', '-1004334874700'))
 LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-1004369517562'))
+VD_CHAT_ID = normalize_tg_id(os.environ.get('VD_CHAT_ID', '-1003703264754'))
 DATA_FILE = 'rests_data.json'
 
 ADMIN_USERNAME = 'ukrgorilka'
@@ -105,6 +106,30 @@ DURATION_PATTERN = (
     r'январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)|'
     r'на\s+неопредел[её]нный\s+срок|неопредел[её]нный\s+срок|бессрочно|без\s+срока|навсегда)'
 )
+
+# ---------------------------------------------------------
+# БАЗА ЗНАНИЙ VIOLENCE DISTRICT (18 ФАКТОВ)
+# ---------------------------------------------------------
+VD_FACTS = [
+    ("🏥 Больница Милосердия", "Карта «Крыша больницы милосердия» полностью вдохновлена и перенесена из культовой игры Left 4 Dead (первая кампания «No Mercy»)."),
+    ("👕 Ретро-гардероб", "До крупного обновления с Вейл все маньяки в игре имели классическую 2D-одежду (текстуры)."),
+    ("🪓 Первый охотник", "Самым первым стартовым маньяком в игре является The Slasher — Джейсон Вурхиз из легендарной франшизы «Пятница 13-е»."),
+    ("🩸 Тайна подвала", "В подвале на карте «Кровавая Баня» за генератором или шкафом есть надпись «I know they have seen the basement» («Я знаю, они видели подвал»)."),
+    ("🔦 Пасхалка Сайлент Хилл", "На карте «Кровавая Баня» в закрытой конструкции туалетной зоны спрятано фото Джеймса из игры «Silent Hill 2»."),
+    ("📰 Новости Блоксбурга", "На втором этаже «Кровавой Бани» есть забавная пасхалка на Bloxburg News Guy."),
+    ("⚡️ Шиноби во дворе", "На «Кровавой Бане» во дворе возле выхода висит изображение Саске из аниме «Наруто»."),
+    ("👥 Оригинальная четверка", "Стартовый релизный ростер насчитывал всего 4 маньяка: Джейсон (The Slasher), Майкл Майерс (The Stalker), Джекет (The Masked) и Джефф (The Killer)."),
+    ("🐔 Сложности масок", "Сложнее всего разработчикам дался Джакет — его модель масок была тесно связана со способностями, и малейшее искажение формы рушило всю анимацию и вайб."),
+    ("🏚 Уютный дом Кожаного Лица", "И старое, и новое лобби в плейсе были скопированы с дома из слэшера «Техасская резня бензопилой»."),
+    ("🎧 Эволюция темы погони", "Джеффу трижды меняли музыку погони: самая первая была темой Легиона из «Dead by Daylight»."),
+    ("🔪 Судьба Саймона", "Саймона из «Cry of Fear» сначала планировали выпустить как отдельного убийцу, но в итоге сделали скином на Джеффа."),
+    ("🛸 Утраченная Носторомо", "Старая карта «Носторомо» была удалена из-за постоянных жалоб на лаги и просадки кадров на слабых устройствах."),
+    ("👤 Мексиканский след", "Ранний концепт Вейл изображал персонажа мужского пола (предположительно мексиканского происхождения)."),
+    ("🎬 Загадочное мори", "Когда-то создатель Yousef показывал в sneak-peeks анимацию добивания (мори), но в финальную версию она так и не вошла."),
+    ("🎀 Уникальная Джейн", "Музыка погони у скина «Джейн Убийца» имеет собственный уникальный саундтрек, отличный от темы Джеффа."),
+    ("⚔️ Эра Арториаса", "На релизе Арториас был абсолютной имбой из-за огромных хитбоксов и лёгкости управления, снискав нелюбовь комьюнити."),
+    ("👁 Забытая 3-я стадия", "У Майкла была 3-я стадия скорости и выпада, фото которой до сих пор осталось в его игровом меню.")
+]
 
 # ---------------------------------------------------------
 # ЭКОНОМИКА: ТОВАРЫ, ЗНАЧКИ, КОЛЬЦА, ТЕМЫ И РАСХОДНИКИ
@@ -470,6 +495,8 @@ active_bj_games = {}
 active_rps_games = {}
 active_drops = {}
 active_mines = {}
+active_crash = {}
+gold_rush_event = {'active': False, 'until': 0}
 current_quiz = {'question': None, 'answer': None, 'reward': 0, 'chat_id': None}
 
 user_flood_history = {}
@@ -582,6 +609,8 @@ def setup_bot_commands():
         BotCommand('del_pfp', '🗑 Удалить фото из профиля'),
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
         BotCommand('backpack', '🎒 Рюкзак баффов и расходников'),
+        BotCommand('crash', '🚀 Игра Краш (Взлетающая ракета)'),
+        BotCommand('fact_vd', '🩸 Случайный факт по Violence District'),
         BotCommand('wheel', '🎡 Бесплатное Колесо Фортуны'),
         BotCommand('mines', '💣 Игра Сапёр (Мины)'),
         BotCommand('football', '⚽️ Футбол пенальти'),
@@ -910,7 +939,6 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             'week_count': 0, 'month_key': '', 'month_count': 0, 'total_count': 0
         }
 
-    # Сброс ежедневных показателей по МСК (UTC+3)
     today_str = now_msk().strftime('%Y-%m-%d')
     if u_data.get('daily_stats_date') != today_str:
         u_data['daily_stats_date'] = today_str
@@ -1425,10 +1453,6 @@ def parse_transfer_command(message):
     text = message.text.strip() if message.text else ''
     body = re.sub(r'^(?:/pay|перевод|передать)\s*', '', text, flags=re.IGNORECASE).strip()
 
-    target_id = None
-    target_name = None
-    amount = 0
-
     if message.reply_to_message:
         u = message.reply_to_message.from_user
         target_id = u.id
@@ -1436,8 +1460,7 @@ def parse_transfer_command(message):
 
         clean_body = re.sub(r'@[a-zA-Z0-9_]{3,32}', '', body).strip()
         m_amt = re.search(r'\b(\d+)\b', clean_body)
-        if m_amt:
-            amount = int(m_amt.group(1))
+        amount = int(m_amt.group(1)) if m_amt else 0
         return target_id, target_name, amount
 
     m_num_first = re.match(r'^(\d+)\s+(.+)$', body)
@@ -1573,7 +1596,6 @@ def rest_manager_worker():
                     u_name = info.get('user_name', r_key)
                     remind_id = f"{str_chat_id}_{r_key}_{int(end_time)}"
 
-                    # Авто-снятие реста
                     if remaining <= 0:
                         del rests_dict[r_key]
                         add_to_history(str_chat_id, u_name, 'Истек', 'Снятие по таймеру', target_user_id, "Снят рест (авто)")
@@ -1586,7 +1608,6 @@ def rest_manager_worker():
                             pass
                         continue
 
-                    # Напоминание об окончании
                     if 0 < remaining <= remind_sec and remind_id not in notified_reminders:
                         notified_reminders.add(remind_id)
                         mins = int(remind_sec / 60)
@@ -1645,7 +1666,7 @@ def apply_rest(chat_id, user_name, duration_text, reason='Не указана', 
 
 
 # ---------------------------------------------------------
-# БЕЗОПАСНЫЙ КАЛЬКУЛЯТОР ДЛЯ ЧАТА (С ЗАЩИТОЙ ОТ DOS)
+# БЕЗОПАСНЫЙ КАЛЬКУЛЯТОР ДЛЯ ЧАТА
 # ---------------------------------------------------------
 def safe_calculate_math(expr_str):
     if len(expr_str) > 100:
@@ -1661,7 +1682,6 @@ def safe_calculate_math(expr_str):
             if not isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Num, 
                                      ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub, ast.UAdd)):
                 return None
-            # Защита от гигантских степеней (DoS)
             if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
                 if isinstance(node.right, ast.Constant) and (not isinstance(node.right.value, (int, float)) or node.right.value > 50):
                     return None
@@ -1680,8 +1700,67 @@ def safe_calculate_math(expr_str):
 
 
 # ---------------------------------------------------------
-# ФОНОВЫЕ ПОТОКИ: ЛЕТО 2025, ДРОПЫ, ВИКТОРИНЫ, ТИШИНА В ЧАТЕ
+# ФОНОВЫЕ ПОТОКИ: ЛЕТО, АВТО-ФАКТЫ VD, ДРОПЫ, ВИКТОРИНЫ, ЗОЛОТАЯ ЛИХОРАДКА
 # ---------------------------------------------------------
+def vd_facts_worker():
+    """Фоновый постинг эксклюзивных фактов о Violence District в специальный чат."""
+    while True:
+        time.sleep(random.randint(7200, 14400))
+        try:
+            if VD_CHAT_ID:
+                title, desc = random.choice(VD_FACTS)
+                msg_text = (
+                    "🩸 <b>ИНТЕРЕСНЫЙ ФАКТ | VIOLENCE DISTRICT</b> 🔪\n"
+                    "──────────────────────\n"
+                    f"📌 <b>{title}</b>\n"
+                    f"📖 <i>{desc}</i>\n"
+                    "──────────────────────\n"
+                    "💡 <i>Хотите еще? Введите в чате:</i> <code>факт вд</code>"
+                )
+                bot.send_message(VD_CHAT_ID, msg_text, parse_mode='HTML')
+        except Exception as e:
+            print(f"[VD FACTS ERROR] {e}")
+
+
+def gold_rush_worker():
+    """Ивент «Золотая лихорадка» с удвоенным шансом редкого улова и цен."""
+    global gold_rush_event
+    while True:
+        time.sleep(random.randint(10800, 21600))
+        try:
+            gold_rush_event['active'] = True
+            gold_rush_event['until'] = time.time() + 1800
+
+            rush_msg = (
+                "🌟🔥 <b>ВНИМАНИЕ! НАЧАЛАСЬ «ЗОЛОТАЯ ЛИХОРАДКА»!</b> 🔥🌟\n"
+                "──────────────────────\n"
+                "⏳ <b>Длительность:</b> 30 минут!\n"
+                "🎣 <b>Рыбалка и Охота:</b> Шанс редкой и легендарной добычи увеличен в <b>2 РАЗА</b>!\n"
+                "💰 <b>Скупщик:</b> Повышенные цены на продажу улова (<code>/sell</code>)!\n"
+                "──────────────────────\n"
+                "<i>Хватайте снасти и отправляйтесь на /fish и /hunt прямо сейчас!</i>"
+            )
+
+            active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
+            for str_chat_id in active_chats:
+                try:
+                    bot.send_message(int(str_chat_id), rush_msg, parse_mode='HTML')
+                except Exception:
+                    pass
+
+            time.sleep(1800)
+            gold_rush_event['active'] = False
+
+            end_msg = "⏱ <b>Золотая лихорадка завершилась!</b> Спасибо всем за активную добычу! 🏕"
+            for str_chat_id in active_chats:
+                try:
+                    bot.send_message(int(str_chat_id), end_msg, parse_mode='HTML')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 def summer_music_worker():
     while True:
         try:
@@ -1806,13 +1885,13 @@ def chat_quiz_worker():
         ("🧮 <b>БЫСТРАЯ МАТЕМАТИКА</b>\nСколько будет: <code>45 + 18 * 3</code>?", "99", 150),
         ("🧮 <b>БЫСТРАЯ МАТЕМАТИКА</b>\nСколько будет: <code>150 - 45 * 2</code>?", "60", 120),
         ("🧮 <b>БЫСТРАЯ МАТЕМАТИКА</b>\nСколько будет: <code>12 * 12 + 6</code>?", "150", 140),
+        ("🩸 <b>ВИКТОРИНА VIOLENCE DISTRICT</b>\nКакой самый первый маньяк появился в игре?", "джейсон", 200),
+        ("🩸 <b>ВИКТОРИНА VIOLENCE DISTRICT</b>\nИз какой игры вдохновлена карта «Крыша больницы милосердия»?", "left 4 dead", 220),
+        ("🩸 <b>ВИКТОРИНА VIOLENCE DISTRICT</b>\nСкином на какого маньяка стал Саймон из Cry of Fear?", "джефф", 200),
         ("🔤 <b>АНАГРАММА</b>\nСоберите слово из букв: <b>К О И Н Е М Е Т</b>", "экономика", 180),
         ("🔤 <b>АНАГРАММА</b>\nСоберите слово из букв: <b>Р Е С Т О П У К</b>", "проступок", 180),
-        ("🔤 <b>АНАГРАММА</b>\nСоберите слово из букв: <b>К О Т И К М Я У</b>", "мяукотик", 200),
         ("🎬 <b>УГАДАЙ ФИЛЬМ ПО ЭМОДЗИ</b>\n🚢 🧊 👩‍❤️‍👨 🎻", "титаник", 180),
         ("🎬 <b>УГАДАЙ ФИЛЬМ ПО ЭМОДЗИ</b>\n🧙‍♂️ 🧝‍♂️ 💍 🌋 👁", "властелин колец", 220),
-        ("🎬 <b>УГАДАЙ МУЛЬТФИЛЬМ ПО ЭМОДЗИ</b>\n🦁 👑 🐗 🐒 🌅", "король лев", 180),
-        ("🎬 <b>УГАДАЙ ФИЛЬМ ПО ЭМОДЗИ</b>\n⚡️ 🧙‍♂️ 👓 🏰 🚂", "гарри поттер", 180),
     ]
 
     while True:
@@ -1849,7 +1928,7 @@ def chat_silence_worker():
         "👀 В чате так тихо... Колитесь, кто чем сейчас занят? ☕️✨",
         "🐾 Котики напоминают: сделайте глоток водички, расправьте плечи и улыбнитесь! 🌸",
         "💭 Мысль часа: если кошка легла на клавиатуру — это не лень, это технический перерыв! 🐱🛋",
-        "🎲 Чат спит, а рулетка в <code>/wheel</code> ждёт своих победителей! Кто смелый крутануть? 🔥",
+        "🎲 Чат спит, а ракета в <code>/crash</code> и рулетка в <code>/wheel</code> ждут победителей! 🔥",
         "💬 Всем отличного настроения и продуктивного дня! Не забывайте заглядывать в <code>/tasks</code> 📋"
     ]
     while True:
@@ -1867,6 +1946,8 @@ def chat_silence_worker():
 
 
 def start_background_threads():
+    threading.Thread(target=vd_facts_worker, daemon=True).start()
+    threading.Thread(target=gold_rush_worker, daemon=True).start()
     threading.Thread(target=summer_music_worker, daemon=True).start()
     threading.Thread(target=random_chat_drops_worker, daemon=True).start()
     threading.Thread(target=market_news_worker, daemon=True).start()
@@ -1906,7 +1987,7 @@ def goodbye_left_member(message):
 
 
 # ---------------------------------------------------------
-# ПОЛНЫЙ ИНТЕРАКТИВНЫЙ СПРАВОЧНИК И ИНФО (/help, /info)
+# ГЛАВНОЕ МЕНЮ И СПРАВОЧНИК
 # ---------------------------------------------------------
 def get_main_menu_markup(owner_id):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -1927,10 +2008,11 @@ def get_main_menu_markup(owner_id):
         InlineKeyboardButton("🍆 Мемы, Шар и IQ", callback_data=f"help_sims:{owner_id}")
     )
     markup.add(
-        InlineKeyboardButton("🏆 Ударники Дня", callback_data=f"help_heroes:{owner_id}"),
-        InlineKeyboardButton("💰 Экономика и Квесты", callback_data=f"help_econ:{owner_id}")
+        InlineKeyboardButton("🩸 Факты Violence District", callback_data=f"help_vd:{owner_id}"),
+        InlineKeyboardButton("🏆 Ударники Дня", callback_data=f"help_heroes:{owner_id}")
     )
     markup.add(
+        InlineKeyboardButton("💰 Экономика и Квесты", callback_data=f"help_econ:{owner_id}"),
         InlineKeyboardButton("📖 ПОЛНЫЙ СПРАВОЧНИК (А-Я)", callback_data=f"help_full_catalog:{owner_id}")
     )
     return markup
@@ -1941,14 +2023,154 @@ def send_welcome(message):
     welcome_text = (
         "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b>\n"
         "──────────────────────\n"
-        "Добро пожаловать в центр управления экономикой, спорт-играми, бизнесами, рестами и кланами!\n\n"
+        "Добро пожаловать в центр управления экономикой, спорт-играми, бизнесами, фактами VD и рестами!\n\n"
         "👇 <i>Выберите интересующий вас раздел из меню ниже:</i>"
     )
     bot.reply_to(message, welcome_text, reply_markup=get_main_menu_markup(message.from_user.id), parse_mode='HTML')
 
 
 # ---------------------------------------------------------
-# TELEGRAM-СПОРТ И АЗАРТ (ФУТБОЛ, БАСКЕТБОЛ, ДАРТС, БОУЛИНГ)
+# ИГРА КРАШ (/crash)
+# ---------------------------------------------------------
+def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, crash_point):
+    steps = [1.05, 1.15, 1.25, 1.40, 1.60, 1.85, 2.15, 2.50, 3.00, 3.60, 4.30, 5.20, 6.50, 8.00, 10.00, 13.00, 17.00, 22.00, 30.00, 50.00]
+    
+    for mult in steps:
+        time.sleep(1.2)
+        game = active_crash.get(game_id)
+        if not game or game.get('cashed_out') or game.get('exploded'):
+            return
+
+        if mult >= crash_point:
+            game['exploded'] = True
+            try:
+                bot.edit_message_text(
+                    f"💥 <b>КРАШ! РАКЕТА ВЗОРВАЛАСЬ НА {crash_point:.2f}x!</b>\n\n"
+                    f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+                    f"💸 Ставка <b>{bet} Ня-коинов 🪙</b> сгорела в атмосфере...",
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    parse_mode='HTML'
+                )
+            except Exception:
+                pass
+            active_crash.pop(game_id, None)
+            return
+
+        game['current_mult'] = mult
+        cashout_amt = int(bet * mult)
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amt} 🪙 | {mult:.2f}x)", callback_data=f"crash_cashout_{game_id}:{user_id}"))
+
+        bar_len = min(8, int(mult * 1.5))
+        sky_bar = "☁️" * (8 - bar_len) + "🚀" + "🔥" * bar_len
+
+        try:
+            bot.edit_message_text(
+                f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b>\n"
+                f"──────────────────────\n"
+                f"👤 Пилот: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+                f"💰 Ставка: <b>{bet} 🪙</b>\n"
+                f"📈 Текущий множитель: <b>{mult:.2f}x</b>\n"
+                f"🛰 Полет: [{sky_bar}]\n"
+                f"──────────────────────\n"
+                f"<i>Успейте нажать кнопку ниже до взрыва ракеты!</i>",
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
+
+
+@bot.message_handler(commands=['crash', 'краш', 'ракета'])
+def cmd_crash(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+
+    m = re.search(r'(?:/crash|краш|ракета)\s*(\d+)?', message.text, re.IGNORECASE)
+    bet = int(m.group(1)) if m and m.group(1) else 50
+
+    if bet <= 0:
+        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
+        return
+
+    if econ['balance'] < bet:
+        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙")
+        return
+
+    econ['balance'] -= bet
+    save_data()
+
+    game_id = f"cr_{user_id}_{int(time.time())}"
+    
+    # Генерация точки взрыва
+    r = random.random()
+    if r < 0.08:
+        crash_point = 1.05
+    elif r < 0.35:
+        crash_point = round(random.uniform(1.10, 1.80), 2)
+    elif r < 0.70:
+        crash_point = round(random.uniform(1.85, 3.50), 2)
+    elif r < 0.90:
+        crash_point = round(random.uniform(3.50, 7.50), 2)
+    elif r < 0.97:
+        crash_point = round(random.uniform(7.50, 18.00), 2)
+    else:
+        crash_point = round(random.uniform(18.00, 50.00), 2)
+
+    active_crash[game_id] = {
+        'user_id': user_id,
+        'user_name': user_name,
+        'username': message.from_user.username,
+        'bet': bet,
+        'crash_point': crash_point,
+        'current_mult': 1.00,
+        'cashed_out': False,
+        'exploded': False
+    }
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(f"💰 Забрать куш ({bet} 🪙 | 1.00x)", callback_data=f"crash_cashout_{game_id}:{user_id}"))
+
+    sent_msg = bot.send_message(
+        message.chat.id,
+        f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b>\n"
+        f"──────────────────────\n"
+        f"👤 Пилот: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
+        f"💰 Ставка: <b>{bet} 🪙</b>\n"
+        f"📈 Запуск двигателей... [🚀☁️☁️☁️☁️☁️☁️]\n"
+        f"──────────────────────\n"
+        f"<i>Приготовьтесь забрать куш!</i>",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
+
+    t = threading.Thread(target=crash_game_thread, args=(game_id, message.chat.id, sent_msg.message_id, user_id, user_name, bet, crash_point))
+    t.daemon = True
+    t.start()
+
+
+# ---------------------------------------------------------
+# РУЧНОЙ ЗАПРОС ФАКТА VIOLENCE DISTRICT
+# ---------------------------------------------------------
+@bot.message_handler(commands=['fact_vd', 'vd_fact', 'факт_вд', 'факт'])
+def cmd_fact_vd(message):
+    title, desc = random.choice(VD_FACTS)
+    msg_text = (
+        "🩸 <b>ИНТЕРЕСНЫЙ ФАКТ | VIOLENCE DISTRICT</b> 🔪\n"
+        "──────────────────────\n"
+        f"📌 <b>{title}</b>\n"
+        f"📖 <i>{desc}</i>\n"
+        "──────────────────────"
+    )
+    bot.reply_to(message, msg_text, parse_mode='HTML')
+
+
+# ---------------------------------------------------------
+# TELEGRAM-СПОРТ И АЗАРТ
 # ---------------------------------------------------------
 def process_sport_dice_game(message, game_type, bet):
     chat_id = message.chat.id
@@ -1978,17 +2200,14 @@ def process_sport_dice_game(message, game_type, bet):
     msg = bot.send_dice(chat_id, emoji=dice_emoji)
     val = msg.dice.value
 
-    # Задержка 3.5 секунды, чтобы нативная анимация Telegram успела проиграться в чате
     time.sleep(3.5)
 
     has_clover = (econ.get('luck_clover_until', 0) > time.time())
     clover_str = " (🍀 Бонус клевера +15%)" if has_clover else ""
 
     result_text = ""
-    win_amount = 0
 
     if game_type == 'football':
-        # Футбол (1-5): 3, 4, 5 — ГОЛ!
         if val in [3, 4, 5]:
             mult = 1.6 if not has_clover else 1.8
             win_amount = int(bet * mult)
@@ -2001,7 +2220,6 @@ def process_sport_dice_game(message, game_type, bet):
             result_text = f"💨 <b>МИМО ВОРОТ!</b>\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
 
     elif game_type == 'basketball':
-        # Баскетбол (1-5): 4, 5 — Чистый гол
         if val in [4, 5]:
             mult = 2.0 if not has_clover else 2.3
             win_amount = int(bet * mult)
@@ -2014,7 +2232,6 @@ def process_sport_dice_game(message, game_type, bet):
             result_text = f"💨 <b>МИМО ЩИТА!</b>\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
 
     elif game_type == 'darts':
-        # Дартс (1-6): 6 — Яблочко, 5 — Центр
         if val == 6:
             mult = 3.5 if not has_clover else 4.0
             win_amount = int(bet * mult)
@@ -2031,7 +2248,6 @@ def process_sport_dice_game(message, game_type, bet):
             result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {val})\n💸 Проигрыш <b>{bet} 🪙</b>."
 
     elif game_type == 'bowling':
-        # Боулинг (1-6): 6 — Страйк, 4,5 — Почти страйк
         if val == 6:
             mult = 3.0 if not has_clover else 3.5
             win_amount = int(bet * mult)
@@ -2170,7 +2386,7 @@ def cmd_detector(message):
 
 
 # ---------------------------------------------------------
-# УДАРНИКИ И ГЕРОИ ДНЯ (/daily_heroes)
+# УДАРНИКИ И ГЕРОИ ДНЯ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['daily_heroes', 'герои_дня', 'ударники'])
 def cmd_daily_heroes(message):
@@ -2219,7 +2435,7 @@ def cmd_daily_heroes(message):
 
 
 # ---------------------------------------------------------
-# РЮКЗАК И РАСХОДНИКИ (/backpack, рюкзак)
+# РЮКЗАК И РАСХОДНИКИ
 # ---------------------------------------------------------
 def render_backpack_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -2265,7 +2481,7 @@ def cmd_backpack(message):
 
 
 # ---------------------------------------------------------
-# КОЛЕСО ФОРТУНЫ (/wheel, /рулетка)
+# КОЛЕСО ФОРТУНЫ (/wheel)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['wheel', 'рулетка', 'колесо'])
 def cmd_wheel(message):
@@ -2348,6 +2564,7 @@ def render_mines_board(game_id):
     if not game:
         return None, None
 
+    u_id = game['user_id']
     markup = InlineKeyboardMarkup(row_width=4)
     buttons = []
 
@@ -2359,14 +2576,14 @@ def render_mines_board(game_id):
         elif game['finished']:
             buttons.append(InlineKeyboardButton("▫️", callback_data="noop"))
         else:
-            buttons.append(InlineKeyboardButton("❓", callback_data=f"mines_open_{game_id}_{i}"))
+            buttons.append(InlineKeyboardButton("❓", callback_data=f"mines_open_{game_id}_{i}:{u_id}"))
 
     for row_idx in range(0, 16, 4):
         markup.add(*buttons[row_idx:row_idx+4])
 
     if not game['finished'] and len(game['revealed']) > 0:
         cashout_amount = int(game['bet'] * game['current_multiplier'])
-        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x)", callback_data=f"mines_cashout_{game_id}"))
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x)", callback_data=f"mines_cashout_{game_id}:{u_id}"))
 
     text = (
         f"💣 <b>САПЁР (ПОЛЕ 4х4)</b>\n"
@@ -2420,7 +2637,7 @@ def cmd_mines(message):
 
 
 # ---------------------------------------------------------
-# МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
+# МЕМНЫЕ СИМУЛЯТОРЫ: РАСШИРЕННЫЙ ПИСЮН И ФАП
 # ---------------------------------------------------------
 @bot.message_handler(commands=['dick', 'писюн', 'замер'])
 def cmd_dick(message):
@@ -2438,9 +2655,10 @@ def cmd_dick(message):
         bot.reply_to(message, f"⏳ Замер писюна доступен раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
-    change = random.choice([-2, -1, 1, 1, 2, 3, 4])
+    change = random.choice([-3, -2, -1, 1, 2, 3, 4, 5, 6])
     cur_size = econ.get('dick_size', 15)
-    new_size = max(1, min(45, cur_size + change))
+    # Расширенный лимит до 250 см
+    new_size = max(1, min(250, cur_size + change))
 
     econ['dick_size'] = new_size
     econ['last_dick_time'] = now
@@ -2449,14 +2667,20 @@ def cmd_dick(message):
     sign = "+" if change >= 0 else ""
     u_link = make_link(chat_id, user_name, user_id, ping=True)
 
-    if new_size >= 30:
-        comment = "🍆 Настоящий гигант чата! Все трепещут!"
+    if new_size >= 100:
+        comment = "🌌 Космический монумент масштабов галактики! Вселенная склоняет колени!"
+    elif new_size >= 70:
+        comment = "🗿 Колосс Родосский нервно курит в сторонке! Невероятный титан!"
+    elif new_size >= 45:
+        comment = "👑 Абсолютный повелитель и гигант чата!"
+    elif new_size >= 30:
+        comment = "🍆 Внушительный и устрашающий размерчик!"
     elif new_size >= 18:
-        comment = "🔥 Солидный и внушительный размерчик!"
+        comment = "🔥 Крепкий и солидный инструмент!"
     elif new_size >= 10:
         comment = "👌 Классический средний размер."
     else:
-        comment = "🤏 Кажется, на улице было слишком холодно..."
+        comment = "🤏 Кажется, на улице было слишком морозно..."
 
     bot.reply_to(
         message,
@@ -2519,7 +2743,7 @@ def cmd_fap(message):
 
 
 # ---------------------------------------------------------
-# ГАРАЖ 2.0 (КАРТИНКИ И РАНГИ)
+# ГАРАЖ
 # ---------------------------------------------------------
 def render_garage_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -2576,7 +2800,7 @@ def cmd_garage(message):
 
 
 # ---------------------------------------------------------
-# КУЛИНАРИЯ (/cook, приготовить)
+# КУЛИНАРИЯ (/cook)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['cook', 'кулинария', 'приготовить'])
 def cmd_cook(message):
@@ -2614,7 +2838,7 @@ def cmd_cook(message):
 
 
 # ---------------------------------------------------------
-# ПИТОМЕЦ (/pet, питомец, уход)
+# ПИТОМЕЦ (/pet)
 # ---------------------------------------------------------
 def render_pet_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -2681,7 +2905,7 @@ def cmd_pet(message):
 
 
 # ---------------------------------------------------------
-# ПРОГУЛКА ПИТОМЦА (/walk, гулять)
+# ПРОГУЛКА ПИТОМЦА (/walk)
 # ---------------------------------------------------------
 def process_pet_walk(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -2744,7 +2968,7 @@ def cmd_walk_pet(message):
 
 
 # ---------------------------------------------------------
-# МАГАЗИН СНАСТЕЙ (/gear, удочки, луки)
+# МАГАЗИН СНАСТЕЙ (/gear)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['gear', 'снасти'])
 def cmd_gear(message):
@@ -2773,7 +2997,7 @@ def cmd_gear(message):
 
 
 # ---------------------------------------------------------
-# БИЗНЕСЫ 2.0 (ПРОКАЧКА И ДОХОД)
+# БИЗНЕСЫ 2.0
 # ---------------------------------------------------------
 def render_business_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -2930,7 +3154,7 @@ def cmd_collect(message):
 
 
 # ---------------------------------------------------------
-# ОБРАБОТЧИКИ БАНКА, КЕЙСА, ЛОТЕРЕИ
+# БАНК, КЕЙС, ЛОТЕРЕЯ
 # ---------------------------------------------------------
 def render_bank_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -3148,7 +3372,7 @@ def cmd_settings(message):
 
 
 # ---------------------------------------------------------
-# АВАТАРКА ПРОФИЛЯ (/set_pfp, /del_pfp)
+# АВАТАРКА ПРОФИЛЯ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['set_pfp', 'аватарка'])
 def cmd_set_pfp(message):
@@ -3191,7 +3415,7 @@ def cmd_del_pfp(message):
 
 
 # ---------------------------------------------------------
-# ПРОФИЛЬ (С ПОДДЕРЖКОЙ ТЕМ ОФОРМЛЕНИЯ)
+# ПРОФИЛЬ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['custom_title', 'set_title'])
 def cmd_custom_title(message):
@@ -3447,8 +3671,8 @@ def cmd_marry(message):
 
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("💍 Согласиться", callback_data=f"m_yes_{prop_id}"),
-        InlineKeyboardButton("❌ Отказать", callback_data=f"m_no_{prop_id}")
+        InlineKeyboardButton("💍 Согласиться", callback_data=f"m_yes_{prop_id}:{target_user_id or 0}"),
+        InlineKeyboardButton("❌ Отказать", callback_data=f"m_no_{prop_id}:{target_user_id or 0}")
     )
 
     from_link = make_link(chat_id, user_name, user_id, ping=True)
@@ -3619,8 +3843,8 @@ def process_bj_game(message, bet):
 
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}"),
-        InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}")
+        InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}:{user_id}"),
+        InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}:{user_id}")
     )
 
     p_score = calculate_bj_score(p_cards)
@@ -3917,12 +4141,13 @@ def cmd_sell(message):
 
     total_earned = 0
     items_sold = 0
+    price_multiplier = 1.5 if gold_rush_event.get('active') else 1.0
 
     for fish_name, count in list(econ.get('fish_inventory', {}).items()):
         price = 20
         for f_item in FISH_TYPES:
             if f_item[0] == fish_name:
-                price = f_item[2]
+                price = int(f_item[2] * price_multiplier)
                 break
         total_earned += price * count
         items_sold += count
@@ -3932,7 +4157,7 @@ def cmd_sell(message):
         price = 25
         for h_item in HUNT_TYPES:
             if h_item[0] == hunt_name:
-                price = h_item[2]
+                price = int(h_item[2] * price_multiplier)
                 break
         total_earned += price * count
         items_sold += count
@@ -3944,7 +4169,8 @@ def cmd_sell(message):
 
     econ['balance'] += total_earned
     save_data()
-    bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned} Ня-коинов 🪙</b>!\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+    rush_note = " (🌟 Золотая лихорадка x1.5!)" if gold_rush_event.get('active') else ""
+    bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned} Ня-коинов 🪙</b>{rush_note}!\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
 
 
 @bot.message_handler(commands=['profile', 'профиль'])
@@ -4065,7 +4291,7 @@ def cmd_foot(message):
         return
 
     change = random.randint(-3, 4)
-    econ['foot_size'] = max(5, min(60, econ.get('foot_size', 25) + change))
+    econ['foot_size'] = max(5, min(80, econ.get('foot_size', 25) + change))
     econ['last_foot_time'] = now_ts
     save_data()
     sign = "+" if change >= 0 else ""
@@ -4089,7 +4315,7 @@ def cmd_chromosomes(message):
 
     change = random.choice([-2, -1, 0, 1, 1, 2, 3])
     cur_chr = econ.get('chromosomes', 46)
-    new_chr = max(38, min(60, cur_chr + change))
+    new_chr = max(38, min(100, cur_chr + change))
     econ['chromosomes'] = new_chr
     econ['last_chromosomes_time'] = now_ts
     save_data()
@@ -4118,7 +4344,7 @@ def cmd_chromosomes(message):
         parse_mode='HTML'
     )
     for task_name, task_reward in completed:
-        bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+                bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
 
 
 # ---------------------------------------------------------
@@ -4237,13 +4463,13 @@ def handle_messages(message):
             bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b>", parse_mode='HTML')
             return
         elif is_super_admin:
-            pass  # Супер-админ может пользоваться командами
+            pass
         else:
-            return  # Для обычных пользователей бот спит
+            return
 
     last_chat_activity[chat_id] = now_ts
 
-    # 🛡 АНТИ-ФЛУД И ЗАЩИТА ОТ ЛАГОВ
+    # 🛡 АНТИ-ФЛУД И ЗАЩИТА ОТ СПАМА
     if user_id in user_flood_muted:
         if now_ts < user_flood_muted[user_id]:
             return
@@ -4271,15 +4497,20 @@ def handle_messages(message):
         except Exception:
             pass
 
-    # 🧮 УМНЫЙ КАЛЬКУЛЯТОР В ЧАТЕ
-    calc_match = re.search(r'(?:сколько\s+будет|посчитай|вычисли|реши)?\s*([\d\s\+\-\*\/\%\(\)\^\.\:×÷]+)(?:\?)?$', text, re.IGNORECASE)
+    # 🧮 БЕЗОПАСНЫЙ КАЛЬКУЛЯТОР В ЧАТЕ (НЕ СРАБАТЫВАЕТ НА ОБЫЧНЫЙ ТЕКСТ)
+    calc_match = None
+    m_calc_cmd = re.match(r'^(?:/calc|посчитай|вычисли|реши|сколько\s+будет)\s+([\d\s\+\-\*\/\%\(\)\^\.\:×÷]+)$', text, re.IGNORECASE)
+    if m_calc_cmd:
+        calc_match = m_calc_cmd.group(1).strip()
+    elif re.match(r'^\s*\(?\d+[\d\s\+\-\*\/\%\(\)\^\.\:×÷]*\d+\)?\s*$', text):
+        if any(op in text for op in ['+', '*', '/', '%', '^', '×', '÷']) or ('-' in text and not re.search(r'[a-zA-Zа-яА-Я]', text)):
+            calc_match = text.strip()
+
     if calc_match:
-        math_expr = calc_match.group(1).strip()
-        if any(op in math_expr for op in ['+', '-', '*', '/', '%', '^', '×', '÷']) and re.search(r'\d', math_expr):
-            calc_res = safe_calculate_math(math_expr)
-            if calc_res is not None:
-                bot.reply_to(message, f"🧮 <b>Результат:</b> <code>{calc_res}</code>", parse_mode='HTML')
-                return
+        calc_res = safe_calculate_math(calc_match)
+        if calc_res is not None:
+            bot.reply_to(message, f"🧮 <b>Результат:</b> <code>{calc_res}</code>", parse_mode='HTML')
+            return
 
     # ⚡️ ПРОВЕРКА ОТВЕТА НА ВИКТОРИНУ
     if current_quiz.get('answer') and current_quiz.get('chat_id') == chat_id:
@@ -4464,7 +4695,7 @@ def handle_messages(message):
                 bot.reply_to(message, chosen_gif)
         return
 
-    # ОГРАБЛЕНИЕ (С ОХРАННОЙ СИГНАЛИЗАЦИЕЙ И ЗАЩИТОЙ)
+    # ОГРАБЛЕНИЕ
     if text_lower.startswith('ограбить'):
         target_user = None
         target_user_id = None
@@ -4743,6 +4974,9 @@ def handle_messages(message):
     elif text_lower in ['герои дня', 'итоги дня', 'ударники дня']:
         cmd_daily_heroes(message)
         return
+    elif text_lower in ['факт вд', 'вд факт', 'факт violence district', 'факт']:
+        cmd_fact_vd(message)
+        return
     elif text_lower in ['питомец', 'пет', 'мой питомец']:
         cmd_pet(message)
         return
@@ -4863,6 +5097,9 @@ def handle_messages(message):
         return
     elif text_lower.startswith(('сапер', 'мины')):
         cmd_mines(message)
+        return
+    elif text_lower.startswith(('краш', 'ракета')):
+        cmd_crash(message)
         return
     elif text_lower.startswith(('блэкджек', '21', 'очко')):
         cmd_bj(message)
@@ -4999,7 +5236,7 @@ def handle_messages(message):
             bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
         return
 
-    # РЫБАЛКА И ОХОТА
+    # РЫБАЛКА И ОХОТА (С УЧЕТОМ ИВЕНТА ЗОЛОТАЯ ЛИХОРАДКА)
     elif text_lower in ['рыбалка', '/fish', 'рыба']:
         econ = get_user_econ(user_id, user_name, username=user_username)
         cooldown = 7200
@@ -5012,6 +5249,8 @@ def handle_messages(message):
         rod = econ.get('equipped_rod')
         if rod and rod in RODS:
             luck_bonus += RODS[rod]['luck']
+        if gold_rush_event.get('active'):
+            luck_bonus += 50
 
         weights = [max(1, int(f[3] * (1 + luck_bonus / 100.0))) for f in FISH_TYPES]
         caught = random.choices(FISH_TYPES, weights=weights, k=1)[0]
@@ -5020,7 +5259,8 @@ def handle_messages(message):
         add_account_exp(user_id, user_name, 8, username=user_username)
         save_data()
         check_achievements(user_id, user_name, 'fish', 1, chat_id, username=user_username)
-        bot.reply_to(message, f'🎣 Вы поймали: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
+        rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""
+        bot.reply_to(message, f'🎣 Вы поймали: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>{rush_info}\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
         return
 
     elif text_lower in ['охота', '/hunt']:
@@ -5035,6 +5275,8 @@ def handle_messages(message):
         bow = econ.get('equipped_bow')
         if bow and bow in BOWS:
             luck_bonus += BOWS[bow]['luck']
+        if gold_rush_event.get('active'):
+            luck_bonus += 50
 
         weights = [max(1, int(h[3] * (1 + luck_bonus / 100.0))) for h in HUNT_TYPES]
         caught = random.choices(HUNT_TYPES, weights=weights, k=1)[0]
@@ -5043,10 +5285,11 @@ def handle_messages(message):
         add_account_exp(user_id, user_name, 8, username=user_username)
         save_data()
         check_achievements(user_id, user_name, 'hunt', 1, chat_id, username=user_username)
-        bot.reply_to(message, f'🏹 Вы добыли: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
+        rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""
+        bot.reply_to(message, f'🏹 Вы добыли: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>{rush_info}\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
         return
 
-    # ПЕРЕВОД КОИНОВ (С УЧЕТОМ СТАТИСТИКИ МЕЦЕНАТА)
+    # ПЕРЕВОД КОИНОВ
     elif text_lower.startswith(('перевод', 'передать', '/pay')):
         target_id, target_u, amount = parse_transfer_command(message)
 
@@ -5144,7 +5387,7 @@ def handle_messages(message):
 
 
 # ---------------------------------------------------------
-# ОБРАБОТКА CALLBACK КНОПОК (С ЗАЩИТОЙ ОТ ЧУЖИХ НАЖАТИЙ)
+# ОБРАБОТКА CALLBACK КНОПОК
 # ---------------------------------------------------------
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
@@ -5164,7 +5407,6 @@ def callback_inline(call):
         bot.answer_callback_query(call.id)
         return
 
-    # Вспомогательная функция извлечения owner_id из callback_data (формат "action:owner_id")
     raw_data = call.data
     owner_id = None
     action_data = raw_data
@@ -5175,9 +5417,8 @@ def callback_inline(call):
             action_data = parts[0]
             owner_id = int(parts[1])
 
-    # Проверка владельца меню (если вшит owner_id)
+    # Проверка владельца меню (защита от перехвата)
     if owner_id and owner_id != user_id:
-        # Для настроек чата даем доступ любому админу
         if action_data in ['set_max_days', 'toggle_del_msg', 'toggle_summer_music', 'set_remind_time']:
             if not is_admin(chat_id, user_id):
                 bot.answer_callback_query(call.id, "❌ Настройки доступны только администраторам!", show_alert=True)
@@ -5199,10 +5440,39 @@ def callback_inline(call):
         except Exception:
             pass
 
+    elif action_data == 'help_vd':
+        text = (
+            "🩸 <b>ФАКТЫ И ВИКТОРИНЫ ПО VIOLENCE DISTRICT</b> 🔪\n"
+            "──────────────────────\n"
+            "• <code>факт вд</code> или <code>/fact_vd</code> — случайный секрет разработки или лора игры\n"
+            "• В чате игры регулярно проходят экспресс-викторины с призами коинов!\n"
+            "• В базе знаний собрано 18 интереснейших фактов от первых маньяков до скрытых пасхалок!\n"
+            "──────────────────────"
+        )
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🩸 Получить факт прямо сейчас", callback_data=f"get_instant_vd_fact:{user_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif action_data == 'get_instant_vd_fact':
+        title, desc = random.choice(VD_FACTS)
+        msg_text = (
+            "🩸 <b>ИНТЕРЕСНЫЙ ФАКТ | VIOLENCE DISTRICT</b> 🔪\n"
+            "──────────────────────\n"
+            f"📌 <b>{title}</b>\n"
+            f"📖 <i>{desc}</i>\n"
+            "──────────────────────"
+        )
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🎲 Еще факт", callback_data=f"get_instant_vd_fact:{user_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
+        bot.edit_message_text(msg_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
     elif action_data == 'help_sports':
         text = (
             "⚽️ <b>СПОРТИВНЫЕ ИГРЫ И КАЗИНО TELEGRAM</b>\n"
             "──────────────────────\n"
+            "• 🚀 <code>/crash 100</code> — игра Краш (ракета со взлётом)\n"
             "• ⚽️ <code>футбол 100</code> — пенальти в ворота (гол x1.6 - x1.8)\n"
             "• 🏀 <code>баскетбол 100</code> — бросок в корзину (гол x2.0 - x2.3)\n"
             "• 🎯 <code>дартс 100</code> — бросок дротика (яблочко x3.5 - x4.0)\n"
@@ -5254,7 +5524,7 @@ def callback_inline(call):
             "• 🔮 <code>шар [вопрос]</code> — магический шар судьбы\n"
             "• 📊 <code>шанс [событие]</code> — расчет процента вероятности\n"
             "• 🕵️‍♂️ <code>детектор [фраза]</code> — проверка на детекторе лжи\n"
-            "• 🍆 <code>/dick</code> или <code>писюн</code> — замер размера\n"
+            "• 🍆 <code>/dick</code> или <code>писюн</code> — замер размера (до 250 см!)\n"
             "• 💦 <code>/fap</code> или <code>дроч</code> — счетчик фапа и ранги\n"
             "• 🧬 <code>хромосомы</code> | 🧠 <code>iq</code> | 🥩 <code>жир</code> | 🦶 <code>пятка</code>\n"
             "• 🏆 <code>топ</code> — интерактивные топы чата\n"
@@ -5365,7 +5635,7 @@ def callback_inline(call):
             "• <b>Ж</b>: <code>жир</code>\n"
             "• <b>З</b>: <code>задания</code>, <code>замер</code>\n"
             "• <b>И</b>: <code>инвентарь</code>, <code>история</code>, <code>итоги дня</code>\n"
-            "• <b>К</b>: <code>кейс</code>, <code>кости 100</code>, <code>кулинария</code>, <code>колесо</code>, <code>кто ты</code>\n"
+            "• <b>К</b>: <code>кейс</code>, <code>кости 100</code>, <code>кулинария</code>, <code>колесо</code>, <code>краш 100</code>, <code>кто ты</code>\n"
             "• <b>Л</b>: <code>лотерея</code>, <code>лидеры</code>\n"
             "• <b>М</b>: <code>магазин</code>, <code>майнер</code>, <code>мины 100</code>, <code>мой рест</code>\n"
             "• <b>О</b>: <code>ограбить @юзер</code>, <code>опыт</code>, <code>охота</code>\n"
@@ -5373,7 +5643,7 @@ def callback_inline(call):
             "• <b>Р</b>: <code>работа</code>, <code>развод</code>, <code>ресты</code>, <code>рулетка</code>, <code>рыбалка</code>, <code>рюкзак</code>\n"
             "• <b>С</b>: <code>сапер 100</code>, <code>слоты 100</code>, <code>семья</code>, <code>семейный сейф</code>, <code>снасти</code>, <code>смехуятинка</code>\n"
             "• <b>Т</b>: <code>топ</code>, <code>тренировка</code>, <code>тачки</code>\n"
-            "• <b>Ф</b>: <code>футбол 100</code>, <code>ферма</code>, <code>фап</code>\n"
+            "• <b>Ф</b>: <code>факт вд</code>, <code>футбол 100</code>, <code>ферма</code>, <code>фап</code>\n"
             "• <b>Х</b>: <code>хромосомы</code>\n"
             "• <b>Ц</b>: <code>цуефа @юзер 100</code>\n"
             "• <b>Ш</b>: <code>шар [вопрос]</code>, <code>шанс [событие]</code>\n"
@@ -5382,6 +5652,46 @@ def callback_inline(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    # ИГРА КРАШ: CASHOUT
+    elif action_data.startswith('crash_cashout_'):
+        game_id = action_data.replace('crash_cashout_', '')
+        game = active_crash.get(game_id)
+        if not game or game.get('cashed_out') or game.get('exploded'):
+            bot.answer_callback_query(call.id, "❌ Раунд уже завершен!", show_alert=True)
+            return
+
+        if user_id != game['user_id']:
+            bot.answer_callback_query(call.id, "❌ Это не ваш раунд!", show_alert=True)
+            return
+
+        game['cashed_out'] = True
+        mult = game['current_mult']
+        win_amt = int(game['bet'] * mult)
+
+        add_coins(user_id, user_name, win_amt, username=user_username)
+        add_account_exp(user_id, user_name, 20, username=user_username)
+        econ = get_user_econ(user_id, user_name, username=user_username)
+        econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amt - game['bet'])
+        check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
+        save_data()
+
+        bot.answer_callback_query(call.id, f"🎉 Куш забран: +{win_amt} 🪙 ({mult:.2f}x)!", show_alert=True)
+
+        try:
+            bot.edit_message_text(
+                f"💰 <b>УСПЕШНЫЙ CASHOUT В КРАШЕ!</b>\n\n"
+                f"👤 Пилот: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+                f"🎉 Зафиксирован выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{mult:.2f}x</b>)!\n"
+                f"💵 Баланс: <b>{econ['balance']} 🪙</b>",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
+
+        active_crash.pop(game_id, None)
 
     # ИСПОЛЬЗОВАНИЕ РАСХОДНИКОВ ИЗ РЮКЗАКА
     elif action_data == 'use_item_energy_drink':
@@ -5857,7 +6167,7 @@ def callback_inline(call):
             save_data()
             render_lottery_view(chat_id, user_id, user_name, call.message.message_id)
 
-    # ЧАТ-ДРОПЫ (ОБЩЕДОСТУПНЫЕ)
+    # ЧАТ-ДРОПЫ
     elif raw_data.startswith('claim_drop_') or action_data.startswith('claim_drop_'):
         drop_id = raw_data.replace('claim_', '').split(':')[0]
         drop = active_drops.get(drop_id)
@@ -6020,8 +6330,8 @@ def callback_inline(call):
                 return
             markup = InlineKeyboardMarkup()
             markup.add(
-                InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}"),
-                InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}")
+                InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}:{user_id}"),
+                InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}:{user_id}")
             )
             bot.edit_message_text(
                 f"🃏 Ваши карты: {game['p_cards']} (Сумма: <b>{p_score}</b>)\nДилер: [{game['d_cards'][0]}, ❓]",
@@ -6351,5 +6661,5 @@ setup_bot_commands()
 start_background_threads()
 keep_alive()
 
-print('Бот успешно запущен со всеми обновлениями и защитой от перехвата кнопок!')
+print('Бот успешно запущен со всеми обновлениями Violence District, Крашем и защитой кнопок!')
 bot.infinity_polling()
