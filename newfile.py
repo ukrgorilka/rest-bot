@@ -108,6 +108,24 @@ DURATION_PATTERN = (
 )
 
 # ---------------------------------------------------------
+# СТРИМЕР И САД БОНСАЙ
+# ---------------------------------------------------------
+STREAM_EQUIP = {
+    'mic': {'name': '🎙 Микрофон', 'levels': [0, 1000, 3000, 8000, 15000]},
+    'webcam': {'name': '📷 Вебкамера', 'levels': [0, 1500, 4000, 10000, 20000]},
+    'light': {'name': '💡 Неоновый свет', 'levels': [0, 800, 2000, 5000, 12000]}
+}
+
+STREAM_GENRES = ['Гейминг', 'ASMR', 'Мемы', 'Трэш-ток']
+
+GARDEN_SEEDS = {
+    'sakura': {'name': '🌸 Сакура', 'price': 300, 'grow_time': 3600*12, 'water_req': 2, 'reward_min': 800, 'reward_max': 1200, 'emoji': '🌸'},
+    'money_tree': {'name': '💸 Денежное дерево', 'price': 800, 'grow_time': 3600*24, 'water_req': 4, 'reward_min': 2000, 'reward_max': 3500, 'emoji': '🌳'},
+    'bamboo': {'name': '🎋 Золотой бамбук', 'price': 1500, 'grow_time': 3600*48, 'water_req': 6, 'reward_min': 4000, 'reward_max': 7000, 'emoji': '🎋'},
+    'berries': {'name': '🫐 Волшебные ягоды', 'price': 500, 'grow_time': 3600*8, 'water_req': 1, 'reward_min': 1000, 'reward_max': 1800, 'emoji': '🫐'}
+}
+
+# ---------------------------------------------------------
 # БАЗА ЗНАНИЙ VIOLENCE DISTRICT (18 ФАКТОВ)
 # ---------------------------------------------------------
 VD_FACTS = [
@@ -388,35 +406,36 @@ WEEKLY_TASKS = [
     ('dice', 'Сыграть в кости 20 раз', 20, 240),
 ]
 
+# Система Кармы: добрые и злые действия
 RP_ACTIONS = {
-    'обнять': {'verb': 'крепко и тепло обнял(а)', 'emoji': '🫂✨'},
-    'поцеловать': {'verb': 'нежно поцеловал(а) в щечку', 'emoji': '💋🌸'},
-    'погладить': {'verb': 'ласково погладил(а) по голове', 'emoji': '🐱💆‍♂️'},
-    'укусить': {'verb': 'сделал(а) игривый кусь за ушко', 'emoji': '🦷😼'},
-    'кусь': {'verb': 'сделал(а) хрустящий кусь', 'emoji': '🐾😈'},
-    'дать пять': {'verb': 'дал(а) звонкую и мощную пятерку', 'emoji': '✋🔥'},
-    'ударить тапком': {'verb': 'с размаху огрел(а) тапком', 'emoji': '🩴💥'},
-    'тапком': {'verb': 'метко запустил(а) тапок в', 'emoji': '🩴🎯'},
-    'похвалить': {'verb': 'искренне похвалил(а) и назвал(а) умничкой', 'emoji': '🌟🥰'},
-    'шлепнуть': {'verb': 'с чувством шлепнул(а)', 'emoji': '🍑👋'},
-    'покормить': {'verb': 'заботливо покормил(а) с ложечки вкусняшкой', 'emoji': '🍰🥄'},
-    'ущипнуть': {'verb': 'аккуратно ущипнул(а) за бочок', 'emoji': '🤏😏'},
-    'утешить': {'verb': 'утешил(а), сказав, что всё обязательно будет хорошо', 'emoji': '🥺🕊'},
-    'чихнуть': {'verb': 'громко чихнул(а) прямо на', 'emoji': '🤧💨'},
-    'задушить в объятиях': {'verb': 'крепко задушил(а) в своих мягких объятиях', 'emoji': '🤗💖'},
-    'дать леща': {'verb': 'выдал(а) звонкого отрезвляющего леща', 'emoji': '🐟👋💥'},
-    'лещ': {'verb': 'отвесил(а) мощного леща', 'emoji': '🐟💥'},
-    'пощекотать': {'verb': 'весело и беспощадно пощекотал(а) за бока', 'emoji': '👐😂'},
-    'укрыть пледом': {'verb': 'заботливо укутал(а) в теплый мягкий плед', 'emoji': '🧶🛏'},
-    'укрыть': {'verb': 'укутал(а) в уютное одеялко', 'emoji': '🛏🧸'},
-    'напоить чаем': {'verb': 'угостил(а) кружечкой согревающего чая с печеньками', 'emoji': '🍵🍪'},
-    'угостить кофе': {'verb': 'приготовил(а) ароматный кофе для', 'emoji': '☕️✨'},
-    'взять за руку': {'verb': 'нежно взял(а) за руку и тепло сжал(а) пальцы', 'emoji': '🤝❤️'},
-    'держать за руку': {'verb': 'крепко держит за руку', 'emoji': '🤝🌸'},
-    'бросить снежок': {'verb': 'слепил(а) круглый снежок и метко запустил(а) в', 'emoji': '❄️🎯'},
-    'плюнуть': {'verb': 'смачно плюнул(а) прямо в лицо', 'emoji': '💦🎯'},
-    'пожать руку': {'verb': 'крепко и с уважением пожал(а) руку', 'emoji': '🤝👔'},
-    'убить': {'verb': 'эпично ликвидировал(а) взглядом и отправил(а) на перерождение', 'emoji': '⚔️💀'}
+    'обнять': {'verb': 'крепко и тепло обнял(а)', 'emoji': '🫂✨', 'karma': 1},
+    'поцеловать': {'verb': 'нежно поцеловал(а) в щечку', 'emoji': '💋🌸', 'karma': 2},
+    'погладить': {'verb': 'ласково погладил(а) по голове', 'emoji': '🐱💆‍♂️', 'karma': 1},
+    'укусить': {'verb': 'сделал(а) игривый кусь за ушко', 'emoji': '🦷😼', 'karma': -1},
+    'кусь': {'verb': 'сделал(а) хрустящий кусь', 'emoji': '🐾😈', 'karma': -1},
+    'дать пять': {'verb': 'дал(а) звонкую и мощную пятерку', 'emoji': '✋🔥', 'karma': 1},
+    'ударить тапком': {'verb': 'с размаху огрел(а) тапком', 'emoji': '🩴💥', 'karma': -3},
+    'тапком': {'verb': 'метко запустил(а) тапок в', 'emoji': '🩴🎯', 'karma': -2},
+    'похвалить': {'verb': 'искренне похвалил(а) и назвал(а) умничкой', 'emoji': '🌟🥰', 'karma': 2},
+    'шлепнуть': {'verb': 'с чувством шлепнул(а)', 'emoji': '🍑👋', 'karma': -1},
+    'покормить': {'verb': 'заботливо покормил(а) с ложечки вкусняшкой', 'emoji': '🍰🥄', 'karma': 2},
+    'ущипнуть': {'verb': 'аккуратно ущипнул(а) за бочок', 'emoji': '🤏😏', 'karma': -1},
+    'утешить': {'verb': 'утешил(а), сказав, что всё обязательно будет хорошо', 'emoji': '🥺🕊', 'karma': 2},
+    'чихнуть': {'verb': 'громко чихнул(а) прямо на', 'emoji': '🤧💨', 'karma': -1},
+    'задушить в объятиях': {'verb': 'крепко задушил(а) в своих мягких объятиях', 'emoji': '🤗💖', 'karma': 1},
+    'дать леща': {'verb': 'выдал(а) звонкого отрезвляющего леща', 'emoji': '🐟👋💥', 'karma': -3},
+    'лещ': {'verb': 'отвесил(а) мощного леща', 'emoji': '🐟💥', 'karma': -2},
+    'пощекотать': {'verb': 'весело и беспощадно пощекотал(а) за бока', 'emoji': '👐😂', 'karma': 1},
+    'укрыть пледом': {'verb': 'заботливо укутал(а) в теплый мягкий плед', 'emoji': '🧶🛏', 'karma': 2},
+    'укрыть': {'verb': 'укутал(а) в уютное одеялко', 'emoji': '🛏🧸', 'karma': 1},
+    'напоить чаем': {'verb': 'угостил(а) кружечкой согревающего чая с печеньками', 'emoji': '🍵🍪', 'karma': 2},
+    'угостить кофе': {'verb': 'приготовил(а) ароматный кофе для', 'emoji': '☕️✨', 'karma': 2},
+    'взять за руку': {'verb': 'нежно взял(а) за руку и тепло сжал(а) пальцы', 'emoji': '🤝❤️', 'karma': 1},
+    'держать за руку': {'verb': 'крепко держит за руку', 'emoji': '🤝🌸', 'karma': 1},
+    'бросить снежок': {'verb': 'слепил(а) круглый снежок и метко запустил(а) в', 'emoji': '❄️🎯', 'karma': -1},
+    'плюнуть': {'verb': 'смачно плюнул(а) прямо в лицо', 'emoji': '💦🎯', 'karma': -5},
+    'пожать руку': {'verb': 'крепко и с уважением пожал(а) руку', 'emoji': '🤝👔', 'karma': 1},
+    'убить': {'verb': 'эпично ликвидировал(а) взглядом и отправил(а) на перерождение', 'emoji': '⚔️💀', 'karma': -5}
 }
 
 RP_SOLO_ACTIONS = {
@@ -605,18 +624,14 @@ def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
         BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
-        BotCommand('set_pfp', '🖼 Установить фото в профиль'),
-        BotCommand('del_pfp', '🗑 Удалить фото из профиля'),
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
+        BotCommand('stream', '🎥 Запустить трансляцию стримера'),
+        BotCommand('garden', '🪴 Ваша личная оранжерея Бонсай'),
         BotCommand('backpack', '🎒 Рюкзак баффов и расходников'),
         BotCommand('crash', '🚀 Игра Краш (Взлетающая ракета)'),
-        BotCommand('fact_vd', '🩸 Случайный факт по Violence District'),
         BotCommand('wheel', '🎡 Бесплатное Колесо Фортуны'),
         BotCommand('mines', '💣 Игра Сапёр (Мины)'),
         BotCommand('football', '⚽️ Футбол пенальти'),
-        BotCommand('basketball', '🏀 Баскетбол в кольцо'),
-        BotCommand('darts', '🎯 Дартс в яблочко'),
-        BotCommand('bowling', '🎳 Боулинг страйк'),
         BotCommand('daily_heroes', '🏆 Герои и ударники дня'),
         BotCommand('ball', '🔮 Магический шар предсказаний'),
         BotCommand('chance', '📊 Измеритель шанса и вероятности'),
@@ -635,20 +650,15 @@ def setup_bot_commands():
         BotCommand('family', '💍 Информация о браке и семье'),
         BotCommand('market', '📈 Крипто-биржа и котировки'),
         BotCommand('work', '💼 Биржа труда и вакансии'),
-        BotCommand('train', '🎓 Тренировка опыта работы'),
         BotCommand('pet', '🐾 Ваш питомец и уход'),
-        BotCommand('gear', '🎣 Магазин удочек и луков'),
         BotCommand('fish', '🎣 Отправиться на рыбалку'),
         BotCommand('hunt', '🏹 Отправиться на охоту'),
-        BotCommand('sell', '💰 Продать весь улов и дичь'),
         BotCommand('bj', '🃏 Сыграть в Блэкджек (21)'),
         BotCommand('dice', '🎲 Кости'),
         BotCommand('slots', '🎰 Слоты'),
         BotCommand('tasks', '📋 Задания и квесты'),
         BotCommand('top', '🏆 Таблицы лидеров чата'),
-        BotCommand('history', '📜 История рестов участника'),
-        BotCommand('settings', '⚙️ Настройки бота в чате'),
-        BotCommand('help', 'ℹ️ Полный справочник по всем командам')
+        BotCommand('settings', '⚙️ Настройки бота в чате')
     ]
     try:
         bot.set_my_commands(commands)
@@ -820,82 +830,8 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             'display_name': clean_d or 'Пользователь',
             'username': clean_u,
             'user_id': user_id,
-            'pfp_file_id': None,
             'balance': 50,
-            'bank_deposit': 0,
-            'last_bank_calc': time.time(),
-            'last_case_time': 0,
-            'last_rob_time': 0,
-            'account_exp': 0,
-            'smeh': 0,
-            'iq': 100,
-            'fat': 20,
-            'foot_size': 25,
-            'dick_size': 15,
-            'last_dick_time': 0,
-            'fap_count': 0,
-            'fap_date': '',
-            'last_fap_time': 0,
-            'chromosomes': 46,
-            'last_hourly': 0,
-            'last_iq_time': 0,
-            'last_fat_time': 0,
-            'last_foot_time': 0,
-            'last_chromosomes_time': 0,
-            'last_wheel_time': 0,
-            'last_pet_walk': 0,
-            'last_pet_care': 0,
-            'badge': None,
-            'inventory': [],
-            'titles': [],
-            'active_title': None,
-            'custom_title': None,
-            'has_custom_title_cert': False,
-            'profile_theme': 'default',
-            'purchased_themes': ['default'],
-            'backpack': {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0},
-            'luck_clover_until': 0,
-            'invis_until': 0,
-            'rings': [],
-            'active_ring': None,
-            'marriage': None,
-            'businesses': {},
-            'biz_levels': {},
-            'last_biz_collect': time.time(),
-            'vehicle': None,
-            'equipped_rod': None,
-            'equipped_bow': None,
-            'daily_tasks_date': '',
-            'daily_progress': {},
-            'daily_claimed': [],
-            'weekly_tasks_yearweek': '',
-            'weekly_progress': {},
-            'weekly_claimed': [],
-            'fish_inventory': {},
-            'hunt_inventory': {},
-            'cooked_meals': 0,
-            'crypto_portfolio': {},
-            'last_fish_time': 0,
-            'last_hunt_time': 0,
-            'rest_rewards_count': 0,
-            'achievements': [],
-            'stats': {},
-            'daily_casino_win': 0,
-            'daily_transferred': 0,
-            'daily_stats_date': '',
-            'msg_stats': {
-                'day_date': '',
-                'day_count': 0,
-                'week_key': '',
-                'week_count': 0,
-                'month_key': '',
-                'month_count': 0,
-                'total_count': 0
-            },
-            'work_exp': 0,
-            'last_work_time': 0,
-            'last_train_time': 0,
-            'pet': None
+            'karma': 0
         }
         mark_dirty()
 
@@ -928,7 +864,9 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('profile_theme', 'default'), ('purchased_themes', ['default']),
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
-        ('daily_transferred', 0), ('daily_stats_date', '')
+        ('daily_transferred', 0), ('daily_stats_date', ''),
+        ('karma', 0), ('garden', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
+        ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', "")
     ]:
         if field not in u_data:
             u_data[field] = default
@@ -951,6 +889,12 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         update_pet_stats(u_data['pet'])
 
     return u_data
+
+
+def change_karma(user_id, user_tag, amount, username=None):
+    econ = get_user_econ(user_id, user_tag, username=username)
+    econ['karma'] = max(-100, min(100, econ.get('karma', 0) + amount))
+    return econ['karma']
 
 
 def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
@@ -1571,7 +1515,6 @@ def add_to_history(chat_str, user, duration_text, reason, user_id=None, action_t
 
 
 def rest_manager_worker():
-    """Единый фоновый поток для проверки и снятия рестов по таймеру."""
     notified_reminders = set()
 
     while True:
@@ -1703,7 +1646,6 @@ def safe_calculate_math(expr_str):
 # ФОНОВЫЕ ПОТОКИ: ЛЕТО, АВТО-ФАКТЫ VD, ДРОПЫ, ВИКТОРИНЫ, ЗОЛОТАЯ ЛИХОРАДКА
 # ---------------------------------------------------------
 def vd_facts_worker():
-    """Фоновый постинг эксклюзивных фактов о Violence District в специальный чат."""
     while True:
         time.sleep(random.randint(7200, 14400))
         try:
@@ -1723,7 +1665,6 @@ def vd_facts_worker():
 
 
 def gold_rush_worker():
-    """Ивент «Золотая лихорадка» с удвоенным шансом редкого улова и цен."""
     global gold_rush_event
     while True:
         time.sleep(random.randint(10800, 21600))
@@ -2008,6 +1949,10 @@ def get_main_menu_markup(owner_id):
         InlineKeyboardButton("🍆 Мемы, Шар и IQ", callback_data=f"help_sims:{owner_id}")
     )
     markup.add(
+        InlineKeyboardButton("🎥 Стример и Сад", callback_data=f"help_stream_garden:{owner_id}"),
+        InlineKeyboardButton("⚖️ Карма и РП", callback_data=f"help_karma_rp:{owner_id}")
+    )
+    markup.add(
         InlineKeyboardButton("🩸 Факты Violence District", callback_data=f"help_vd:{owner_id}"),
         InlineKeyboardButton("🏆 Ударники Дня", callback_data=f"help_heroes:{owner_id}")
     )
@@ -2097,6 +2042,10 @@ def cmd_crash(message):
         bot.reply_to(message, "❌ Ставка должна быть больше 0!")
         return
 
+    if bet > 5000:
+        bot.reply_to(message, "❌ Максимальная ставка в Краш: <b>5000 🪙</b>!", parse_mode='HTML')
+        return
+
     if econ['balance'] < bet:
         bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙")
         return
@@ -2106,12 +2055,11 @@ def cmd_crash(message):
 
     game_id = f"cr_{user_id}_{int(time.time())}"
     
-    # Генерация точки взрыва
     r = random.random()
-    if r < 0.08:
-        crash_point = 1.05
-    elif r < 0.35:
-        crash_point = round(random.uniform(1.10, 1.80), 2)
+    if r < 0.15:
+        crash_point = 1.00
+    elif r < 0.40:
+        crash_point = round(random.uniform(1.05, 1.80), 2)
     elif r < 0.70:
         crash_point = round(random.uniform(1.85, 3.50), 2)
     elif r < 0.90:
@@ -2132,6 +2080,20 @@ def cmd_crash(message):
         'exploded': False
     }
 
+    if crash_point <= 1.00:
+        active_crash[game_id]['exploded'] = True
+        bot.send_message(
+            message.chat.id,
+            f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b>\n"
+            f"──────────────────────\n"
+            f"💥 <b>РАКЕТА ВЗОРВАЛАСЬ НА СТАРТЕ (1.00x)!</b>\n\n"
+            f"👤 Пилот: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
+            f"💸 Ваша ставка <b>{bet} Ня-коинов 🪙</b> моментально сгорела в атмосфере...",
+            parse_mode='HTML'
+        )
+        del active_crash[game_id]
+        return
+
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(f"💰 Забрать куш ({bet} 🪙 | 1.00x)", callback_data=f"crash_cashout_{game_id}:{user_id}"))
 
@@ -2151,6 +2113,170 @@ def cmd_crash(message):
     t = threading.Thread(target=crash_game_thread, args=(game_id, message.chat.id, sent_msg.message_id, user_id, user_name, bet, crash_point))
     t.daemon = True
     t.start()
+
+
+# ---------------------------------------------------------
+# СИМУЛЯТОР СТРИМЕРА (/stream)
+# ---------------------------------------------------------
+def stream_thread(chat_id, user_id, user_name, genre, message_id):
+    econ = get_user_econ(user_id, user_name)
+    studio = econ.get('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
+    
+    base_viewers = (studio.get('mic', 1) + studio.get('webcam', 1) + studio.get('light', 1)) * 50
+    viewers = base_viewers + random.randint(10, 100)
+    
+    text = (
+        f"🔴 <b>СТРИМ ЗАПУЩЕН!</b>\n"
+        f"──────────────────────\n"
+        f"👤 Стример: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+        f"🎮 Жанр: <b>{genre}</b>\n\n"
+        f"<i>Зрители подключаются... (👁 {viewers})</i>"
+    )
+    try:
+        bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+    except Exception:
+        pass
+    
+    time.sleep(3)
+    
+    event_roll = random.random()
+    if event_roll < 0.3:
+        event = "🔥 Чат сходит с ума от ваших шуток!"
+        viewers = int(viewers * 1.5)
+    elif event_roll < 0.6:
+        event = "💰 Крупный донатер скинул солидную сумму!"
+    elif event_roll < 0.8:
+        event = "🎉 RAID от популярного стримера!"
+        viewers = int(viewers * 2.5)
+    else:
+        event = "📉 Интернет лагает, часть зрителей ушла..."
+        viewers = int(viewers * 0.7)
+        
+    text += f"\n\n⚡️ <b>Событие:</b> {event}\n<i>(👁 {viewers} зрителей)</i>"
+    try:
+        bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+    except Exception:
+        pass
+        
+    time.sleep(3)
+    
+    donates = int(viewers * random.uniform(0.5, 1.5))
+    if 'Трэш-ток' in genre.title():
+        karma_diff = -2
+    else:
+        karma_diff = 1
+        
+    change_karma(user_id, user_name, karma_diff)
+    econ['balance'] += donates
+    save_data()
+    
+    k_sign = "+" if karma_diff > 0 else ""
+    text += (
+        f"\n\n🏁 <b>СТРИМ ЗАВЕРШЕН!</b>\n"
+        f"──────────────────────\n"
+        f"💸 Заработано донатов: <b>+{donates} 🪙</b>\n"
+        f"⚖️ Влияние на Карму: <b>{k_sign}{karma_diff}</b>"
+    )
+    try:
+        bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+    except Exception:
+        pass
+
+
+@bot.message_handler(commands=['stream', 'стрим'])
+def cmd_stream(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    
+    now = time.time()
+    cooldown = 3600 * 2
+    left = cooldown_text(econ.get('last_stream_time', 0), cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Стримить можно раз в 2 часа! Ждите: <b>{left}</b>.", parse_mode='HTML')
+        return
+        
+    parts = message.text.split(maxsplit=1)
+    genre = parts[1].strip() if len(parts) > 1 else random.choice(STREAM_GENRES)
+    
+    econ['last_stream_time'] = now
+    save_data()
+    
+    msg = bot.reply_to(message, "🔴 <i>Настройка ОБС и запуск потока...</i>", parse_mode='HTML')
+    t = threading.Thread(target=stream_thread, args=(message.chat.id, user_id, user_name, genre, msg.message_id))
+    t.daemon = True
+    t.start()
+
+
+# ---------------------------------------------------------
+# САД БОНСАЙ (/garden)
+# ---------------------------------------------------------
+def render_garden_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    garden = econ.get('garden')
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    if not garden:
+        text = (
+            f"🪴 <b>ВАША ОРАНЖЕРЕЯ БОНСАЙ</b>\n"
+            f"──────────────────────\n"
+            f"У вас пока нет посаженных растений!\n\n"
+            f"Купите семена ниже, чтобы начать выращивать свой сад для пассивного заработка."
+        )
+        for s_id, s_info in GARDEN_SEEDS.items():
+            markup.add(InlineKeyboardButton(f"{s_info['emoji']} Купить {s_info['name']} ({s_info['price']} 🪙)", callback_data=f"buy_seed_{s_id}:{user_id}"))
+    else:
+        seed_id = garden['seed']
+        seed_info = GARDEN_SEEDS[seed_id]
+        now = time.time()
+        
+        elapsed = now - garden['planted_at']
+        progress_pct = min(100, int((elapsed / seed_info['grow_time']) * 100))
+        
+        water_count = garden['water_count']
+        req_water = seed_info['water_req']
+        
+        can_harvest = (progress_pct >= 100 and water_count >= req_water)
+        
+        stage = "🌱 Росток"
+        if progress_pct >= 100:
+            stage = "🍎 Урожай"
+        elif progress_pct >= 50:
+            stage = "🌿 Цветение"
+            
+        bar_len = progress_pct // 10
+        bar = "🟩" * bar_len + "⬜️" * (10 - bar_len)
+        
+        text = (
+            f"🪴 <b>ВАШ САД: {seed_info['name']}</b>\n"
+            f"──────────────────────\n"
+            f"📈 Прогресс роста: <b>{progress_pct}%</b>\n"
+            f"[{bar}]\n"
+            f"💧 Полив: <b>{water_count}/{req_water}</b>\n"
+            f"🌻 Стадия: <b>{stage}</b>\n"
+            f"──────────────────────"
+        )
+        
+        if not can_harvest:
+            markup.add(InlineKeyboardButton("💦 Полить растение", callback_data=f"water_plant:{user_id}"))
+        if can_harvest:
+            markup.add(InlineKeyboardButton("🧺 Собрать урожай", callback_data=f"harvest_plant:{user_id}"))
+        markup.add(InlineKeyboardButton("❌ Выкорчевать", callback_data=f"uproot_plant:{user_id}"))
+        
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            pass
+    else:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+
+@bot.message_handler(commands=['garden', 'сад'])
+def cmd_garden(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_garden_view(message.chat.id, user_id, user_name)
 
 
 # ---------------------------------------------------------
@@ -2507,7 +2633,7 @@ def cmd_wheel(message):
         ('fish', '🐟 Случайный редкий улов', 15),
         ('beast', '🏹 Охотничий трофей', 15),
         ('exp', '⭐ +80 Опыта профиля', 10),
-        ('mini_rest', '🌴 Мини-курорт (Рест на 3 минуты)', 5)
+        ('karma', '😇 +5 Кармы (Светлый путь)', 5)
     ]
 
     weights = [s[2] for s in sectors]
@@ -2536,9 +2662,9 @@ def cmd_wheel(message):
     elif win_key == 'exp':
         add_account_exp(user_id, user_name, 80, username=message.from_user.username)
         prize_text = "⭐ Вы получили <b>+80 EXP опыта профиля</b>!"
-    elif win_key == 'mini_rest':
-        apply_rest(message.chat.id, user_name, "3 минуты", "Выигрыш в Колесе Фортуны", user_id)
-        prize_text = "🌴 Вы выиграли <b>3-минутный шуточный рест на курорте</b>!"
+    elif win_key == 'karma':
+        change_karma(user_id, user_name, 5)
+        prize_text = "😇 Вы выиграли <b>+5 Кармы</b>!"
 
     check_achievements(user_id, user_name, 'wheel_spins', 1, message.chat.id, username=message.from_user.username)
     save_data()
@@ -2549,7 +2675,7 @@ def cmd_wheel(message):
         "▫️ [ 💵 300 🪙 ]\n"
         "▫️ [ 💎 ДЖЕКПОТ 1,500 🪙 ]\n"
         "▫️ [ 🐟 Рыба / 🏹 Дичь ]\n"
-        "▫️ [ 🌴 Мини-Рест ]\n\n"
+        "▫️ [ 😇 Карма +5 ]\n\n"
         f"🎉 <b>Стрелка остановилась на секторе:</b>\n👉 <b>{win_sector[1]}</b>!\n\n"
         f"{prize_text}"
     )
@@ -2657,7 +2783,6 @@ def cmd_dick(message):
 
     change = random.choice([-3, -2, -1, 1, 2, 3, 4, 5, 6])
     cur_size = econ.get('dick_size', 15)
-    # Расширенный лимит до 250 см
     new_size = max(1, min(250, cur_size + change))
 
     econ['dick_size'] = new_size
@@ -3415,7 +3540,7 @@ def cmd_del_pfp(message):
 
 
 # ---------------------------------------------------------
-# ПРОФИЛЬ
+# ПРОФИЛЬ И КАРМА
 # ---------------------------------------------------------
 @bot.message_handler(commands=['custom_title', 'set_title'])
 def cmd_custom_title(message):
@@ -3528,13 +3653,22 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
 
     lvl, cur_exp, next_exp, bar = get_account_level(econ.get('account_exp', 0))
 
+    # Рассчет Кармы
+    karma = econ.get('karma', 0)
+    if karma >= 80: karma_title = "😇 Святой Ангел"
+    elif karma >= 30: karma_title = "🕊 Добряк"
+    elif karma > -30: karma_title = "⚖️ Нейтрал"
+    elif karma > -80: karma_title = "😈 Злодей"
+    else: karma_title = "👹 Абсолютный Демон"
+
     text = (
         f"{header}\n"
         f"{border}\n"
         f"{t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
         f"{t_icon} ⭐ Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
+        f"{t_icon} ⚖️ Карма: <b>{karma}</b> ({karma_title})\n"
         f"{t_icon} 💵 В кармане: <b>{econ['balance']} Ня-коинов 💸</b>\n"
-        f"{t_icon} 🏦 На депозите в банке: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
+        f"{t_icon} 🏦 На депозите: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
         f"{t_icon} 🚘 Гараж: <b>{veh_str}</b>\n"
         f"{t_icon} 💼 Опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n"
         f"{t_icon} 💍 Семья: <b>{marriage_info}</b>\n"
@@ -3599,18 +3733,22 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton('✨ Значки для профиля', callback_data=f'shop_cat_badges:{user_id}'),
-        InlineKeyboardButton('👑 Титулы с баффами', callback_data=f'shop_cat_titles:{user_id}')
+        InlineKeyboardButton('✨ Значки профиля', callback_data=f'shop_cat_badges:{user_id}'),
+        InlineKeyboardButton('👑 Титулы с баффом', callback_data=f'shop_cat_titles:{user_id}')
     )
     markup.add(
         InlineKeyboardButton('🎨 Темы профиля', callback_data=f'shop_cat_themes:{user_id}'),
-        InlineKeyboardButton('🧰 Расходники и баффы', callback_data=f'shop_cat_buffs:{user_id}')
+        InlineKeyboardButton('🧰 Расходники', callback_data=f'shop_cat_buffs:{user_id}')
     )
     markup.add(
-        InlineKeyboardButton('💍 Кольца для брака', callback_data=f'shop_cat_rings:{user_id}'),
-        InlineKeyboardButton('🐾 Зоомагазин (Питомцы)', callback_data=f'shop_cat_pets:{user_id}')
+        InlineKeyboardButton('💍 Кольца (Брак)', callback_data=f'shop_cat_rings:{user_id}'),
+        InlineKeyboardButton('🐾 Зоомагазин', callback_data=f'shop_cat_pets:{user_id}')
     )
-    markup.add(InlineKeyboardButton('🏎 Автосалон (Гараж)', callback_data=f'shop_cat_garage:{user_id}'))
+    markup.add(
+        InlineKeyboardButton('🏎 Гараж', callback_data=f'shop_cat_garage:{user_id}'),
+        InlineKeyboardButton('🪴 Семена Сада', callback_data=f'shop_cat_garden:{user_id}')
+    )
+    markup.add(InlineKeyboardButton('🎙 Студия Стримера', callback_data=f'shop_cat_stream:{user_id}'))
 
     text = (
         "🏪 <b>ГЛОБАЛЬНЫЙ МАГАЗИН НЯ-БОТА</b>\n"
@@ -3747,6 +3885,9 @@ def cmd_gift(message):
     econ['balance'] -= cost
     p_econ = get_user_econ(p_id, p_tag)
     p_econ['balance'] += 80
+    
+    # Карма за подарок супругу
+    change_karma(user_id, user_name, 3)
     save_data()
 
     sender_l = make_link(message.chat.id, user_name, user_id, ping=True)
@@ -3756,7 +3897,7 @@ def cmd_gift(message):
         message.chat.id,
         f"💐 <b>РОМАНТИЧЕСКИЙ ПОДАРОК!</b>\n\n"
         f"{sender_l} преподнес(ла) роскошный букет цветов и сладости для {partner_l}! 💖🍫\n"
-        f"Любовь крепнет с каждым днем! (+80 🪙 на счет любимого человека)",
+        f"Любовь крепнет с каждым днем! (+80 🪙 на счет любимого человека, +3 Карма)",
         parse_mode='HTML'
     )
 
@@ -4361,7 +4502,7 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     )
     markup.add(
         InlineKeyboardButton("🧠 IQ", callback_data=f"top_cat_iq{uid_tag}"),
-        InlineKeyboardButton("🥩 Жир", callback_data=f"top_cat_fat{uid_tag}")
+        InlineKeyboardButton("⚖️ Карма", callback_data=f"top_cat_karma{uid_tag}")
     )
     markup.add(
         InlineKeyboardButton("🦶 Пятки", callback_data=f"top_cat_foot{uid_tag}"),
@@ -4370,7 +4511,7 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg{uid_tag}"))
 
     # Фильтрация игроков под маской-невидимкой
-    visible_items = {k: v for k, v in econ_items.items() if category in ['rich', 'msg'] or v.get('invis_until', 0) <= now}
+    visible_items = {k: v for k, v in econ_items.items() if category in ['rich', 'msg', 'karma'] or v.get('invis_until', 0) <= now}
 
     if category == 'rich':
         sorted_data = sorted(visible_items.items(), key=lambda x: (x[1].get('balance', 0) + x[1].get('bank_deposit', 0)), reverse=True)
@@ -4384,10 +4525,10 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('iq', 100), reverse=True)
         title = "🧠 <b>ТОП ПО УРОВНЮ IQ</b>"
         val_formatter = lambda info: f"<b>{info.get('iq', 100)} IQ</b>"
-    elif category == 'fat':
-        sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('fat', 20), reverse=True)
-        title = "🥩 <b>ТОП ПО ПРОЦЕНТУ ЖИРА</b>"
-        val_formatter = lambda info: f"<b>{info.get('fat', 20)}% 🍔</b>"
+    elif category == 'karma':
+        sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('karma', 0), reverse=True)
+        title = "⚖️ <b>ТОП КАРМЫ (Самые Светлые)</b>"
+        val_formatter = lambda info: f"<b>{info.get('karma', 0)} 😇</b>"
     elif category == 'foot':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('foot_size', 25), reverse=True)
         title = "🦶 <b>ТОП ПО РАЗМЕРУ ПЯТКИ</b>"
@@ -4469,7 +4610,15 @@ def handle_messages(message):
 
     last_chat_activity[chat_id] = now_ts
 
-    # 🛡 АНТИ-ФЛУД И ЗАЩИТА ОТ СПАМА
+    # 🛡 АНТИ-ФЛУД И ЗАЩИТА ОТ СПАМА (DUPLICATE COOLDOWN)
+    econ = get_user_econ(user_id, user_name, username=user_username)
+    
+    if text_lower.startswith('/') or any(kw in text_lower for kw in ['рест', 'профиль', 'баланс', 'топ', 'шанс']):
+        if (now_ts - econ.get('last_cmd_time', 0)) < 3.0 and econ.get('last_cmd_text') == text_lower:
+            return 
+        econ['last_cmd_time'] = now_ts
+        econ['last_cmd_text'] = text_lower
+
     if user_id in user_flood_muted:
         if now_ts < user_flood_muted[user_id]:
             return
@@ -4743,6 +4892,7 @@ def handle_messages(message):
             fine = min(econ['balance'], 150)
             econ['balance'] -= fine
             t_econ['balance'] += fine
+            change_karma(user_id, user_name, -5) # Карма за попытку кражи
             save_data()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
@@ -4750,7 +4900,7 @@ def handle_messages(message):
                 chat_id,
                 f"🚨🔊 <b>СИГНАЛИЗАЦИЯ СРАБОТАЛА!</b>\n\n"
                 f"{u_link} попытался проникнуть в карман {t_link}, но сработала <b>Охранная сигнализация</b>!\n"
-                f"Вор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы!",
+                f"Вор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы! (Карма -5)",
                 parse_mode='HTML'
             )
             return
@@ -4763,6 +4913,7 @@ def handle_messages(message):
             stolen = max(10, min(600, int(t_pocket * random.uniform(0.10, 0.20))))
             t_econ['balance'] -= stolen
             econ['balance'] += stolen
+            change_karma(user_id, user_name, -5) # Карма за кражу
             save_data()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
@@ -4770,7 +4921,7 @@ def handle_messages(message):
             bot.send_message(
                 chat_id,
                 f"🥷 <b>УДАЧНОЕ ОГРАБЛЕНИЕ!</b>\n\n"
-                f"{u_link} ловко украл у {t_link} <b>{stolen} Ня-коинов 🪙</b>!",
+                f"{u_link} ловко украл у {t_link} <b>{stolen} Ня-коинов 🪙</b>! (Карма -5)",
                 parse_mode='HTML'
             )
         else:
@@ -4780,6 +4931,7 @@ def handle_messages(message):
 
             econ['balance'] -= fine
             t_econ['balance'] += fine
+            change_karma(user_id, user_name, -3) # Карма за попытку
             save_data()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
@@ -4787,7 +4939,7 @@ def handle_messages(message):
             bot.send_message(
                 chat_id,
                 f"🚨 <b>ПРОВАЛ ОГРАБЛЕНИЯ!</b>\n\n"
-                f"{u_link} попался с поличным и выплатил {t_link} компенсацию: <b>-{fine} 🪙</b>!",
+                f"{u_link} попался с поличным и выплатил {t_link} компенсацию: <b>-{fine} 🪙</b>! (Карма -3)",
                 parse_mode='HTML'
             )
         return
@@ -4850,7 +5002,7 @@ def handle_messages(message):
             bot.send_message(chat_id, f"{solo_emoji} {sender_link} {solo_text}", parse_mode='HTML')
             return
 
-    # ПАРНЫЕ РП
+    # ПАРНЫЕ РП И КАРМА
     for rp_cmd, rp_data in RP_ACTIONS.items():
         if text_lower.startswith(rp_cmd):
             target_user = None
@@ -4868,11 +5020,26 @@ def handle_messages(message):
                     target_user_id = uid
 
             if target_user:
+                if target_user_id == user_id:
+                    bot.reply_to(message, "❌ Вы не можете использовать это действие на себе!")
+                    return
+                    
                 sender_link = make_link(chat_id, user_name, user_id, ping=True)
                 target_link = make_link(chat_id, target_user, target_user_id, ping=True)
+                
                 check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
                 add_account_exp(user_id, user_name, 3, username=user_username)
-                bot.send_message(chat_id, f"{rp_data['emoji']} {sender_link} <b>{rp_data['verb']}</b> {target_link}!", parse_mode='HTML')
+                
+                # Изменение кармы за РП
+                k_val = rp_data.get('karma', 0)
+                if k_val != 0:
+                    change_karma(user_id, user_name, k_val)
+                    k_sign = "+" if k_val > 0 else ""
+                    k_str = f" [Карма {k_sign}{k_val}]"
+                else:
+                    k_str = ""
+
+                bot.send_message(chat_id, f"{rp_data['emoji']} {sender_link} <b>{rp_data['verb']}</b> {target_link}!{k_str}", parse_mode='HTML')
                 return
             else:
                 bot.reply_to(message, f"💡 Ответьте на сообщение или укажите ник:\n<code>{rp_cmd} @username</code>", parse_mode='HTML')
@@ -5052,6 +5219,9 @@ def handle_messages(message):
     elif text_lower in ['настройки']:
         cmd_settings(message)
         return
+    elif text_lower in ['сад', 'оранжерея']:
+        cmd_garden(message)
+        return
     elif text_lower.startswith('история'):
         cmd_history(message)
         return
@@ -5068,6 +5238,9 @@ def handle_messages(message):
         return
     elif text_lower in ['топ айкью', 'топ iq', 'топ умных']:
         render_top_menu(chat_id, user_id=user_id, category='iq')
+        return
+    elif text_lower in ['топ кармы', 'топ ангелов', 'топ добрых']:
+        render_top_menu(chat_id, user_id=user_id, category='karma')
         return
     elif text_lower in ['топ жир', 'топ жира', 'топ жирных']:
         render_top_menu(chat_id, user_id=user_id, category='fat')
@@ -5236,7 +5409,7 @@ def handle_messages(message):
             bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
         return
 
-    # РЫБАЛКА И ОХОТА (С УЧЕТОМ ИВЕНТА ЗОЛОТАЯ ЛИХОРАДКА)
+    # РЫБАЛКА И ОХОТА
     elif text_lower in ['рыбалка', '/fish', 'рыба']:
         econ = get_user_econ(user_id, user_name, username=user_username)
         cooldown = 7200
@@ -5313,6 +5486,7 @@ def handle_messages(message):
         sender_econ['daily_transferred'] = sender_econ.get('daily_transferred', 0) + amount
 
         add_coins(user_id=target_id, user_tag=target_u, amount=receive_amount)
+        change_karma(user_id, user_name, 1) # Повышение кармы за щедрость
         save_data()
         check_achievements(user_id, user_name, 'transfers', 1, chat_id, username=user_username)
         track_daily_task(user_id, user_name, 'transfer', 1, chat_id, username=user_username)
@@ -5395,12 +5569,21 @@ def callback_inline(call):
     user_id = call.from_user.id
     user_name = (f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}").strip() or call.from_user.username
     user_username = (call.from_user.username or '').lower()
+    now_ts = time.time()
 
     # 🛑 ПРОВЕРКА РЕЖИМА СНА
     bot_is_active = db.get('bot_active', True)
     is_super_admin = (user_username == ADMIN_USERNAME.lower())
     if not bot_is_active and not is_super_admin:
         bot.answer_callback_query(call.id, "⏳ Бот временно на техобслуживании!", show_alert=True)
+        return
+
+    # Защита от автокликера кнопок
+    user_hist = user_flood_history.setdefault(user_id, [])
+    user_hist.append(now_ts)
+    user_flood_history[user_id] = [t for t in user_hist if now_ts - t <= 2.0]
+    if len(user_flood_history[user_id]) >= 4:
+        bot.answer_callback_query(call.id, "⚠️ Слишком быстро нажимаете кнопки!", show_alert=True)
         return
 
     if call.data == 'noop':
@@ -5417,7 +5600,6 @@ def callback_inline(call):
             action_data = parts[0]
             owner_id = int(parts[1])
 
-    # Проверка владельца меню (защита от перехвата)
     if owner_id and owner_id != user_id:
         if action_data in ['set_max_days', 'toggle_del_msg', 'toggle_summer_music', 'set_remind_time']:
             if not is_admin(chat_id, user_id):
@@ -5496,6 +5678,32 @@ def callback_inline(call):
             "• 🍀 <b>Клевер:</b> +15% к удаче в играх на 1 час\n"
             "• 🛡 <b>Сигнализация:</b> оглушает вора и защищает ваши деньги\n"
             "• 🥷 <b>Невидимка:</b> скрывает ваши замеры в общих топах\n"
+            "──────────────────────"
+        )
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif action_data == 'help_stream_garden':
+        text = (
+            "🎥 <b>СТРИМЕР И ОРАНЖЕРЕЯ БОНСАЙ</b> 🪴\n"
+            "──────────────────────\n"
+            "• <code>/stream [Жанр]</code> — запустить трансляцию (Гейминг, ASMR и др.)\n"
+            "• Покупай микрофоны и вебкамеры в магазине для роста аудитории.\n"
+            "• <code>/garden</code> — твоя личная оранжерея. Сажай семена, поливай и собирай урожай!\n"
+            "──────────────────────"
+        )
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif action_data == 'help_karma_rp':
+        text = (
+            "⚖️ <b>СИСТЕМА КАРМЫ И РП</b> 😇😈\n"
+            "──────────────────────\n"
+            "• <code>обнять @user</code>, <code>похвалить</code>, <code>подарок</code> повышают Карму (+)\n"
+            "• <code>ударить тапком</code>, <code>плюнуть</code>, <code>ограбить</code> понижают Карму (-)\n"
+            "• Проверь свой статус в <code>/profile</code>: от Святого Ангела до Демона!\n"
             "──────────────────────"
         )
         markup = InlineKeyboardMarkup()
@@ -5628,7 +5836,7 @@ def callback_inline(call):
             "📖 <b>ПОЛНЫЙ АЛФАВИТНЫЙ СПРАВОЧНИК КОМАНД:</b>\n"
             "──────────────────────\n"
             "• <b>А</b>: <code>ачивки</code>, <code>аватарка</code>, <code>айкью</code>\n"
-            "• <b>Б</b>: <code>баланс</code>, <code>банк</code>, <code>бизнес</code>, <code>биржа</code>, <code>брак</code>, <code>бонус</code>, <code>баскетбол 100</code>, <code>боулинг 100</code>\n"
+            "• <b>Б</b>: <code>баланс</code>, <code>банк</code>, <code>бизнес</code>, <code>биржа</code>, <code>брак</code>, <code>бонус</code>\n"
             "• <b>В</b>: <code>вакансии</code>, <code>/walk</code> (гулять)\n"
             "• <b>Г</b>: <code>гараж</code>, <code>герои дня</code>, <code>гулять</code>\n"
             "• <b>Д</b>: <code>дартс 100</code>, <code>депозит</code>, <code>детектор</code>, <code>дроч</code>, <code>/dick</code>\n"
@@ -5639,9 +5847,9 @@ def callback_inline(call):
             "• <b>Л</b>: <code>лотерея</code>, <code>лидеры</code>\n"
             "• <b>М</b>: <code>магазин</code>, <code>майнер</code>, <code>мины 100</code>, <code>мой рест</code>\n"
             "• <b>О</b>: <code>ограбить @юзер</code>, <code>опыт</code>, <code>охота</code>\n"
-            "• <b>П</b>: <code>передать @юзер 100</code>, <code>подарок</code>, <code>питомец</code>, <code>профиль</code>, <code>портфель</code>, <code>пенальти 100</code>\n"
+            "• <b>П</b>: <code>передать @юзер 100</code>, <code>подарок</code>, <code>питомец</code>, <code>профиль</code>, <code>портфель</code>\n"
             "• <b>Р</b>: <code>работа</code>, <code>развод</code>, <code>ресты</code>, <code>рулетка</code>, <code>рыбалка</code>, <code>рюкзак</code>\n"
-            "• <b>С</b>: <code>сапер 100</code>, <code>слоты 100</code>, <code>семья</code>, <code>семейный сейф</code>, <code>снасти</code>, <code>смехуятинка</code>\n"
+            "• <b>С</b>: <code>сапер 100</code>, <code>слоты 100</code>, <code>семья</code>, <code>стрим</code>, <code>сад</code>\n"
             "• <b>Т</b>: <code>топ</code>, <code>тренировка</code>, <code>тачки</code>\n"
             "• <b>Ф</b>: <code>факт вд</code>, <code>футбол 100</code>, <code>ферма</code>, <code>фап</code>\n"
             "• <b>Х</b>: <code>хромосомы</code>\n"
@@ -5738,7 +5946,164 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, "🥷 Маска надета! Ваши замеры скрыты из топов на 24 часа!", show_alert=True)
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
-    # МАГАЗИН: ТЕМЫ И БАФФЫ
+    # МАГАЗИН: ТЕМЫ И БАФФЫ И СТУДИЯ СТРИМЕРА И САД
+    elif action_data == 'shop_cat_stream':
+        econ = get_user_econ(user_id, user_name)
+        studio = econ.setdefault('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
+        lines = [
+            "🎙 <b>СТУДИЯ СТРИМЕРА (АПГРЕЙДЫ)</b>",
+            "──────────────────────",
+            "<i>Улучшайте оборудование, чтобы привлекать больше зрителей!</i>\n"
+        ]
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for k, v in STREAM_EQUIP.items():
+            lvl = studio.get(k, 1)
+            if lvl < 4:
+                cost = v['levels'][lvl]
+                lines.append(f"• <b>{v['name']}</b> (Ур. {lvl}/4) -> {cost} 🪙")
+                markup.add(InlineKeyboardButton(f"⬆️ Улучшить {v['name']} -> {cost} 🪙", callback_data=f"buy_studio_{k}:{user_id}"))
+            else:
+                lines.append(f"• <b>{v['name']}</b> (Ур. МАХ) -> Полностью прокачано!")
+
+        lines.append("──────────────────────")
+        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
+        bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif action_data.startswith('buy_studio_'):
+        equip_key = action_data.replace('buy_studio_', '')
+        econ = get_user_econ(user_id, user_name, username=user_username)
+        studio = econ.setdefault('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
+        lvl = studio.get(equip_key, 1)
+        
+        if lvl >= 4:
+            bot.answer_callback_query(call.id, "❌ Максимальный уровень!", show_alert=True)
+            return
+            
+        cost = STREAM_EQUIP[equip_key]['levels'][lvl]
+        if econ['balance'] < cost:
+            bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙!", show_alert=True)
+            return
+            
+        econ['balance'] -= cost
+        studio[equip_key] = lvl + 1
+        save_data()
+        bot.answer_callback_query(call.id, f"🎉 Вы улучшили {STREAM_EQUIP[equip_key]['name']} до {lvl+1} уровня!")
+        
+        # Обновление меню
+        markup = InlineKeyboardMarkup(row_width=1)
+        lines = [
+            "🎙 <b>СТУДИЯ СТРИМЕРА (АПГРЕЙДЫ)</b>",
+            "──────────────────────",
+            "<i>Улучшайте оборудование, чтобы привлекать больше зрителей!</i>\n"
+        ]
+        for k, v in STREAM_EQUIP.items():
+            curlvl = studio.get(k, 1)
+            if curlvl < 4:
+                ccost = v['levels'][curlvl]
+                lines.append(f"• <b>{v['name']}</b> (Ур. {curlvl}/4) -> {ccost} 🪙")
+                markup.add(InlineKeyboardButton(f"⬆️ Улучшить {v['name']} -> {ccost} 🪙", callback_data=f"buy_studio_{k}:{user_id}"))
+            else:
+                lines.append(f"• <b>{v['name']}</b> (Ур. МАХ) -> Полностью прокачано!")
+        lines.append("──────────────────────")
+        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
+        bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif action_data == 'shop_cat_garden':
+        lines = [
+            "🪴 <b>СЕМЕНА ОРАНЖЕРЕИ БОНСАЙ</b>",
+            "──────────────────────",
+            "<i>Посадите семечко, поливайте его и соберите ценный урожай!</i>\n"
+        ]
+        for s_id, s_info in GARDEN_SEEDS.items():
+            hrs = s_info['grow_time'] // 3600
+            lines.append(f"• {s_info['emoji']} <b>{s_info['name']}</b> — <code>{s_info['price']} 🪙</code>\n  <i>(Рост: {hrs} ч., Поливов: {s_info['water_req']}, Прибыль: {s_info['reward_min']}-{s_info['reward_max']} 🪙)</i>\n")
+        lines.append("──────────────────────")
+
+        markup = InlineKeyboardMarkup(row_width=2)
+        btns = [InlineKeyboardButton(f"{s['emoji']} {s['price']} 🪙", callback_data=f"buy_seed_{s_id}:{user_id}") for s_id, s in GARDEN_SEEDS.items()]
+        markup.add(*btns)
+        markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
+        bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    elif action_data.startswith('buy_seed_'):
+        s_id = action_data.replace('buy_seed_', '')
+        if s_id in GARDEN_SEEDS:
+            seed = GARDEN_SEEDS[s_id]
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            if econ.get('garden'):
+                bot.answer_callback_query(call.id, "❌ У вас уже растет растение в саду! Сначала соберите его или выкорчуйте.", show_alert=True)
+                return
+            if econ['balance'] < seed['price']:
+                bot.answer_callback_query(call.id, f"❌ Нужно {seed['price']} 🪙!", show_alert=True)
+                return
+            econ['balance'] -= seed['price']
+            econ['garden'] = {
+                'seed': s_id,
+                'planted_at': time.time(),
+                'water_count': 0
+            }
+            save_data()
+            bot.answer_callback_query(call.id, f"🎉 Вы посадили {seed['name']}! Зайдите в /garden", show_alert=True)
+            render_garden_view(chat_id, user_id, user_name, call.message.message_id)
+
+    elif action_data == 'water_plant':
+        econ = get_user_econ(user_id, user_name)
+        garden = econ.get('garden')
+        if not garden:
+            return
+            
+        seed_info = GARDEN_SEEDS[garden['seed']]
+        if garden['water_count'] >= seed_info['water_req']:
+            bot.answer_callback_query(call.id, "💦 Растение уже достаточно полито!", show_alert=True)
+            return
+            
+        garden['water_count'] += 1
+        save_data()
+        bot.answer_callback_query(call.id, "💦 Вы успешно полили растение!")
+        render_garden_view(chat_id, user_id, user_name, call.message.message_id)
+
+    elif action_data == 'harvest_plant':
+        econ = get_user_econ(user_id, user_name)
+        garden = econ.get('garden')
+        if not garden:
+            return
+            
+        seed_info = GARDEN_SEEDS[garden['seed']]
+        elapsed = time.time() - garden['planted_at']
+        
+        if elapsed < seed_info['grow_time']:
+            bot.answer_callback_query(call.id, "❌ Урожай еще не созрел!", show_alert=True)
+            return
+        if garden['water_count'] < seed_info['water_req']:
+            bot.answer_callback_query(call.id, "❌ Растению не хватило воды! Полейте его.", show_alert=True)
+            return
+            
+        reward = random.randint(seed_info['reward_min'], seed_info['reward_max'])
+        econ['balance'] += reward
+        econ['garden'] = None
+        change_karma(user_id, user_name, 2)
+        save_data()
+        
+        bot.answer_callback_query(call.id, f"🎉 Урожай собран: +{reward} 🪙!")
+        bot.edit_message_text(
+            f"🪴 <b>СБОР УРОЖАЯ</b>\n"
+            f"──────────────────────\n"
+            f"Вы собрали великолепный урожай {seed_info['name']} и продали его за <b>{reward} Ня-коинов 🪙</b>!\n"
+            f"Карма повышена: <b>+2 😇</b>",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            parse_mode='HTML'
+        )
+
+    elif action_data == 'uproot_plant':
+        econ = get_user_econ(user_id, user_name)
+        econ['garden'] = None
+        save_data()
+        bot.answer_callback_query(call.id, "❌ Растение выкорчевано.")
+        render_garden_view(chat_id, user_id, user_name, call.message.message_id)
+
+
     elif action_data == 'shop_cat_buffs':
         lines = [
             "🧰 <b>МАГАЗИН РАСХОДНИКОВ И БАФФОВ</b>",
@@ -6661,5 +7026,5 @@ setup_bot_commands()
 start_background_threads()
 keep_alive()
 
-print('Бот успешно запущен со всеми обновлениями Violence District, Крашем и защитой кнопок!')
+print('Бот успешно запущен со всеми обновлениями (Карма, Стример, Сад, Краш, Защита)!')
 bot.infinity_polling()
