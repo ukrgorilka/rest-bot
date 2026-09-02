@@ -3667,7 +3667,51 @@ def cmd_marry(message):
     if target_user_id == user_id:
         bot.reply_to(message, "❌ Нельзя заключить брак с самим собой!")
         return
+# Проверка, что предложение сделано боту
+    try:
+        bot_me = bot.get_me()
+    except Exception:
+        bot_me = None
 
+    is_bot_target = False
+    if bot_me:
+        if target_user_id and target_user_id == bot_me.id:
+            is_bot_target = True
+        elif target_user and clean_tag(target_user).lower() in [bot_me.username.lower(), 'бот', 'bot', 'ня']:
+            is_bot_target = True
+        elif message.reply_to_message and message.reply_to_message.from_user.id == bot_me.id:
+            is_bot_target = True
+    elif target_user and clean_tag(target_user).lower() in ['бот', 'bot', 'ня']:
+        is_bot_target = True
+
+    if is_bot_target:
+        rings = econ.get('rings', [])
+        chosen_ring = rings[0] if rings else 'copper'
+        ring_emoji = RINGS.get(chosen_ring, {}).get('emoji', '💍')
+        bot_id = bot_me.id if bot_me else 0
+        bot_name = bot_me.first_name if bot_me else "Ня-Бот"
+
+        m_time = time.time()
+        econ['marriage'] = {
+            'partner_id': bot_id,
+            'partner_name': f"🤖 {bot_name}",
+            'ring': chosen_ring,
+            'married_at': m_time,
+            'vault': 0
+        }
+        check_achievements(user_id, user_name, 'marriages', 1, chat_id, username=message.from_user.username)
+        mark_dirty()
+
+        u_link = make_link(chat_id, user_name, user_id, ping=True)
+        bot.send_message(
+            chat_id,
+            f"😳👉👈 <b>Ох, семпай... Это так неожиданно и приятно!</b>\n\n"
+            f"Я согласна стать твоей вайфу! {ring_emoji}\n\n"
+            f"💒 <b>Горько!</b> {u_link} и <b>🤖 {bot_name}</b> теперь официально в браке! 💖🌸",
+            parse_mode='HTML'
+        )
+        return
+        
     target_econ = get_user_econ(target_user_id, target_user)
     if target_econ.get('marriage'):
         bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> уже состоит в браке!", parse_mode='HTML')
