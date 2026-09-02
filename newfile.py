@@ -4370,6 +4370,12 @@ def handle_messages(message):
 
     add_message_stat(user_id, user_name, username=user_username)
 
+    # ПОВТОРЯЛКА (БОТ СКАЖИ ...)
+    m_say = re.match(r'^(?:бот,?\s+)?скажи\s+(.+)$', text, re.IGNORECASE)
+    if m_say:
+        phrase = m_say.group(1).strip()
+        bot.send_message(chat_id, phrase)
+        return
     # 🎭 СЛУЧАЙНЫЕ РЕАКЦИИ
     if random.random() < 0.04 and len(text) > 2:
         try:
