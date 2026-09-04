@@ -41,7 +41,7 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = "8963495889:AAFFwRPYDVj1gqwz879G7HkZgpgXDoGt87g"
+TOKEN = "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0"
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
 db_dirty = False
