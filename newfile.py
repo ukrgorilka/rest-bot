@@ -27,7 +27,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Nya Bot is alive and running!"
+    return "Nya Bot is alive and running! 😺"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -68,7 +68,7 @@ ADMIN_USERNAME = 'ukrgorilka'
 
 # Медиа-канал и летнее аудиосообщение
 MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
-WHY_TG_MSG_IDS = [5, 9]
+WHY_TG_MSG_IDS = [350503, 350504]
 SUMMER_SONG_MSG_ID = 307
 
 WHY_GIFS = [
@@ -473,6 +473,10 @@ RP_SOLO_ACTIONS = {
 }
 
 ALWAYS_ACTIVE_PATTERNS = {
+    r'\bзачем\b': [
+        'За мясом! 😼',
+        'За мясом! 😹🥩'
+    ],
     r'\b(твоя\s+мамка|твоя\s+мама|твою\s+маму|твоя\s+мать|мамулька|маман)\b': [
         'Твоя мама самая лучшая и прекрасная! 🌸💖',
         'Мама — это святое! Давай только с любовью и уважением ✨🥰',
@@ -945,9 +949,6 @@ def add_coins(user_id=None, user_tag=None, amount=0, username=None):
     return user_data['balance']
 
 def check_casino_limits(econ, bet, is_multiplayer=False):
-    if is_multiplayer: return True
-    if econ.get('daily_casino_profit', 0) >= 100000:
-        return False
     return True
 
 def process_casino_bet(bet):
@@ -1525,7 +1526,7 @@ def rest_manager_worker():
                         u_link = make_link(chat_id, u_name, target_user_id, ping=True)
                         log_event('РЕСТ СНЯТ (АВТО)', f'Чат: <code>{chat_id}</code>\nПользователь: {u_link}\nСтатус: Время реста истекло.')
                         try:
-                            bot.send_message(chat_id, f'⏰ <b>Время реста для {u_link} истекло!</b> Рест автоматически снят.', parse_mode='HTML')
+                            bot.send_message(chat_id, f'⏰ <b>Время реста для {u_link} истекло!</b> Рест автоматически снят. 😺', parse_mode='HTML')
                         except Exception:
                             pass
                         continue
@@ -1535,7 +1536,7 @@ def rest_manager_worker():
                         mins = int(remind_sec / 60)
                         u_link = make_link(chat_id, u_name, target_user_id, ping=True)
                         try:
-                            bot.send_message(chat_id, f'🔔 <b>Напоминание:</b> Рест у {u_link} закончится через {mins} мин!', parse_mode='HTML')
+                            bot.send_message(chat_id, f'🔔 <b>Напоминание:</b> Рест у {u_link} закончится через {mins} мин! 😺', parse_mode='HTML')
                         except Exception:
                             pass
         except Exception as e:
@@ -1645,7 +1646,7 @@ def vd_facts_worker():
                     f"📌 <b>{title}</b>\n"
                     f"📖 <i>{desc}</i>\n"
                     "──────────────────────\n"
-                    "💡 <i>Хотите еще? Введите в чате:</i> <code>факт вд</code>"
+                    "💡 <i>Хотите еще? Введите в чате:</i> <code>факт вд</code> 😺"
                 )
                 bot.send_message(VD_CHAT_ID, msg_text, parse_mode='HTML')
         except Exception:
@@ -1662,10 +1663,10 @@ def gold_rush_worker():
                 "🌟🔥 <b>ВНИМАНИЕ! НАЧАЛАСЬ «ЗОЛОТАЯ ЛИХОРАДКА»!</b> 🔥🌟\n"
                 "──────────────────────\n"
                 "⏳ <b>Длительность:</b> 30 минут!\n"
-                "🎣 <b>Рыбалка и Охота:</b> Шанс редкой и легендарной добычи увеличен в <b>2 РАЗА</b>!\n"
+                "🎣 <b>Рыбалка и Охота:</b> Шанс редкой и легендарной добычи увеличен в <b>2 РАЗА</b>! 😻\n"
                 "💰 <b>Скупщик:</b> Повышенные цены на продажу улова (<code>/sell</code>)!\n"
                 "──────────────────────\n"
-                "<i>Хватайте снасти и отправляйтесь на /fish и /hunt прямо сейчас!</i>"
+                "<i>Хватайте снасти и отправляйтесь на /fish и /hunt прямо сейчас!</i> 😺"
             )
             active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
             for str_chat_id in active_chats:
@@ -1673,7 +1674,7 @@ def gold_rush_worker():
                 except Exception: pass
             time.sleep(1800)
             gold_rush_event['active'] = False
-            end_msg = "⏱ <b>Золотая лихорадка завершилась!</b> Спасибо всем за активную добычу! 🏕"
+            end_msg = "⏱ <b>Золотая лихорадка завершилась!</b> Спасибо всем за активную добычу! 🏕 😸"
             for str_chat_id in active_chats:
                 try: bot.send_message(int(str_chat_id), end_msg, parse_mode='HTML')
                 except Exception: pass
@@ -1692,10 +1693,10 @@ def summer_music_worker():
                 hours, rem = divmod(delta.seconds, 3600)
                 mins, _ = divmod(rem, 60)
                 countdown_caption = (
-                    "☀️ <b>ЛЕТО ТАЕТ НА ГЛАЗАХ... ЛОВИ КАЖДЫЙ ТЁПЛЫЙ МОМЕНТ!</b> 🌊\n"
+                    "☀️ <b>ЛЕТО ТАЕТ НА ГЛАЗАХ... ЛОВИ КАЖДЫЙ ТЁПЛЫЙ МОМЕНТ!</b> 🌊 😺\n"
                     "──────────────────────\n"
                     f"⏳ До окончания лета осталось: <b>{days} дн. {hours} ч. {mins} мин.</b>\n\n"
-                    "🎧 <i>Твой атмосферный летний трек этого часа:</i>"
+                    "🎧 <i>Твой атмосферный летний трек этого часа:</i> 😻"
                 )
                 active_chats = list(db.get('settings', {}).keys())
                 for str_chat_id in active_chats:
@@ -1728,12 +1729,12 @@ def random_chat_drops_worker():
             drop_id = f"drop_{int(time.time())}_{random.randint(100, 999)}"
             active_drops[drop_id] = {'chat_id': target_chat, 'reward': reward, 'claimed': False}
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🎁 Забрать подарок!", callback_data=f"claim_{drop_id}"))
+            markup.add(InlineKeyboardButton("🎁 Забрать подарок! 😻", callback_data=f"claim_{drop_id}"))
             msg_text = (
-                "📦 <b>ВНЕЗАПНЫЙ ДРОП В ЧАТЕ!</b>\n"
+                "📦 <b>ВНЕЗАПНЫЙ ДРОП В ЧАТЕ!</b> 😺\n"
                 "──────────────────────\n"
                 f"На полу чата найдена коробка с <b>{reward} Ня-коинами 🪙</b>!\n"
-                "Кто первый нажмёт кнопку ниже — заберёт всю награду себе!"
+                "Кто первый нажмёт кнопку ниже — заберёт всю награду себе! 😸"
             )
             bot.send_message(target_chat, msg_text, reply_markup=markup, parse_mode='HTML')
         except Exception:
@@ -1741,10 +1742,10 @@ def random_chat_drops_worker():
 
 def market_news_worker():
     news_templates = [
-        ("🚀 <b>ЭКСТРЕННЫЕ НОВОСТИ БИРЖИ!</b>\nКрупный венчурный фонд инвестировал 10,000,000 в <b>{name}</b>! Курс взлетает!", 'pump', 0.25, 0.45),
-        ("🔥 <b>ПАМП НА НЯ-СТРИТ!</b>\nПопулярный блогер выпустил обзор на <b>{name}</b>! Монета летит на Луну!", 'pump', 0.20, 0.35),
-        ("📉 <b>ОБВАЛ РЫНКА!</b>\nХакеры совершили атаку на смарт-контракт <b>{name}</b>! Панические распродажи!", 'dump', 0.20, 0.35),
-        ("⚠️ <b>РЕГУЛЯТОРЫ В ДЕЛЕ!</b>\nВведены новые ограничения на торговлю <b>{name}</b>! Временная просадка курса!", 'dump', 0.15, 0.30)
+        ("🚀 <b>ЭКСТРЕННЫЕ НОВОСТИ БИРЖИ!</b>\nКрупный венчурный фонд инвестировал 10,000,000 в <b>{name}</b>! Курс взлетает! 😻", 'pump', 0.25, 0.45),
+        ("🔥 <b>ПАМП НА НЯ-СТРИТ!</b>\nПопулярный блогер выпустил обзор на <b>{name}</b>! Монета летит на Луну! 😺", 'pump', 0.20, 0.35),
+        ("📉 <b>ОБВАЛ РЫНКА!</b>\nХакеры совершили атаку на смарт-контракт <b>{name}</b>! Панические распродажи! 🙀", 'dump', 0.20, 0.35),
+        ("⚠️ <b>РЕГУЛЯТОРЫ В ДЕЛЕ!</b>\nВведены новые ограничения на торговлю <b>{name}</b>! Временная просадка курса! 😿", 'dump', 0.15, 0.30)
     ]
     while True:
         time.sleep(random.randint(7200, 14400))
@@ -1761,7 +1762,7 @@ def market_news_worker():
             asset['price'] = new_p
             asset['last_update'] = time.time()
             mark_dirty()
-            news_text = template.format(name=asset['name']) + f"\n\n📊 Новый курс <b>{ticker}</b>: <b>{new_p:.2f} 🪙</b> (Было: {old_p:.2f} 🪙)"
+            news_text = template.format(name=asset['name']) + f"\n\n📊 Новый курс <b>{ticker}</b>: <b>{new_p:.2f} 🪙</b> (Было: {old_p:.2f} 🪙) 😸"
             active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
             for str_chat_id in active_chats:
                 try: bot.send_message(int(str_chat_id), news_text, parse_mode='HTML')
@@ -1794,12 +1795,12 @@ def chat_quiz_worker():
             current_quiz['reward'] = q_data[2]
             current_quiz['chat_id'] = target_chat
             msg_text = (
-                "⚡️ <b>ЭКСПРЕСС-ВИКТОРИНА В ЧАТЕ!</b>\n"
+                "⚡️ <b>ЭКСПРЕСС-ВИКТОРИНА В ЧАТЕ!</b> 😺\n"
                 "──────────────────────\n"
                 f"{q_data[0]}\n\n"
-                f"💰 Награда первому верному ответу: <b>+{q_data[2]} Ня-коинов 🪙</b>\n"
+                f"💰 Награда первому верному ответу: <b>+{q_data[2]} Ня-коинов 🪙</b> 😻\n"
                 "──────────────────────\n"
-                "<i>Просто напишите правильный ответ в чат!</i>"
+                "<i>Просто напишите правильный ответ в чат!</i> 😸"
             )
             bot.send_message(target_chat, msg_text, parse_mode='HTML')
         except Exception:
@@ -1808,10 +1809,10 @@ def chat_quiz_worker():
 def chat_silence_worker():
     silence_prompts = [
         "👀 В чате так тихо... Колитесь, кто чем сейчас занят? ☕️✨",
-        "🐾 Котики напоминают: сделайте глоток водички, расправьте плечи и улыбнитесь! 🌸",
-        "💭 Мысль часа: если кошка легла на клавиатуру — это не лень, это технический перерыв! 🐱🛋",
-        "🎲 Чат спит, а ракета в <code>/crash</code> и рулетка в <code>/wheel</code> ждут победителей! 🔥",
-        "💬 Всем отличного настроения и продуктивного дня! Не забывайте заглядывать в <code>/tasks</code> 📋"
+        "🐾 Котики напоминают: сделайте глоток водички, расправьте плечи и улыбнитесь! 🌸 😺",
+        "💭 Мысль часа: если кошка легла на клавиатуру — это не лень, это технический перерыв! 🐱🛋 😸",
+        "🎲 Чат спит, а ракета в <code>/crash</code> и рулетка в <code>/wheel</code> ждут победителей! 🔥 😻",
+        "💬 Всем отличного настроения и продуктивного дня! Не забывайте заглядывать в <code>/tasks</code> 📋 😺"
     ]
     while True:
         time.sleep(3600)
@@ -1849,10 +1850,10 @@ def welcome_new_members(message):
         add_coins(member.id, user_name, 50, username=member.username)
 
         welcome_text = (
-            f"🎉 <b>Добро пожаловать в наш чат, {user_link}!</b>\n\n"
-            f"🌸 Мы рады видеть тебя в нашей дружной семье!\n"
-            f"💵 Тебе начислен приветственный подарок: <b>50 Ня-коинов 🪙</b>\n\n"
-            f"💡 Введи <code>меню</code> или <code>/help</code>, чтобы открыть интерактивный путеводитель."
+            f"🎉 <b>Добро пожаловать в наш чат, {user_link}!</b> 😺\n\n"
+            f"🌸 Мы рады видеть тебя в нашей дружной семье! 😻\n"
+            f"💵 Тебе начислен приветственный подарок: <b>50 Ня-коинов 🪙</b> 😽\n\n"
+            f"💡 Введи <code>меню</code> или <code>/help</code>, чтобы открыть интерактивный путеводитель. 😸"
         )
         bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
 
@@ -1861,7 +1862,7 @@ def goodbye_left_member(message):
     member = message.left_chat_member
     user_name = (f"{member.first_name or ''} {member.last_name or ''}").strip() or member.username
     user_link = make_link(message.chat.id, user_name, member.id, ping=False)
-    farewell_text = f"👋 <b>{user_link}</b> покинул(а) наш чат. Пожелаем удачи на пути! 🌸"
+    farewell_text = f"👋 <b>{user_link}</b> покинул(а) наш чат. Пожелаем удачи на пути! 😿🌸"
     bot.send_message(message.chat.id, farewell_text, parse_mode='HTML')
 
 # ---------------------------------------------------------
@@ -1902,10 +1903,10 @@ def get_main_menu_markup(owner_id):
 @bot.message_handler(commands=['start', 'help', 'menu', 'info'])
 def send_welcome(message):
     welcome_text = (
-        "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b>\n"
+        "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
         "──────────────────────\n"
-        "Добро пожаловать в центр управления экономикой, спорт-играми, бизнесами, фактами VD и рестами!\n\n"
-        "👇 <i>Выберите интересующий вас раздел из меню ниже:</i>"
+        "Добро пожаловать в центр управления экономикой, спорт-играми, бизнесами, фактами VD и рестами! 😻\n\n"
+        "👇 <i>Выберите интересующий вас раздел из меню ниже:</i> 😸"
     )
     bot.reply_to(message, welcome_text, reply_markup=get_main_menu_markup(message.from_user.id), parse_mode='HTML')
 
@@ -1922,15 +1923,15 @@ def cmd_brick(message):
     bet = int(m.group(1)) if m and m.group(1) else 50
 
     if bet <= 0:
-        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
+        bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
         return
 
     if not check_casino_limits(econ, bet):
-        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
         return
 
     if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙")
+        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙 😿")
         return
 
     econ['balance'] -= bet
@@ -1953,13 +1954,13 @@ def cmd_brick(message):
 
     bot.send_message(
         message.chat.id,
-        f"🧱 <b>ИГРА КИРПИЧ (СТРОЙКА)</b>\n"
+        f"🧱 <b>ИГРА КИРПИЧ (СТРОЙКА)</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Строитель: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
         f"💰 Ставка: <b>{bet} 🪙</b>\n"
         f"📈 Текущий множитель: <b>1.0x</b>\n"
         f"──────────────────────\n"
-        f"<i>Делайте шаги, чтобы увеличить множитель, но помните: с каждым шагом шанс, что кирпич упадет на голову, растет!</i>",
+        f"<i>Делайте шаги, чтобы увеличить множитель, но помните: с каждым шагом шанс, что кирпич упадет на голову, растет!</i> 😸",
         reply_markup=markup,
         parse_mode='HTML'
     )
@@ -1980,9 +1981,9 @@ def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, cra
             game['exploded'] = True
             try:
                 bot.edit_message_text(
-                    f"💥 <b>КРАШ! РАКЕТА ВЗОРВАЛАСЬ НА {crash_point:.2f}x!</b>\n\n"
+                    f"💥 <b>КРАШ! РАКЕТА ВЗОРВАЛАСЬ НА {crash_point:.2f}x!</b> 🙀\n\n"
                     f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}\n"
-                    f"💸 Ставка <b>{bet} Ня-коинов 🪙</b> сгорела в атмосфере...",
+                    f"💸 Ставка <b>{bet} Ня-коинов 🪙</b> сгорела в атмосфере... 😿",
                     chat_id=chat_id,
                     message_id=message_id,
                     parse_mode='HTML'
@@ -1995,21 +1996,21 @@ def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, cra
         game['current_mult'] = mult
         cashout_amt = int(bet * mult)
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amt} 🪙 | {mult:.2f}x)", callback_data=f"crash_cashout_{game_id}:{user_id}"))
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amt} 🪙 | {mult:.2f}x) 😻", callback_data=f"crash_cashout_{game_id}:{user_id}"))
 
         bar_len = min(8, int(mult * 1.5))
         sky_bar = "☁️" * (8 - bar_len) + "🚀" + "🔥" * bar_len
 
         try:
             bot.edit_message_text(
-                f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b>\n"
+                f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b> 😺\n"
                 f"──────────────────────\n"
                 f"👤 Пилот: {make_link(chat_id, user_name, user_id, ping=False)}\n"
                 f"💰 Ставка: <b>{bet} 🪙</b>\n"
                 f"📈 Текущий множитель: <b>{mult:.2f}x</b>\n"
                 f"🛰 Полет: [{sky_bar}]\n"
                 f"──────────────────────\n"
-                f"<i>Успейте нажать кнопку ниже до взрыва ракеты!</i>",
+                f"<i>Успейте нажать кнопку ниже до взрыва ракеты!</i> 😸",
                 chat_id=chat_id,
                 message_id=message_id,
                 reply_markup=markup,
@@ -2028,19 +2029,15 @@ def cmd_crash(message):
     bet = int(m.group(1)) if m and m.group(1) else 50
 
     if bet <= 0:
-        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
-        return
-
-    if bet > 5000:
-        bot.reply_to(message, "❌ Максимальная ставка в Краш: <b>5000 🪙</b>!", parse_mode='HTML')
+        bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
         return
 
     if not check_casino_limits(econ, bet):
-        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
         return
 
     if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙")
+        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙 😿")
         return
 
     econ['balance'] -= bet
@@ -2077,28 +2074,28 @@ def cmd_crash(message):
         active_crash[game_id]['exploded'] = True
         bot.send_message(
             message.chat.id,
-            f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b>\n"
+            f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b> 😺\n"
             f"──────────────────────\n"
-            f"💥 <b>РАКЕТА ВЗОРВАЛАСЬ НА СТАРТЕ (1.00x)!</b>\n\n"
+            f"💥 <b>РАКЕТА ВЗОРВАЛАСЬ НА СТАРТЕ (1.00x)!</b> 🙀\n\n"
             f"👤 Пилот: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
-            f"💸 Ваша ставка <b>{bet} Ня-коинов 🪙</b> моментально сгорела в атмосфере...",
+            f"💸 Ваша ставка <b>{bet} Ня-коинов 🪙</b> моментально сгорела в атмосфере... 😿",
             parse_mode='HTML'
         )
         del active_crash[game_id]
         return
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"💰 Забрать куш ({bet} 🪙 | 1.00x)", callback_data=f"crash_cashout_{game_id}:{user_id}"))
+    markup.add(InlineKeyboardButton(f"💰 Забрать куш ({bet} 🪙 | 1.00x) 😻", callback_data=f"crash_cashout_{game_id}:{user_id}"))
 
     sent_msg = bot.send_message(
         message.chat.id,
-        f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b>\n"
+        f"🚀 <b>ИГРА КРАШ (CRASH ROCKET)</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Пилот: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
         f"💰 Ставка: <b>{bet} 🪙</b>\n"
         f"📈 Запуск двигателей... [🚀☁️☁️☁️☁️☁️☁️]\n"
         f"──────────────────────\n"
-        f"<i>Приготовьтесь забрать куш!</i>",
+        f"<i>Приготовьтесь забрать куш!</i> 😸",
         reply_markup=markup,
         parse_mode='HTML'
     )
@@ -2118,11 +2115,11 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
     viewers = base_viewers + random.randint(10, 100)
     
     text = (
-        f"🔴 <b>СТРИМ ЗАПУЩЕН!</b>\n"
+        f"🔴 <b>СТРИМ ЗАПУЩЕН!</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Стример: {make_link(chat_id, user_name, user_id, ping=False)}\n"
         f"🎮 Жанр: <b>{genre}</b>\n\n"
-        f"<i>Зрители подключаются... (👁 {viewers})</i>"
+        f"<i>Зрители подключаются... (👁 {viewers})</i> 😸"
     )
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
     except Exception: pass
@@ -2131,15 +2128,15 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
     
     event_roll = random.random()
     if event_roll < 0.3:
-        event = "🔥 Чат сходит с ума от ваших шуток!"
+        event = "🔥 Чат сходит с ума от ваших шуток! 😹"
         viewers = int(viewers * 1.5)
     elif event_roll < 0.6:
-        event = "💰 Крупный донатер скинул солидную сумму!"
+        event = "💰 Крупный донатер скинул солидную сумму! 😻"
     elif event_roll < 0.8:
-        event = "🎉 RAID от популярного стримера!"
+        event = "🎉 RAID от популярного стримера! 🙀"
         viewers = int(viewers * 2.5)
     else:
-        event = "📉 Интернет лагает, часть зрителей ушла..."
+        event = "📉 Интернет лагает, часть зрителей ушла... 😿"
         viewers = int(viewers * 0.7)
         
     text += f"\n\n⚡️ <b>Событие:</b> {event}\n<i>(👁 {viewers} зрителей)</i>"
@@ -2158,10 +2155,10 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
     
     k_sign = "+" if karma_diff > 0 else ""
     text += (
-        f"\n\n🏁 <b>СТРИМ ЗАВЕРШЕН!</b>\n"
+        f"\n\n🏁 <b>СТРИМ ЗАВЕРШЕН!</b> 😺\n"
         f"──────────────────────\n"
-        f"💸 Заработано донатов: <b>+{donates} 🪙</b>\n"
-        f"⚖️ Влияние на Карму: <b>{k_sign}{karma_diff}</b>"
+        f"💸 Заработано донатов: <b>+{donates} 🪙</b> 😻\n"
+        f"⚖️ Влияние на Карму: <b>{k_sign}{karma_diff}</b> 😸"
     )
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
     except Exception: pass
@@ -2176,7 +2173,7 @@ def cmd_stream(message):
     cooldown = 3600 * 2
     left = cooldown_text(econ.get('last_stream_time', 0), cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Стримить можно раз в 2 часа! Ждите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Стримить можно раз в 2 часа! Ждите: <b>{left}</b>. 😿", parse_mode='HTML')
         return
         
     parts = message.text.split(maxsplit=1)
@@ -2185,7 +2182,7 @@ def cmd_stream(message):
     econ['last_stream_time'] = now
     mark_dirty()
     
-    msg = bot.reply_to(message, "🔴 <i>Настройка ОБС и запуск потока...</i>", parse_mode='HTML')
+    msg = bot.reply_to(message, "🔴 <i>Настройка ОБС и запуск потока...</i> 😺", parse_mode='HTML')
     t = threading.Thread(target=stream_thread, args=(message.chat.id, user_id, user_name, genre, msg.message_id))
     t.daemon = True
     t.start()
@@ -2200,10 +2197,10 @@ def render_garden_view(chat_id, user_id, user_name, message_id=None):
     markup = InlineKeyboardMarkup(row_width=2)
     if not garden:
         text = (
-            f"🪴 <b>ВАША ОРАНЖЕРЕЯ БОНСАЙ</b>\n"
+            f"🪴 <b>ВАША ОРАНЖЕРЕЯ БОНСАЙ</b> 😺\n"
             f"──────────────────────\n"
-            f"У вас пока нет посаженных растений!\n\n"
-            f"Купите семена ниже, чтобы начать выращивать свой сад для пассивного заработка."
+            f"У вас пока нет посаженных растений! 😿\n\n"
+            f"Купите семена ниже, чтобы начать выращивать свой сад для пассивного заработка. 😻"
         )
         for s_id, s_info in GARDEN_SEEDS.items():
             markup.add(InlineKeyboardButton(f"{s_info['emoji']} Купить {s_info['name']} ({s_info['price']} 🪙)", callback_data=f"buy_seed_{s_id}:{user_id}"))
@@ -2226,7 +2223,7 @@ def render_garden_view(chat_id, user_id, user_name, message_id=None):
         bar = "🟩" * bar_len + "⬜️" * (10 - bar_len)
         
         text = (
-            f"🪴 <b>ВАШ САД: {seed_info['name']}</b>\n"
+            f"🪴 <b>ВАШ САД: {seed_info['name']}</b> 😺\n"
             f"──────────────────────\n"
             f"📈 Прогресс роста: <b>{progress_pct}%</b>\n"
             f"[{bar}]\n"
@@ -2266,11 +2263,11 @@ def cmd_loan(message):
     
     if loan.get('amount', 0) > 0:
         due_date = datetime.fromtimestamp(loan['due']).strftime('%d.%m.%Y %H:%M')
-        bot.reply_to(message, f"❌ У вас уже есть активный кредит на <b>{loan['amount']} 🪙</b>!\nОплатите его до {due_date} (команда: <code>/repay</code>).", parse_mode='HTML')
+        bot.reply_to(message, f"❌ У вас уже есть активный кредит на <b>{loan['amount']} 🪙</b>! 😾\nОплатите его до {due_date} (команда: <code>/repay</code>).", parse_mode='HTML')
         return
         
     if loan.get('defaulted'):
-        bot.reply_to(message, "❌ Ваша кредитная история испорчена (Вы в черном списке банка)!", parse_mode='HTML')
+        bot.reply_to(message, "❌ Ваша кредитная история испорчена (Вы в черном списке банка)! 🙀", parse_mode='HTML')
         return
 
     m = re.search(r'(?:/loan|кредит)\s*(\d+)?', message.text, re.IGNORECASE)
@@ -2280,11 +2277,11 @@ def cmd_loan(message):
     max_loan = lvl * 1500
     
     if amount <= 0:
-        bot.reply_to(message, f"🏦 <b>КРЕДИТНЫЙ ОТДЕЛ НЯ-БАНКА</b>\n\nВам доступен кредит до <b>{max_loan} 🪙</b> (на 24 часа).\nСумма возврата будет на 15% больше!\n\nДля оформления введите: <code>/loan {max_loan}</code>", parse_mode='HTML')
+        bot.reply_to(message, f"🏦 <b>КРЕДИТНЫЙ ОТДЕЛ НЯ-БАНКА</b> 😺\n\nВам доступен кредит до <b>{max_loan} 🪙</b> (на 24 часа).\nСумма возврата будет на 15% больше!\n\nДля оформления введите: <code>/loan {max_loan}</code> 😸", parse_mode='HTML')
         return
         
     if amount > max_loan:
-        bot.reply_to(message, f"❌ Банк не одобрил такую сумму! Максимум для вашего {lvl} уровня: <b>{max_loan} 🪙</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"❌ Банк не одобрил такую сумму! Максимум для вашего {lvl} уровня: <b>{max_loan} 🪙</b>. 😿", parse_mode='HTML')
         return
         
     repay_amount = int(amount * 1.15)
@@ -2296,7 +2293,7 @@ def cmd_loan(message):
     }
     mark_dirty()
     
-    bot.reply_to(message, f"✅ <b>КРЕДИТ ОДОБРЕН!</b>\n\nВы получили <b>{amount} 🪙</b>.\nВам нужно вернуть <b>{repay_amount} 🪙</b> в течение 24 часов (команда <code>/repay</code>), иначе вмешаются коллекторы!", parse_mode='HTML')
+    bot.reply_to(message, f"✅ <b>КРЕДИТ ОДОБРЕН!</b> 😸\n\nВы получили <b>{amount} 🪙</b>.\nВам нужно вернуть <b>{repay_amount} 🪙</b> в течение 24 часов (команда <code>/repay</code>), иначе вмешаются коллекторы! 🙀", parse_mode='HTML')
 
 @bot.message_handler(commands=['repay', 'погасить'])
 def cmd_repay(message):
@@ -2306,18 +2303,18 @@ def cmd_repay(message):
     
     loan = econ.get('loan', {})
     if loan.get('amount', 0) <= 0:
-        bot.reply_to(message, "У вас нет активных кредитов!")
+        bot.reply_to(message, "У вас нет активных кредитов! 😸")
         return
         
     amount_to_pay = loan['amount']
     if econ['balance'] < amount_to_pay:
-        bot.reply_to(message, f"❌ Недостаточно средств для погашения! Нужно <b>{amount_to_pay} 🪙</b>, у вас: {econ['balance']}.", parse_mode='HTML')
+        bot.reply_to(message, f"❌ Недостаточно средств для погашения! Нужно <b>{amount_to_pay} 🪙</b>, у вас: {econ['balance']}. 😿", parse_mode='HTML')
         return
         
     econ['balance'] -= amount_to_pay
     econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
     mark_dirty()
-    bot.reply_to(message, f"✅ Кредит успешно погашен! Списано <b>{amount_to_pay} 🪙</b>. Ваша кредитная история чиста.", parse_mode='HTML')
+    bot.reply_to(message, f"✅ Кредит успешно погашен! Списано <b>{amount_to_pay} 🪙</b>. Ваша кредитная история чиста. 😻", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # TELEGRAM-СПОРТ И АЗАРТ
@@ -2329,15 +2326,15 @@ def process_sport_dice_game(message, game_type, bet):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     if bet <= 0:
-        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
+        bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
         return
         
     if not check_casino_limits(econ, bet):
-        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
         return
 
     if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ Недостаточно средств! У вас: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+        bot.reply_to(message, f"❌ Недостаточно средств! У вас: <b>{econ['balance']} 🪙</b> 😿", parse_mode='HTML')
         return
 
     econ['balance'] -= bet
@@ -2367,11 +2364,11 @@ def process_sport_dice_game(message, game_type, bet):
             econ['balance'] += win_amount
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b>\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
+            result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
         elif val == 2:
-            result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b>\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
+            result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b> 🙀\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
         else:
-            result_text = f"💨 <b>МИМО ВОРОТ!</b>\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
+            result_text = f"💨 <b>МИМО ВОРОТ!</b> 😿\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
     elif game_type == 'basketball':
         if val in [4, 5]:
             mult = 2.0 if not has_clover else 2.3
@@ -2380,11 +2377,11 @@ def process_sport_dice_game(message, game_type, bet):
             econ['balance'] += win_amount
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b>\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+            result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
         elif val == 3:
-            result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b>\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
+            result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b> 🙀\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
         else:
-            result_text = f"💨 <b>МИМО ЩИТА!</b>\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
+            result_text = f"💨 <b>МИМО ЩИТА!</b> 😿\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
     elif game_type == 'darts':
         if val == 6:
             mult = 3.5 if not has_clover else 4.0
@@ -2393,7 +2390,7 @@ def process_sport_dice_game(message, game_type, bet):
             econ['balance'] += win_amount
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b>\n🎉 МЕГА-КУШ: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+            result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 МЕГА-КУШ: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
         elif val == 5:
             mult = 1.5
             win_amount = int(bet * mult)
@@ -2401,9 +2398,9 @@ def process_sport_dice_game(message, game_type, bet):
             econ['balance'] += win_amount
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b>\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
+            result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
         else:
-            result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {val})\n💸 Проигрыш <b>{bet} 🪙</b>."
+            result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
     elif game_type == 'bowling':
         if val == 6:
             mult = 3.0 if not has_clover else 3.5
@@ -2412,21 +2409,21 @@ def process_sport_dice_game(message, game_type, bet):
             econ['balance'] += win_amount
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
             econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b>\n🎉 Мега-бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+            result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Мега-бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
         elif val in [4, 5]:
             win_amount = int(bet * 1.1)
             win_amount = process_casino_win(win_amount)
             econ['balance'] += win_amount
-            result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Сбито большинство кеглей.\n✅ Возврат с бонусом: <b>+{win_amount} 🪙</b> (x1.1)."
+            result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Сбито большинство кеглей. 😸\n✅ Возврат с бонусом: <b>+{win_amount} 🪙</b> (x1.1)."
         else:
-            result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {val})\n💸 Проигрыш <b>{bet} 🪙</b>."
+            result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
     add_account_exp(user_id, user_name, 5, username=message.from_user.username)
     check_achievements(user_id, user_name, 'games', 1, chat_id, username=message.from_user.username)
     mark_dirty()
 
     u_link = make_link(chat_id, user_name, user_id, ping=True)
-    bot.reply_to(message, f"👤 Игрок: {u_link}\n{result_text}\n💰 Баланс: <b>{econ['balance']} Ня-коинов 🪙</b>", parse_mode='HTML')
+    bot.reply_to(message, f"👤 Игрок: {u_link}\n{result_text}\n💰 Баланс: <b>{econ['balance']} Ня-коинов 🪙</b> 😸", parse_mode='HTML')
 
 @bot.message_handler(commands=['football', 'футбол', 'пенальти'])
 def cmd_football(message):
@@ -2471,7 +2468,7 @@ def cmd_magic_ball(message):
         bot.reply_to(message, "🔮 Задайте вопрос шару судьбы!\nПример: <code>шар пойду ли я сегодня спать вовремя?</code>", parse_mode='HTML')
         return
     ans = random.choice(BALL_RESPONSES)
-    bot.reply_to(message, f"🔮 <b>Вопрос:</b> <i>«{html.escape(q)}»</i>\n\n{ans}", parse_mode='HTML')
+    bot.reply_to(message, f"🔮 <b>Вопрос:</b> <i>«{html.escape(q)}»</i>\n\n{ans} 😺", parse_mode='HTML')
 
 @bot.message_handler(commands=['chance', 'шанс'])
 def cmd_chance(message):
@@ -2486,7 +2483,7 @@ def cmd_chance(message):
     elif pct >= 50: verdict = "👌 Вполне вероятно!"
     elif pct >= 25: verdict = "🎲 Шанс невелик, но он есть."
     else: verdict = "🤏 Почти невозможно..."
-    bot.reply_to(message, f"📊 <b>АНАЛИЗ ВЕРОЯТНОСТИ СОБЫТИЯ:</b>\n<i>«{html.escape(q)}»</i>\n──────────────────────\nШанс: <b>{pct}%</b> [{bar}]\n💡 Вердикт: <i>{verdict}</i>\n──────────────────────", parse_mode='HTML')
+    bot.reply_to(message, f"📊 <b>АНАЛИЗ ВЕРОЯТНОСТИ СОБЫТИЯ:</b> 😸\n<i>«{html.escape(q)}»</i>\n──────────────────────\nШанс: <b>{pct}%</b> [{bar}]\n💡 Вердикт: <i>{verdict}</i>\n──────────────────────", parse_mode='HTML')
 
 @bot.message_handler(commands=['detector', 'детектор', 'правда'])
 def cmd_detector(message):
@@ -2502,7 +2499,7 @@ def cmd_detector(message):
         ("🔴 <b>ЧИСТЕЙШАЯ БРЕХНЯ!</b>", "Даже кот семпая не поверил в эту историю! Ложь 10/10! 🤡💥")
     ]
     v_title, v_desc = random.choice(verdicts)
-    bot.reply_to(message, f"🕵️‍♂️ <b>СКАНИРОВАНИЕ НА ПОЛИГРАФЕ:</b>\n<i>«{html.escape(q)}»</i>\n──────────────────────\nВердикт: {v_title}\n📝 <i>{v_desc}</i>\n──────────────────────", parse_mode='HTML')
+    bot.reply_to(message, f"🕵️‍♂️ <b>СКАНИРОВАНИЕ НА ПОЛИГРАФЕ:</b> 😺\n<i>«{html.escape(q)}»</i>\n──────────────────────\nВердикт: {v_title}\n📝 <i>{v_desc}</i>\n──────────────────────", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # УДАРНИКИ И ГЕРОИ ДНЯ
@@ -2529,13 +2526,13 @@ def cmd_daily_heroes(message):
     transfer_str = f"{make_link(chat_id, top_transfer_user.get('display_name'), top_transfer_user.get('user_id'), ping=False)} (<b>{top_transfer_amt} 🪙</b>)" if top_transfer_user and top_transfer_amt > 0 else "<i>Переводов сегодня не было</i>"
 
     text = (
-        "🏆 <b>ГЕРОИ И УДАРНИКИ СЕГОДНЯШНЕГО ДНЯ</b>\n"
+        "🏆 <b>ГЕРОИ И УДАРНИКИ СЕГОДНЯШНЕГО ДНЯ</b> 😺\n"
         "──────────────────────\n"
         f"🗣 <b>Главный спикер дня:</b>\n👉 {speaker_str}\n\n"
         f"🎰 <b>Гроза казино и спорта:</b>\n👉 {casino_str}\n\n"
         f"💖 <b>Главный меценат чата:</b>\n👉 {transfer_str}\n"
         "──────────────────────\n"
-        "👑 <i>Герои дня получают почёт, уважение и статус в чате на 24 часа!</i>"
+        "👑 <i>Герои дня получают почёт, уважение и статус в чате на 24 часа!</i> 😻"
     )
     bot.reply_to(message, text, parse_mode='HTML')
 
@@ -2556,7 +2553,7 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
     invis_status = "✅ Включена" if econ.get('invis_until', 0) > time.time() else "❌ Выключена"
 
     text = (
-        f"🎒 <b>РЮКЗАК БАФФОВ И РАСХОДНИКОВ</b>\n"
+        f"🎒 <b>РЮКЗАК БАФФОВ И РАСХОДНИКОВ</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Владелец: {make_link(chat_id, user_name, user_id, ping=False)}\n\n"
         f"• ⚡️ Энергетик Red Cat: <b>{bp.get('energy_drink', 0)} шт.</b>\n"
@@ -2564,7 +2561,7 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
         f"• 🛡 Охранная сигнализация: <b>{bp.get('alarm_system', 0)} шт.</b> (Авто-защита)\n"
         f"• 🥷 Маска-невидимка: <b>{bp.get('invis_mask', 0)} шт.</b> (Статус: {invis_status})\n"
         f"──────────────────────\n"
-        f"💡 <i>Нажмите кнопку под сообщением, чтобы использовать предмет!</i>"
+        f"💡 <i>Нажмите кнопку под сообщением, чтобы использовать предмет!</i> 😸"
     )
 
     if message_id:
@@ -2594,7 +2591,7 @@ def cmd_wheel(message):
 
     left = cooldown_text(last_spin, cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ <b>Колесо Фортуны доступно раз в 12 часов!</b>\nСледующее бесплатное вращение через: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ <b>Колесо Фортуны доступно раз в 12 часов!</b> 😿\nСледующее бесплатное вращение через: <b>{left}</b>.", parse_mode='HTML')
         return
 
     econ['last_wheel_time'] = now
@@ -2611,34 +2608,34 @@ def cmd_wheel(message):
     prize_text = ""
     if win_key == 'coins_100':
         econ['balance'] += 100
-        prize_text = "💰 Вы выиграли <b>+100 Ня-коинов 🪙</b>!"
+        prize_text = "💰 Вы выиграли <b>+100 Ня-коинов 🪙</b>! 😸"
     elif win_key == 'coins_300':
         econ['balance'] += 300
-        prize_text = "💵 Вы выиграли <b>+300 Ня-коинов 🪙</b>!"
+        prize_text = "💵 Вы выиграли <b>+300 Ня-коинов 🪙</b>! 😻"
     elif win_key == 'jackpot':
         econ['balance'] += 1500
-        prize_text = "💎👑 <b>МЕГА ДЖЕКПОТ! +1,500 Ня-коинов 🪙</b>!"
+        prize_text = "💎👑 <b>МЕГА ДЖЕКПОТ! +1,500 Ня-коинов 🪙</b>! 🙀"
         log_event('КОЛЕСО: ДЖЕКПОТ', f'{make_link(message.chat.id, user_name, user_id, ping=False)} сорвал джекпот Колеса Фортуны (1,500 🪙)!')
     elif win_key == 'fish':
         trophy = random.choice(FISH_TYPES)[0]
         add_inventory_item(econ['fish_inventory'], trophy)
-        prize_text = f"🐟 Вы выловили: <b>{trophy}</b>!"
+        prize_text = f"🐟 Вы выловили: <b>{trophy}</b>! 😺"
     elif win_key == 'beast':
         trophy = random.choice(HUNT_TYPES)[0]
         add_inventory_item(econ['hunt_inventory'], trophy)
-        prize_text = f"🏹 Вы добыли: <b>{trophy}</b>!"
+        prize_text = f"🏹 Вы добыли: <b>{trophy}</b>! 😺"
     elif win_key == 'exp':
         add_account_exp(user_id, user_name, 80, username=message.from_user.username)
-        prize_text = "⭐ Вы получили <b>+80 EXP опыта профиля</b>!"
+        prize_text = "⭐ Вы получили <b>+80 EXP опыта профиля</b>! 😸"
     elif win_key == 'karma':
         change_karma(user_id, user_name, 5)
-        prize_text = "😇 Вы выиграли <b>+5 Кармы</b>!"
+        prize_text = "😇 Вы выиграли <b>+5 Кармы</b>! 😻"
 
     check_achievements(user_id, user_name, 'wheel_spins', 1, message.chat.id, username=message.from_user.username)
     mark_dirty()
 
     anim_text = (
-        "🎡 <b>КОЛЕСО ФОРТУНЫ КРУТИТСЯ...</b>\n\n"
+        "🎡 <b>КОЛЕСО ФОРТУНЫ КРУТИТСЯ...</b> 😺\n\n"
         "▫️ [ 💰 100 🪙 ]\n▫️ [ 💵 300 🪙 ]\n▫️ [ 💎 ДЖЕКПОТ 1,500 🪙 ]\n▫️ [ 🐟 Рыба / 🏹 Дичь ]\n▫️ [ 😇 Карма +5 ]\n\n"
         f"🎉 <b>Стрелка остановилась на секторе:</b>\n👉 <b>{win_sector[1]}</b>!\n\n{prize_text}"
     )
@@ -2665,17 +2662,17 @@ def render_mines_board(game_id):
 
     if not game['finished'] and len(game['revealed']) > 0:
         cashout_amount = int(game['bet'] * game['current_multiplier'])
-        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x)", callback_data=f"mines_cashout_{game_id}:{u_id}"))
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x) 😻", callback_data=f"mines_cashout_{game_id}:{u_id}"))
 
     text = (
-        f"💣 <b>САПЁР (ПОЛЕ 4х4)</b>\n"
+        f"💣 <b>САПЁР (ПОЛЕ 4х4)</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Игрок: {game['user_tag']}\n"
         f"💰 Ставка: <b>{game['bet']} 🪙</b> | Мин на поле: <b>{len(game['bombs'])} шт.</b>\n"
         f"💎 Найдено кристаллов: <b>{len(game['revealed'])}/13</b>\n"
         f"📈 Множитель: <b>{game['current_multiplier']:.2f}x</b>\n"
         f"──────────────────────\n"
-        f"<i>Открывайте безопасные клетки или заберите куш!</i>"
+        f"<i>Открывайте безопасные клетки или заберите куш!</i> 😸"
     )
     return text, markup
 
@@ -2689,15 +2686,15 @@ def cmd_mines(message):
     bet = int(match.group(1)) if match and match.group(1) else 50
 
     if bet <= 0:
-        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
+        bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
         return
 
     if not check_casino_limits(econ, bet):
-        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
         return
 
     if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙")
+        bot.reply_to(message, f"❌ Недостаточно средств! У вас: {econ['balance']} 🪙 😿")
         return
 
     econ['balance'] -= bet
@@ -2737,7 +2734,7 @@ def cmd_dick(message):
 
     left = cooldown_text(last_time, cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Замер писюна доступен раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Замер писюна доступен раз в 20 минут! 😿\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.choice([-3, -2, -1, 1, 2, 3, 4, 5, 6])
@@ -2751,13 +2748,13 @@ def cmd_dick(message):
     sign = "+" if change >= 0 else ""
     u_link = make_link(chat_id, user_name, user_id, ping=True)
 
-    if new_size >= 100: comment = "🌌 Космический монумент масштабов галактики! Вселенная склоняет колени!"
-    elif new_size >= 70: comment = "🗿 Колосс Родосский нервно курит в сторонке! Невероятный титан!"
-    elif new_size >= 45: comment = "👑 Абсолютный повелитель и гигант чата!"
-    elif new_size >= 30: comment = "🍆 Внушительный и устрашающий размерчик!"
-    elif new_size >= 18: comment = "🔥 Крепкий и солидный инструмент!"
-    elif new_size >= 10: comment = "👌 Классический средний размер."
-    else: comment = "🤏 Кажется, на улице было слишком морозно..."
+    if new_size >= 100: comment = "🌌 Космический монумент масштабов галактики! Вселенная склоняет колени! 🙀"
+    elif new_size >= 70: comment = "🗿 Колосс Родосский нервно курит в сторонке! Невероятный титан! 🙀"
+    elif new_size >= 45: comment = "👑 Абсолютный повелитель и гигант чата! 😻"
+    elif new_size >= 30: comment = "🍆 Внушительный и устрашающий размерчик! 😸"
+    elif new_size >= 18: comment = "🔥 Крепкий и солидный инструмент! 😺"
+    elif new_size >= 10: comment = "👌 Классический средний размер. 😽"
+    else: comment = "🤏 Кажется, на улице было слишком морозно... 😿"
 
     bot.reply_to(
         message,
@@ -2785,7 +2782,7 @@ def cmd_fap(message):
     cooldown = 600
     left = cooldown_text(last_fap, cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Рука должна отдохнуть! Подождите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Рука должна отдохнуть! Подождите: <b>{left}</b>. 😿", parse_mode='HTML')
         return
 
     econ['fap_count'] = econ.get('fap_count', 0) + 1
@@ -2802,7 +2799,7 @@ def cmd_fap(message):
     u_link = make_link(message.chat.id, user_name, user_id, ping=True)
     bot.reply_to(
         message,
-        f"💦 <b>СЕАНС ФАПА УСПЕШНО ЗАВЕРШЕН!</b>\n"
+        f"💦 <b>СЕАНС ФАПА УСПЕШНО ЗАВЕРШЕН!</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Участник: {u_link}\n"
         f"📊 Подходов за сегодня: <b>{count} раз(а)</b>\n"
@@ -2820,12 +2817,12 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
     cur_name = VEHICLES[cur_veh]['name'] if cur_veh in VEHICLES else "Пешеход 🚶‍♂️"
 
     lines = [
-        f"🏎 <b>ЛИЧНЫЙ АВТОГАРАЖ</b>",
+        f"🏎 <b>ЛИЧНЫЙ АВТОГАРАЖ</b> 😺",
         "──────────────────────",
         f"👤 Владелец: {make_link(chat_id, user_name, user_id, ping=False)}",
         f"🚘 Текущий транспорт: <b>{cur_name}</b>\n",
         "<i>Транспорт навсегда снижает кулдауны на работу, охоту, рыбалку и замеры!</i>\n",
-        "<b>Каталог транспорта:</b>"
+        "<b>Каталог транспорта:</b> 😸"
     ]
 
     markup = InlineKeyboardMarkup()
@@ -2876,7 +2873,7 @@ def cmd_cook(message):
     hunt_count = sum(econ.get('hunt_inventory', {}).values())
 
     if fish_count == 0 and hunt_count == 0:
-        bot.reply_to(message, "🎒 У вас нет пойманной рыбы или мяса дичи для приготовления!\nСходите на <code>/fish</code> или <code>/hunt</code>.", parse_mode='HTML')
+        bot.reply_to(message, "🎒 У вас нет пойманной рыбы или мяса дичи для приготовления! 😿\nСходите на <code>/fish</code> или <code>/hunt</code>.", parse_mode='HTML')
         return
 
     econ['fish_inventory'] = {}
@@ -2892,10 +2889,10 @@ def cmd_cook(message):
     mark_dirty()
     bot.reply_to(
         message,
-        f"🍳 <b>КУЛИНАРНЫЙ ШЕДЕВР ГОТОВ!</b>\n"
+        f"🍳 <b>КУЛИНАРНЫЙ ШЕДЕВР ГОТОВ!</b> 😺\n"
         f"──────────────────────\n"
         f"Вы приготовили <b>{total_items} порций</b> изысканных блюд! 🍲🍖\n"
-        f"🐾 Питомец накормлен до отвала (Сытость: <b>100%</b>) без трат коинов!\n"
+        f"🐾 Питомец накормлен до отвала (Сытость: <b>100%</b>) без трат коинов! 😻\n"
         f"──────────────────────",
         parse_mode='HTML'
     )
@@ -2909,8 +2906,8 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
 
     if not pet:
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🐾 Открыть Зоомагазин", callback_data=f"shop_cat_pets_0:{user_id}"))
-        text = "🐾 <b>У вас пока нет питомца!</b>\n\nКупите верного друга в зоомагазине, чтобы получать бонусы к удаче, охоте и часовому доходу!"
+        markup.add(InlineKeyboardButton("🐾 Открыть Зоомагазин 😻", callback_data=f"shop_cat_pets_0:{user_id}"))
+        text = "🐾 <b>У вас пока нет питомца!</b> 😿\n\nКупите верного друга в зоомагазине, чтобы получать бонусы к удаче, охоте и часовому доходу! 😻"
         if message_id:
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
@@ -2935,7 +2932,7 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
     )
 
     text = (
-        f"🐾 <b>КАРТОЧКА ПИТОМЦА: {pet['name']}</b>\n"
+        f"🐾 <b>КАРТОЧКА ПИТОМЦА: {pet['name']}</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Хозяин: {make_link(chat_id, user_name, user_id, ping=False)}\n"
         f"⭐ Опыт питомца: <b>{pet.get('pet_exp', 0)} EXP</b>\n"
@@ -2943,7 +2940,7 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
         f"🧼 Чистота: <b>{pet.get('cleanliness', 100)}%</b> [{clean_bar or '❌ Грязнуля'}]\n"
         f"✨ Бонус: <b>+{pet.get('luck_bonus', 10)}% к удаче</b>\n"
         f"──────────────────────\n"
-        f"💡 <i>Используйте кнопки для ухода за питомцем!</i>"
+        f"💡 <i>Используйте кнопки для ухода за питомцем!</i> 😸"
     )
 
     if message_id:
@@ -2966,7 +2963,7 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
     pet = econ.get('pet')
 
     if not pet:
-        text = "❌ У вас нет питомца! Купите его в <code>/shop</code>."
+        text = "❌ У вас нет питомца! Купите его в <code>/shop</code>. 😿"
         bot.send_message(chat_id, text, parse_mode='HTML')
         return
 
@@ -2976,7 +2973,7 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
 
     left = cooldown_text(last_walk, cooldown, econ)
     if left:
-        msg = f"⏳ Питомец устал! На следующую прогулку можно через: <b>{left}</b>."
+        msg = f"⏳ Питомец устал! 😿 На следующую прогулку можно через: <b>{left}</b>."
         bot.send_message(chat_id, msg, parse_mode='HTML')
         return
 
@@ -2996,17 +2993,17 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
 
     if ev_type in ['coins', 'gem', 'fun', 'shoe', 'hero']:
         econ['balance'] += ev_val
-        res_str = f"💰 Прибыль: <b>+{ev_val} Ня-коинов 🪙</b>!"
+        res_str = f"💰 Прибыль: <b>+{ev_val} Ня-коинов 🪙</b>! 😸"
     elif ev_type == 'fish':
         add_inventory_item(econ['fish_inventory'], ev_val)
-        res_str = f"🐟 Находка: <b>{ev_val}</b>!"
+        res_str = f"🐟 Находка: <b>{ev_val}</b>! 😺"
 
     pet['pet_exp'] = pet.get('pet_exp', 0) + 25
     mark_dirty()
 
     bot.send_message(
         chat_id,
-        f"🦮 <b>ПРОГУЛКА С ПИТОМЦЕМ: {pet['name']}</b>\n"
+        f"🦮 <b>ПРОГУЛКА С ПИТОМЦЕМ: {pet['name']}</b> 😺\n"
         f"──────────────────────\n"
         f"Во время прогулки питомец {ev_desc}!\n"
         f"{res_str}\n"
@@ -3028,10 +3025,10 @@ def cmd_walk_pet(message):
 def cmd_gear(message):
     user_id = message.from_user.id
     lines = [
-        "🎣 <b>МАГАЗИН ПРОФЕССИОНАЛЬНЫХ СНАСТЕЙ</b>",
+        "🎣 <b>МАГАЗИН ПРОФЕССИОНАЛЬНЫХ СНАСТЕЙ</b> 😺",
         "──────────────────────",
         "<i>Удочки и луки многократно увеличивают шанс на легендарную и мифическую добычу!</i>\n",
-        "<b>Доступные снасти:</b>"
+        "<b>Доступные снасти:</b> 😸"
     ]
     for r_id, r in RODS.items(): lines.append(f"• <b>{r['name']}</b> — <code>{r['price']} 🪙</code> (+{r['luck']}% к удаче)")
     for b_id, b in BOWS.items(): lines.append(f"• <b>{b['name']}</b> — <code>{b['price']} 🪙</code> (+{b['luck']}% к удаче)")
@@ -3057,10 +3054,10 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
     biz_levels = econ.setdefault('biz_levels', {})
 
     lines = [
-        "🏢 <b>КОММЕРЧЕСКАЯ НЕДВИЖИМОСТЬ И БИЗНЕСЫ 2.0</b>",
+        "🏢 <b>КОММЕРЧЕСКАЯ НЕДВИЖИМОСТЬ И БИЗНЕСЫ 2.0</b> 😺",
         "──────────────────────",
         "Каждое предприятие приносит пассивный доход в час и прокачивается до <b>5 ур.</b>!\n",
-        "<b>Каталог предприятий:</b>"
+        "<b>Каталог предприятий:</b> 😸"
     ]
 
     markup = InlineKeyboardMarkup(row_width=2)
@@ -3108,10 +3105,10 @@ def cmd_miner(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("💻 Купить Крипто-Ферму (18,000 🪙)", callback_data=f"buy_biz_crypto_farm:{user_id}"))
         text = (
-            "💻 <b>КРИПТО-МАЙНИНГ СТАНЦИЯ</b>\n"
+            "💻 <b>КРИПТО-МАЙНИНГ СТАНЦИЯ</b> 😺\n"
             "──────────────────────\n"
-            "У вас пока не установлена <b>Крипто-Ферма</b>!\n\n"
-            "Купите её, чтобы автоматически майнить монеты <b>NYA</b> каждый час и продавать их на бирже на пике цен!\n"
+            "У вас пока не установлена <b>Крипто-Ферма</b>! 😿\n\n"
+            "Купите её, чтобы автоматически майнить монеты <b>NYA</b> каждый час и продавать их на бирже на пике цен! 😻\n"
             "──────────────────────"
         )
         bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
@@ -3128,14 +3125,14 @@ def cmd_miner(message):
     markup.add(InlineKeyboardButton("💰 Собрать прибыль с фермы", callback_data=f"collect_biz_profit:{user_id}"))
 
     text = (
-        f"💻 <b>ВАША КРИПТО-ФЕРМА (УРОВЕНЬ {lvl}/5)</b>\n"
+        f"💻 <b>ВАША КРИПТО-ФЕРМА (УРОВЕНЬ {lvl}/5)</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Владелец: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
         f"⚡️ Хешрейт: <b>{lvl * 145} MH/s</b>\n"
         f"💵 Доходность: <b>~{int(280 * (1 + (lvl-1)*0.45))} 🪙 в час</b>\n"
         f"📈 Текущий курс NYA: <b>{nya_price:.2f} 🪙</b>\n"
         f"──────────────────────\n"
-        f"💡 Доход накапливается в общем пуле бизнесов! Нажмите кнопку ниже для сбора."
+        f"💡 Доход накапливается в общем пуле бизнесов! Нажмите кнопку ниже для сбора. 😸"
     )
     bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
@@ -3148,7 +3145,7 @@ def cmd_collect(message):
     biz_levels = econ.get('biz_levels', {})
 
     if not user_biz:
-        bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>бизнесы</code> для покупки.", parse_mode='HTML')
+        bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>бизнесы</code> для покупки. 😾", parse_mode='HTML')
         return
 
     now = time.time()
@@ -3156,7 +3153,7 @@ def cmd_collect(message):
     hours_passed = (now - last_collect) / 3600.0
 
     if hours_passed < 0.05:
-        bot.reply_to(message, "⏳ Прибыль еще не накопилась, загляните чуть позже!")
+        bot.reply_to(message, "⏳ Прибыль еще не накопилась, загляните чуть позже! 😿")
         return
 
     base_profit = 0
@@ -3167,7 +3164,7 @@ def cmd_collect(message):
             base_profit += inc
 
     if base_profit <= 0:
-        bot.reply_to(message, "⏳ Накоплений пока нет, подождите немного!")
+        bot.reply_to(message, "⏳ Накоплений пока нет, подождите немного! 😿")
         return
 
     event_text = ""
@@ -3175,11 +3172,11 @@ def cmd_collect(message):
         if random.random() < 0.70:
             boost = int(base_profit * 0.5)
             base_profit += boost
-            event_text = f"\n🌟 <b>Вирусный тренд в сети!</b> Приток клиентов дал <b>+{boost} 🪙</b>!"
+            event_text = f"\n🌟 <b>Вирусный тренд в сети!</b> Приток клиентов дал <b>+{boost} 🪙</b>! 😻"
         else:
             tax = int(base_profit * 0.15)
             base_profit -= tax
-            event_text = f"\n⚠️ <b>Плановое техобслуживание:</b> расход <b>-{tax} 🪙</b>."
+            event_text = f"\n⚠️ <b>Плановое техобслуживание:</b> расход <b>-{tax} 🪙</b>. 😿"
 
     active_t = econ.get('active_title')
     if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'biz_bonus':
@@ -3197,7 +3194,7 @@ def cmd_collect(message):
     econ['last_biz_collect'] = now
     mark_dirty()
 
-    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{base_profit} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{base_profit} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']} 🪙</b> 😸", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # БАНК, КЕЙС, ЛОТЕРЕЯ
@@ -3222,7 +3219,7 @@ def render_bank_view(chat_id, user_id, user_name, message_id=None):
     markup.add(InlineKeyboardButton("🔄 Обновить баланс", callback_data=f"bank_refresh:{user_id}"))
 
     text = (
-        f"🏦 <b>НЯ-БАНК | НАКОПИТЕЛЬНЫЙ СЧЁТ</b>\n"
+        f"🏦 <b>НЯ-БАНК | НАКОПИТЕЛЬНЫЙ СЧЁТ</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Владелец: {make_link(chat_id, user_name, user_id, ping=False)}\n\n"
         f"💳 На депозите: <b>{deposit} Ня-коинов 🪙</b>\n"
@@ -3230,12 +3227,12 @@ def render_bank_view(chat_id, user_id, user_name, message_id=None):
         f"📈 <b>Ставка:</b> <b>+1% каждые 6 часов</b> (сложный процент!)\n"
         f"🛡 <b>Защита:</b> Депозит защищен от любых карманных краж на 100%!\n"
         f"──────────────────────\n"
-        f"💡 <i>Используйте кнопки или команды:</i>\n"
+        f"💡 <i>Используйте кнопки или команды:</i> 😸\n"
         f"• <code>банк положить 500</code>\n"
         f"• <code>банк снять 500</code>"
     )
 
-    if interest_earned > 0: text += f"\n\n✨ <i>Начислены дивиденды: +{interest_earned} 🪙!</i>"
+    if interest_earned > 0: text += f"\n\n✨ <i>Начислены дивиденды: +{interest_earned} 🪙!</i> 😻"
 
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
@@ -3260,7 +3257,7 @@ def cmd_case(message):
 
     left = cooldown_text(last_case, cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Бесплатный кейс доступен раз в 24 часа!\nДо следующего открытия: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Бесплатный кейс доступен раз в 24 часа!\nДо следующего открытия: <b>{left}</b>. 😿", parse_mode='HTML')
         return
 
     econ['last_case_time'] = now
@@ -3289,12 +3286,12 @@ def cmd_case(message):
 
     bot.reply_to(
         message,
-        f"📦 <b>ВЫ ОТКРЫЛИ ЕЖЕДНЕВНЫЙ СУНДУК!</b>\n"
+        f"📦 <b>ВЫ ОТКРЫЛИ ЕЖЕДНЕВНЫЙ СУНДУК!</b> 😺\n"
         f"──────────────────────\n"
         f"🎉 Ваша награда: {prize_str}\n"
         f"⭐ Опыт аккаунта: <b>+20 EXP</b>\n"
         f"──────────────────────\n"
-        f"Возвращайтесь за новым сундуком завтра!",
+        f"Возвращайтесь за новым сундуком завтра! 😸",
         parse_mode='HTML'
     )
 
@@ -3313,13 +3310,13 @@ def render_lottery_view(chat_id, user_id, user_name, message_id=None):
     my_tickets = tickets.get(str(user_id), 0)
 
     text = (
-        f"🎟 <b>СЕРВЕРНАЯ ДЖЕКПОТ-ЛОТЕРЕЯ</b>\n"
+        f"🎟 <b>СЕРВЕРНАЯ ДЖЕКПОТ-ЛОТЕРЕЯ</b> 😺\n"
         f"──────────────────────\n"
         f"💰 Текущий Джекпот: <b>{pot} Ня-коинов 🪙</b>\n"
         f"🎫 Продано билетов: <b>{total_tickets}/10</b>\n"
         f"👤 Ваших билетов: <b>{my_tickets} шт.</b>\n"
         f"──────────────────────\n"
-        f"📌 При достижении <b>10 билетов</b> бот автоматически разыграет весь банк между участниками!"
+        f"📌 При достижении <b>10 билетов</b> бот автоматически разыграет весь банк между участниками! 😸"
     )
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
@@ -3350,10 +3347,10 @@ def cmd_history(message):
     hist_entries = db.get('history', {}).get(str_chat, {}).get(clean_u, [])
 
     if not hist_entries:
-        bot.reply_to(message, f"📜 История рестов для <b>{html.escape(clean_u)}</b> в этом чате пуста!", parse_mode='HTML')
+        bot.reply_to(message, f"📜 История рестов для <b>{html.escape(clean_u)}</b> в этом чате пуста! 😿", parse_mode='HTML')
         return
 
-    lines = [f"📜 <b>ИСТОРИЯ РЕСТОВ: {make_link(chat_id, clean_u, target_user_id, ping=False)}</b>", "──────────────────────"]
+    lines = [f"📜 <b>ИСТОРИЯ РЕСТОВ: {make_link(chat_id, clean_u, target_user_id, ping=False)}</b> 😺", "──────────────────────"]
     for idx, item in enumerate(reversed(hist_entries[-8:]), 1):
         lines.append(
             f"<b>{idx}. {item.get('action', 'Рест')}</b> ({item.get('date', '—')})\n"
@@ -3375,14 +3372,14 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
     markup.add(InlineKeyboardButton(f"🔔 Напоминание за: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
 
     text = (
-        f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b>\n"
+        f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺\n"
         f"──────────────────────\n"
         f"• Максимальный срок реста: <b>{sett['max_days']} дней</b>\n"
         f"• Авто-удаление сообщений отдыхающих: <b>{del_msg_status}</b>\n"
         f"• Напоминание об окончании реста: за <b>{sett.get('remind_minutes', 60)} мин.</b>\n"
         f"• Летнее напоминание и трек каждый час: <b>{summer_status}</b>\n"
         f"──────────────────────\n"
-        f"<i>Нажимайте кнопки ниже для переключения параметров:</i>"
+        f"<i>Нажимайте кнопки ниже для переключения параметров:</i> 😸"
     )
 
     if message_id:
@@ -3394,7 +3391,7 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
 @bot.message_handler(commands=['settings', 'настройки'])
 def cmd_settings(message):
     if not is_admin(message.chat.id, message.from_user.id):
-        bot.reply_to(message, "❌ Настройки доступны только администраторам чата!")
+        bot.reply_to(message, "❌ Настройки доступны только администраторам чата! 😾")
         return
     render_settings_view(message.chat.id, message.from_user.id)
 
@@ -3414,7 +3411,7 @@ def cmd_set_pfp(message):
     if not photo_file_id:
         bot.reply_to(
             message,
-            "📸 <b>КАК УСТАНОВИТЬ АВАТАРКУ В ПРОФИЛЬ:</b>\n"
+            "📸 <b>КАК УСТАНОВИТЬ АВАТАРКУ В ПРОФИЛЬ:</b> 😺\n"
             "──────────────────────\n"
             "1. Отправьте в чат картинку и в подписи (caption) напишите <code>/set_pfp</code>\n"
             "2. Либо ответьте командой <code>/set_pfp</code> на любое сообщение с фото!\n"
@@ -3425,7 +3422,7 @@ def cmd_set_pfp(message):
 
     econ['pfp_file_id'] = photo_file_id
     mark_dirty()
-    bot.reply_to(message, "✅ <b>Ваша аватарка профиля успешно установлена!</b>\nПосмотреть: <code>/profile</code>", parse_mode='HTML')
+    bot.reply_to(message, "✅ <b>Ваша аватарка профиля успешно установлена!</b> 😻\nПосмотреть: <code>/profile</code>", parse_mode='HTML')
 
 @bot.message_handler(commands=['del_pfp', 'удалить_аватарку'])
 def cmd_del_pfp(message):
@@ -3434,7 +3431,7 @@ def cmd_del_pfp(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
     econ['pfp_file_id'] = None
     mark_dirty()
-    bot.reply_to(message, "🗑 <b>Аватарка профиля успешно удалена!</b>", parse_mode='HTML')
+    bot.reply_to(message, "🗑 <b>Аватарка профиля успешно удалена!</b> 😿", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # ПРОФИЛЬ И КАРМА
@@ -3446,19 +3443,19 @@ def cmd_custom_title(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     if not econ.get('has_custom_title_cert', False):
-        bot.reply_to(message, "❌ У вас нет <b>Сертификата на кастомный титул</b>!\nКупите его в <code>/shop</code> за 15,000 🪙.", parse_mode='HTML')
+        bot.reply_to(message, "❌ У вас нет <b>Сертификата на кастомный титул</b>! 😿\nКупите его в <code>/shop</code> за 15,000 🪙.", parse_mode='HTML')
         return
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        bot.reply_to(message, "❌ Укажите желаемый титул!\nПример: <code>/custom_title 👑 Главный Кот</code>", parse_mode='HTML')
+        bot.reply_to(message, "❌ Укажите желаемый титул! 😾\nПример: <code>/custom_title 👑 Главный Кот</code>", parse_mode='HTML')
         return
 
     new_title = parts[1].strip()[:32]
     econ['custom_title'] = new_title
     econ['active_title'] = None
     mark_dirty()
-    bot.reply_to(message, f"🎉 Ваш кастомный титул успешно установлен: <b>[{html.escape(new_title)}]</b>!", parse_mode='HTML')
+    bot.reply_to(message, f"🎉 Ваш кастомный титул успешно установлен: <b>[{html.escape(new_title)}]</b>! 😻", parse_mode='HTML')
 
 def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
     econ = get_user_econ(user_id, user_tag, username=username)
@@ -3633,9 +3630,9 @@ def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup.add(InlineKeyboardButton('🎙 Студия Стримера', callback_data=f'shop_cat_stream:{user_id}'))
 
     text = (
-        "🏪 <b>ГЛОБАЛЬНЫЙ МАГАЗИН НЯ-БОТА</b>\n"
+        "🏪 <b>ГЛОБАЛЬНЫЙ МАГАЗИН НЯ-БОТА</b> 😺\n"
         "──────────────────────\n"
-        "Выберите интересующий вас каталог товаров:"
+        "Выберите интересующий вас каталог товаров: 😸"
     )
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
@@ -3654,20 +3651,20 @@ def cmd_marry(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     if econ.get('marriage'):
-        bot.reply_to(message, "❌ Вы уже состоите в браке! Чтобы развестись, введите: <code>развод</code>", parse_mode='HTML')
+        bot.reply_to(message, "❌ Вы уже состоите в браке! Чтобы развестись, введите: <code>развод</code> 😿", parse_mode='HTML')
         return
 
     target_user, target_user_id, _ = parse_target_and_args(message, '/marry')
     if not target_user: target_user, target_user_id, _ = parse_target_and_args(message, 'брак')
 
     if not target_user:
-        bot.reply_to(message, "❌ Укажите пользователя!\nПример: <code>брак @username</code> или ответом на сообщение.", parse_mode='HTML')
+        bot.reply_to(message, "❌ Укажите пользователя! 😾\nПример: <code>брак @username</code> или ответом на сообщение.", parse_mode='HTML')
         return
 
     if target_user_id == user_id:
-        bot.reply_to(message, "❌ Нельзя заключить брак с самим собой!")
+        bot.reply_to(message, "❌ Нельзя заключить брак с самим собой! 🙀")
         return
-# Проверка, что предложение сделано боту
+
     try:
         bot_me = bot.get_me()
     except Exception:
@@ -3705,16 +3702,16 @@ def cmd_marry(message):
         u_link = make_link(chat_id, user_name, user_id, ping=True)
         bot.send_message(
             chat_id,
-            f"😳👉👈 <b>Ох, семпай... Это так неожиданно и приятно!</b>\n\n"
+            f"😳👉👈 <b>Ох, семпай... Это так неожиданно и приятно!</b> 😻\n\n"
             f"Я согласна стать твоей вайфу! {ring_emoji}\n\n"
-            f"💒 <b>Горько!</b> {u_link} и <b>🤖 {bot_name}</b> теперь официально в браке! 💖🌸",
+            f"💒 <b>Горько!</b> {u_link} и <b>🤖 {bot_name}</b> теперь официально в браке! 💖🌸 😺",
             parse_mode='HTML'
         )
         return
         
     target_econ = get_user_econ(target_user_id, target_user)
     if target_econ.get('marriage'):
-        bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> уже состоит в браке!", parse_mode='HTML')
+        bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> уже состоит в браке! 😿", parse_mode='HTML')
         return
 
     rings = econ.get('rings', [])
@@ -3740,9 +3737,9 @@ def cmd_marry(message):
 
     bot.send_message(
         chat_id,
-        f"💖 {to_link}, вам делает предложение руки и сердца {from_link}!\n"
+        f"💖 {to_link}, вам делает предложение руки и сердца {from_link}! 😻\n"
         f"💍 Преподнесенное кольцо: {ring_emoji} <b>{ring_name}</b>\n\n"
-        f"Вы согласны соединить свои сердца?",
+        f"Вы согласны соединить свои сердца? 😺",
         reply_markup=markup, parse_mode='HTML'
     )
 
@@ -3753,7 +3750,7 @@ def cmd_family(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     if not econ.get('marriage'):
-        bot.reply_to(message, "💔 Вы пока не состоите в браке! Сделайте предложение через <code>брак @username</code>.", parse_mode='HTML')
+        bot.reply_to(message, "💔 Вы пока не состоите в браке! 😿 Сделайте предложение через <code>брак @username</code>.", parse_mode='HTML')
         return
 
     m = econ['marriage']
@@ -3764,14 +3761,14 @@ def cmd_family(message):
     vault = m.get('vault', 0)
 
     text = (
-        f"💒 <b>ИНФОРМАЦИЯ О СЕМЬЕ:</b>\n"
+        f"💒 <b>ИНФОРМАЦИЯ О СЕМЬЕ:</b> 😺\n"
         f"──────────────────────\n"
         f"💍 Кольцо: {ring_emoji} <b>{ring_name}</b>\n"
         f"👫 Супруг(а): {partner_link}\n"
         f"⏳ Дней в браке: <b>{days_together} дн.</b>\n"
         f"💰 Семейный сейф: <b>{vault} Ня-коинов 🪙</b>\n"
         f"──────────────────────\n"
-        f"💡 <b>Команды семьи:</b>\n"
+        f"💡 <b>Команды семьи:</b> 😸\n"
         f"• <code>подарок</code> — романтический букет (100 🪙)\n"
         f"• <code>семейный сейф положить 100</code>\n"
         f"• <code>семейный сейф снять 100</code>\n"
@@ -3786,7 +3783,7 @@ def cmd_gift(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     if not econ.get('marriage'):
-        bot.reply_to(message, "❌ Подарки супругу доступны только тем, кто состоит в браке!")
+        bot.reply_to(message, "❌ Подарки супругу доступны только тем, кто состоит в браке! 😿")
         return
 
     m = econ['marriage']
@@ -3795,7 +3792,7 @@ def cmd_gift(message):
 
     cost = 100
     if econ['balance'] < cost:
-        bot.reply_to(message, f"❌ На роскошный букет нужно <b>{cost} 🪙</b>!")
+        bot.reply_to(message, f"❌ На роскошный букет нужно <b>{cost} 🪙</b>! 😿")
         return
 
     econ['balance'] -= cost
@@ -3809,7 +3806,7 @@ def cmd_gift(message):
 
     bot.send_message(
         message.chat.id,
-        f"💐 <b>РОМАНТИЧЕСКИЙ ПОДАРОК!</b>\n\n"
+        f"💐 <b>РОМАНТИЧЕСКИЙ ПОДАРОК!</b> 😻\n\n"
         f"{sender_l} преподнес(ла) роскошный букет цветов и сладости для {partner_l}! 💖🍫\n"
         f"Любовь крепнет с каждым днем! (+80 🪙 на счет любимого человека, +3 Карма)",
         parse_mode='HTML'
@@ -3822,7 +3819,7 @@ def cmd_divorce(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     if not econ.get('marriage'):
-        bot.reply_to(message, "❌ Вы не состоите в браке!")
+        bot.reply_to(message, "❌ Вы не состоите в браке! 😿")
         return
 
     m = econ['marriage']
@@ -3838,7 +3835,7 @@ def cmd_divorce(message):
     p_econ['marriage'] = None
     mark_dirty()
 
-    bot.reply_to(message, f"💔 <b>Брак расторгнут.</b>\nСемейный сейф ({vault} 🪙) разделен поровну между бывшими супругами (+{split_coins} 🪙 каждому).", parse_mode='HTML')
+    bot.reply_to(message, f"💔 <b>Брак расторгнут.</b> 😿\nСемейный сейф ({vault} 🪙) разделен поровну между бывшими супругами (+{split_coins} 🪙 каждому).", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # ИГРЫ: БЛЭКДЖЕК, ЦУЕФА
@@ -3857,16 +3854,16 @@ def process_bj_game(message, bet):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
-    if bet <= 0:
-        bot.reply_to(message, "❌ Ставка должна быть больше 0!")
+    if bet < 30:
+        bot.reply_to(message, "❌ Минимальная ставка — 30 Ня-коинов! 😾")
         return
 
     if not check_casino_limits(econ, bet):
-        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+        bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
         return
 
     if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: {econ['balance']} 🪙")
+        bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: {econ['balance']} 🪙 😿")
         return
 
     econ['balance'] -= bet
@@ -3893,7 +3890,7 @@ def process_bj_game(message, bet):
     p_score = calculate_bj_score(p_cards)
     bot.send_message(
         chat_id,
-        f"🃏 <b>БЛЭКДЖЕК (21 ОЧКО)</b>\n──────────────────────\n"
+        f"🃏 <b>БЛЭКДЖЕК (21 ОЧКО)</b> 😺\n──────────────────────\n"
         f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=True)}\n💰 Ставка: <b>{bet} 🪙</b>\n\n"
         f"🎴 Ваши карты: {p_cards} (Сумма: <b>{p_score}</b>)\n🤖 Дилер: [{d_cards[0]}, ❓]\n──────────────────────",
         reply_markup=markup, parse_mode='HTML'
@@ -3919,16 +3916,20 @@ def cmd_rps(message):
     bet = int(match.group(1)) if match else 50
 
     if not target_user:
-        bot.reply_to(message, "❌ Формат: <code>/rps @username 100</code> или ответом на сообщение.", parse_mode='HTML')
+        bot.reply_to(message, "❌ Формат: <code>/rps @username 100</code> или ответом на сообщение. 😾", parse_mode='HTML')
         return
 
     if target_user_id == user_id:
-        bot.reply_to(message, "❌ Нельзя играть с самим собой!")
+        bot.reply_to(message, "❌ Нельзя играть с самим собой! 🙀")
+        return
+        
+    if bet < 30:
+        bot.reply_to(message, "❌ Минимальная ставка — 30 Ня-коинов! 😾")
         return
 
     target_econ = get_user_econ(target_user_id, target_user)
     if econ['balance'] < bet or target_econ['balance'] < bet:
-        bot.reply_to(message, "❌ У одного из участников недостаточно коинов для ставки!")
+        bot.reply_to(message, "❌ У одного из участников недостаточно коинов для ставки! 😿")
         return
 
     game_id = f"rps_{user_id}_{target_user_id or 0}_{int(time.time())}"
@@ -3947,10 +3948,10 @@ def cmd_rps(message):
 
     bot.send_message(
         chat_id,
-        f"✌️ <b>ДУЭЛЬ: КАМЕНЬ-НОЖНИЦЫ-БУМАГА!</b>\n──────────────────────\n"
+        f"✌️ <b>ДУЭЛЬ: КАМЕНЬ-НОЖНИЦЫ-БУМАГА!</b> 😺\n──────────────────────\n"
         f"⚔️ {make_link(chat_id, user_name, user_id, ping=True)} VS {make_link(chat_id, target_user, target_user_id, ping=True)}\n"
         f"💰 Ставка: <b>{bet} 🪙</b> с каждого!\n──────────────────────\n"
-        f"<i>Оба участника, нажмите свой тайный выбор на кнопках ниже:</i>",
+        f"<i>Оба участника, нажмите свой тайный выбор на кнопках ниже:</i> 😸",
         reply_markup=markup, parse_mode='HTML'
     )
 
@@ -3961,7 +3962,7 @@ def cmd_rps(message):
 def cmd_market(message):
     market = get_market_data()
     lines = [
-        "📈 <b>НЯ-БИРЖА КРИПТОВАЛЮТ И АКЦИЙ</b>",
+        "📈 <b>НЯ-БИРЖА КРИПТОВАЛЮТ И АКЦИЙ</b> 😺",
         "──────────────────────",
         "<i>Курсы обновляются автоматически каждые 30 минут:</i>\n"
     ]
@@ -3973,7 +3974,7 @@ def cmd_market(message):
         trend = "🟢 📈 +" if diff >= 0 else "🔴 📉 "
         lines.append(f"• <b>{info['name']}</b> [{ticker}]\n  Курс: <b>{price:.2f} 🪙</b> ({trend}{pct:.1f}%)\n")
 
-    lines.append("──────────────────────\n💡 <b>Как торговать:</b>")
+    lines.append("──────────────────────\n💡 <b>Как торговать:</b> 😸")
     lines.append("• <code>купить крипту NYA 5</code>\n• <code>продать крипту NYA 5</code>\n• <code>портфель</code> — посмотреть свои активы")
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
@@ -3986,7 +3987,7 @@ def cmd_portfolio(message):
 
     portfolio = econ.get('crypto_portfolio', {})
     total_val = 0.0
-    lines = [f"💼 <b>ИНВЕСТИЦИОННЫЙ ПОРТФЕЛЬ: {make_link(message.chat.id, user_name, user_id, ping=False)}</b>", "──────────────────────"]
+    lines = [f"💼 <b>ИНВЕСТИЦИОННЫЙ ПОРТФЕЛЬ: {make_link(message.chat.id, user_name, user_id, ping=False)}</b> 😺", "──────────────────────"]
 
     has_assets = False
     for ticker, amount in portfolio.items():
@@ -3997,8 +3998,8 @@ def cmd_portfolio(message):
             total_val += val
             lines.append(f"• <b>{ticker}</b>: {amount:.2f} шт. (Оценка: <b>{val:.2f} 🪙</b>)")
 
-    if not has_assets: lines.append("🎒 Ваш крипто-портфель пока пуст! Купите активы в <code>биржа</code>.")
-    else: lines.extend(["──────────────────────", f"📊 <b>Общая стоимость: {total_val:.2f} Ня-коинов 🪙</b>"])
+    if not has_assets: lines.append("🎒 Ваш крипто-портфель пока пуст! Купите активы в <code>биржа</code>. 😿")
+    else: lines.extend(["──────────────────────", f"📊 <b>Общая стоимость: {total_val:.2f} Ня-коинов 🪙</b> 😻"])
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
 def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_msg=None, username=None):
@@ -4007,7 +4008,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
 
     if ticker not in market:
         available = ', '.join(market.keys())
-        msg = f"❌ Неверный тикер! Доступные активы: <b>{available}</b>"
+        msg = f"❌ Неверный тикер! Доступные активы: <b>{available}</b> 😾"
         if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
         return
@@ -4016,7 +4017,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
         amount = float(amount_str)
         if amount <= 0: raise ValueError
     except ValueError:
-        msg = "❌ Укажите корректное положительное число монет!"
+        msg = "❌ Укажите корректное положительное число монет! 😾"
         if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
         return
@@ -4029,7 +4030,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
 
     if action == 'buy':
         if econ['balance'] < total_cost:
-            msg = f"❌ Недостаточно коинов! Нужно <b>{total_cost:.2f} 🪙</b> (У вас: {econ['balance']} 🪙)."
+            msg = f"❌ Недостаточно коинов! Нужно <b>{total_cost:.2f} 🪙</b> (У вас: {econ['balance']} 🪙). 😿"
             if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
             else: bot.send_message(chat_id, msg, parse_mode='HTML')
             return
@@ -4040,14 +4041,14 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
         add_account_exp(user_id, user_tag, 10, username=username)
         mark_dirty()
 
-        msg = f"✅ <b>УСПЕШНАЯ ПОКУПКА!</b>\n──────────────────────\nКуплено: <b>{amount:.2f} {ticker}</b> ({asset['name']})\nСписано: <b>-{total_cost:.2f} 🪙</b>\nОстаток баланса: <b>{econ['balance']} 🪙</b>"
+        msg = f"✅ <b>УСПЕШНАЯ ПОКУПКА!</b> 😻\n──────────────────────\nКуплено: <b>{amount:.2f} {ticker}</b> ({asset['name']})\nСписано: <b>-{total_cost:.2f} 🪙</b>\nОстаток баланса: <b>{econ['balance']} 🪙</b>"
         if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
 
     elif action == 'sell':
         user_amount = portfolio.get(ticker, 0.0)
         if user_amount < amount:
-            msg = f"❌ Недостаточно {ticker}! В наличии: <b>{user_amount:.2f} шт.</b>"
+            msg = f"❌ Недостаточно {ticker}! В наличии: <b>{user_amount:.2f} шт.</b> 😿"
             if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
             else: bot.send_message(chat_id, msg, parse_mode='HTML')
             return
@@ -4061,7 +4062,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
         add_account_exp(user_id, user_tag, 10, username=username)
         mark_dirty()
 
-        msg = f"💰 <b>УСПЕШНАЯ ПРОДАЖА!</b>\n──────────────────────\nПродано: <b>{amount:.2f} {ticker}</b>\nВыручка: <b>+{earned} 🪙</b>\nНовый баланс: <b>{econ['balance']} 🪙</b>"
+        msg = f"💰 <b>УСПЕШНАЯ ПРОДАЖА!</b> 😸\n──────────────────────\nПродано: <b>{amount:.2f} {ticker}</b>\nВыручка: <b>+{earned} 🪙</b>\nНовый баланс: <b>{econ['balance']} 🪙</b>"
         if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
 
@@ -4073,14 +4074,14 @@ def train_work_exp(user_id, user_tag, username=None):
     now = time.time()
     cooldown = 900
     left = cooldown_text(econ.get('last_train_time', 0), cooldown, econ)
-    if left: return False, f"⏳ Тренировка доступна раз в 15 минут! Ждать: <b>{left}</b>."
+    if left: return False, f"⏳ Тренировка доступна раз в 15 минут! Ждать: <b>{left}</b>. 😿"
 
     gain = random.randint(15, 40)
     econ['work_exp'] = econ.get('work_exp', 0) + gain
     econ['last_train_time'] = now
     add_account_exp(user_id, user_tag, gain, username=username)
     mark_dirty()
-    return True, f"🎓 Вы усердно позанимались!\nПолучено: <b>+{gain} EXP</b> опыта работы (Всего: <b>{econ['work_exp']} EXP</b>)."
+    return True, f"🎓 Вы усердно позанимались! 😸\nПолучено: <b>+{gain} EXP</b> опыта работы (Всего: <b>{econ['work_exp']} EXP</b>)."
 
 @bot.message_handler(commands=['work', 'работа'])
 def cmd_work(message):
@@ -4089,10 +4090,10 @@ def cmd_work(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     lines = [
-        "💼 <b>БИРЖА ТРУДА И ВАКАНСИЙ</b>",
+        "💼 <b>БИРЖА ТРУДА И ВАКАНСИЙ</b> 😺",
         "──────────────────────",
         f"👤 Ваш опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n",
-        "<b>Доступные вакансии:</b>"
+        "<b>Доступные вакансии:</b> 😸"
     ]
     for j_id, j in JOBS.items():
         lines.append(f"• <b>{j['name']}</b>: от <code>{j['req_exp']} EXP</code> (З/П: {j['min_pay']}-{j['max_pay']} 🪙)")
@@ -4140,13 +4141,13 @@ def cmd_sell(message):
     econ['hunt_inventory'] = {}
 
     if items_sold == 0:
-        bot.reply_to(message, "🎒 У вас нет рыбы или охотничьих трофеев для продажи!")
+        bot.reply_to(message, "🎒 У вас нет рыбы или охотничьих трофеев для продажи! 😿")
         return
 
     econ['balance'] += total_earned
     mark_dirty()
     rush_note = " (🌟 Золотая лихорадка x1.5!)" if gold_rush_event.get('active') else ""
-    bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned} Ня-коинов 🪙</b>{rush_note}!\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+    bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned} Ня-коинов 🪙</b>{rush_note}! 😻\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
 
 @bot.message_handler(commands=['profile', 'профиль'])
 def cmd_profile(message):
@@ -4160,19 +4161,19 @@ def cmd_achievements(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
     unlocked = econ.get('achievements', [])
 
-    lines = [f"🏆 <b>ДОСТИЖЕНИЯ: {make_link(message.chat.id, user_name, user_id, ping=False)}</b>", "──────────────────────"]
+    lines = [f"🏆 <b>ДОСТИЖЕНИЯ: {make_link(message.chat.id, user_name, user_id, ping=False)}</b> 😺", "──────────────────────"]
     for ach_id, ach in ACHIEVEMENTS.items():
         if ach_id in unlocked: lines.append(f"✅ <b>{ach['title']}</b> — {ach['desc']} (+{ach['reward']} 🪙)")
         else: lines.append(f"🔒 <b>{ach['title']}</b> — {ach['desc']} (<b>+{ach['reward']} 🪙</b>)")
     lines.append("──────────────────────")
-    lines.append(f"Прогресс: <b>{len(unlocked)}/{len(ACHIEVEMENTS)}</b> открыто.")
+    lines.append(f"Прогресс: <b>{len(unlocked)}/{len(ACHIEVEMENTS)}</b> открыто. 😸")
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
 @bot.message_handler(commands=['balance', 'баланс'])
 def cmd_balance(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(message.from_user.id, user_name, username=message.from_user.username)
-    bot.reply_to(message, f"💵 <b>Ваш кошелек:</b> <b>{econ['balance']} Ня-коинов 💸</b>\n🏦 <b>В банке:</b> <b>{econ.get('bank_deposit', 0)} 🪙</b>", parse_mode='HTML')
+    bot.reply_to(message, f"💵 <b>Ваш кошелек:</b> <b>{econ['balance']} Ня-коинов 💸</b>\n🏦 <b>В банке:</b> <b>{econ.get('bank_deposit', 0)} 🪙</b> 😺", parse_mode='HTML')
 
 @bot.message_handler(commands=['shop', 'магазин'])
 def cmd_shop(message):
@@ -4197,7 +4198,7 @@ def cmd_iq(message):
     cooldown = 1800
     left = cooldown_text(econ.get('last_iq_time', 0), cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Тест на IQ доступен раз в 30 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Тест на IQ доступен раз в 30 минут! 😿\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.randint(-5, 15)
@@ -4206,8 +4207,8 @@ def cmd_iq(message):
     mark_dirty()
     completed = track_daily_task(user_id, user_name, 'iq', 1, chat_id, username=message.from_user.username)
     sign = "+" if change >= 0 else ""
-    bot.reply_to(message, f"🧠 {make_link(chat_id, user_name, user_id, ping=True)}, ваш IQ: <b>{econ['iq']} ({sign}{change}) 📊</b>", parse_mode='HTML')
-    for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+    bot.reply_to(message, f"🧠 {make_link(chat_id, user_name, user_id, ping=True)}, ваш IQ: <b>{econ['iq']} ({sign}{change}) 📊</b> 😺", parse_mode='HTML')
+    for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
 
 @bot.message_handler(commands=['fat'])
 def cmd_fat(message):
@@ -4219,7 +4220,7 @@ def cmd_fat(message):
     cooldown = 1800
     left = cooldown_text(econ.get('last_fat_time', 0), cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Замер жира доступен раз в 30 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Замер жира доступен раз в 30 минут! 😿\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.randint(-4, 6)
@@ -4228,8 +4229,8 @@ def cmd_fat(message):
     mark_dirty()
     completed = track_daily_task(user_id, user_name, 'fat', 1, chat_id, username=message.from_user.username)
     sign = "+" if change >= 0 else ""
-    bot.reply_to(message, f"🥩 {make_link(chat_id, user_name, user_id, ping=True)}, процент жира: <b>{econ['fat']}% ({sign}{change}%) 🍔</b>", parse_mode='HTML')
-    for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+    bot.reply_to(message, f"🥩 {make_link(chat_id, user_name, user_id, ping=True)}, процент жира: <b>{econ['fat']}% ({sign}{change}%) 🍔</b> 😺", parse_mode='HTML')
+    for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
 
 @bot.message_handler(commands=['foot'])
 def cmd_foot(message):
@@ -4241,7 +4242,7 @@ def cmd_foot(message):
     cooldown = 1200
     left = cooldown_text(econ.get('last_foot_time', 0), cooldown, econ)
     if left:
-        bot.reply_to(message, f"⏳ Измерить пятку можно раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"⏳ Измерить пятку можно раз в 20 минут! 😿\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.randint(-3, 4)
@@ -4249,7 +4250,7 @@ def cmd_foot(message):
     econ['last_foot_time'] = now_ts
     mark_dirty()
     sign = "+" if change >= 0 else ""
-    bot.reply_to(message, f"🦶 {make_link(chat_id, user_name, user_id, ping=True)}, размер пятки: <b>{econ['foot_size']} см ({sign}{change} см) 🦶</b>", parse_mode='HTML')
+    bot.reply_to(message, f"🦶 {make_link(chat_id, user_name, user_id, ping=True)}, размер пятки: <b>{econ['foot_size']} см ({sign}{change} см) 🦶</b> 😺", parse_mode='HTML')
 
 @bot.message_handler(commands=['chromosomes', 'хромосомы', 'хромосома'])
 def cmd_chromosomes(message):
@@ -4261,7 +4262,7 @@ def cmd_chromosomes(message):
     cooldown = 1200
     left = cooldown_text(econ.get('last_chromosomes_time', 0), cooldown, econ)
     if left:
-        bot.reply_to(message, f"🧬 Генетический анализ доступен раз в 20 минут!\nПодождите: <b>{left}</b>.", parse_mode='HTML')
+        bot.reply_to(message, f"🧬 Генетический анализ доступен раз в 20 минут! 😿\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
     change = random.choice([-2, -1, 0, 1, 1, 2, 3])
@@ -4275,14 +4276,14 @@ def cmd_chromosomes(message):
     check_achievements(user_id, user_name, 'chromosomes_check', 1, chat_id, username=message.from_user.username)
     sign = "+" if change >= 0 else ""
 
-    if new_chr == 46: comment = "Идеальный человеческий баланс! ✨"
-    elif new_chr == 47: comment = "Обнаружена экстра-хромосома сверхразума! ⚡️"
-    elif new_chr > 47: comment = "Межгалактический уровень ДНК! 👽🚀"
-    else: comment = "Кажется, пара хромосом взяли отгул... 🔍"
+    if new_chr == 46: comment = "Идеальный человеческий баланс! ✨ 😻"
+    elif new_chr == 47: comment = "Обнаружена экстра-хромосома сверхразума! ⚡️ 🙀"
+    elif new_chr > 47: comment = "Межгалактический уровень ДНК! 👽🚀 😹"
+    else: comment = "Кажется, пара хромосом взяли отгул... 🔍 😿"
 
     u_link = make_link(chat_id, user_name, user_id, ping=True)
-    bot.reply_to(message, f"🧬 <b>ГЕНЕТИЧЕСКИЙ ТЕСТ:</b> {u_link}\n──────────────────────\nКоличество хромосом: <b>{new_chr} ({sign}{change}) 🧬</b>\n📝 <i>{comment}</i>\n──────────────────────", parse_mode='HTML')
-    for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+    bot.reply_to(message, f"🧬 <b>ГЕНЕТИЧЕСКИЙ ТЕСТ:</b> {u_link}\n──────────────────────\nКоличество хромосом: <b>{new_chr} ({sign}{change}) 🧬</b>\n📝 <i>{comment}</i>\n────────────────────── 😺", parse_mode='HTML')
+    for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
 
 # ---------------------------------------------------------
 # ИНТЕРАКТИВНЫЕ ТОПЫ С КНОПКАМИ
@@ -4310,31 +4311,31 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
 
     if category == 'rich':
         sorted_data = sorted(visible_items.items(), key=lambda x: (x[1].get('balance', 0) + x[1].get('bank_deposit', 0)), reverse=True)
-        title = "🏆 <b>ТОП БОГАЧЕЙ ЧАТА (Карман + Банк)</b>"
+        title = "🏆 <b>ТОП БОГАЧЕЙ ЧАТА (Карман + Банк)</b> 😻"
         val_formatter = lambda info: f"<b>{info.get('balance', 0) + info.get('bank_deposit', 0)} 🪙</b>"
     elif category == 'dick':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('dick_size', 15), reverse=True)
-        title = "🍆 <b>ТОП ПО РАЗМЕРУ ПИСЮНА</b>"
+        title = "🍆 <b>ТОП ПО РАЗМЕРУ ПИСЮНА</b> 🙀"
         val_formatter = lambda info: f"<b>{info.get('dick_size', 15)} см 📏</b>"
     elif category == 'iq':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('iq', 100), reverse=True)
-        title = "🧠 <b>ТОП ПО УРОВНЮ IQ</b>"
+        title = "🧠 <b>ТОП ПО УРОВНЮ IQ</b> 😸"
         val_formatter = lambda info: f"<b>{info.get('iq', 100)} IQ</b>"
     elif category == 'karma':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('karma', 0), reverse=True)
-        title = "⚖️ <b>ТОП КАРМЫ (Самые Светлые)</b>"
+        title = "⚖️ <b>ТОП КАРМЫ (Самые Светлые)</b> 😇"
         val_formatter = lambda info: f"<b>{info.get('karma', 0)} 😇</b>"
     elif category == 'foot':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('foot_size', 25), reverse=True)
-        title = "🦶 <b>ТОП ПО РАЗМЕРУ ПЯТКИ</b>"
+        title = "🦶 <b>ТОП ПО РАЗМЕРУ ПЯТКИ</b> 😸"
         val_formatter = lambda info: f"<b>{info.get('foot_size', 25)} см 🦶</b>"
     elif category == 'chr':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('chromosomes', 46), reverse=True)
-        title = "🧬 <b>ТОП ПО КОЛИЧЕСТВУ ХРОМОСОМ</b>"
+        title = "🧬 <b>ТОП ПО КОЛИЧЕСТВУ ХРОМОСОМ</b> 😺"
         val_formatter = lambda info: f"<b>{info.get('chromosomes', 46)} 🧬</b>"
     elif category == 'msg':
         sorted_data = sorted(visible_items.items(), key=lambda x: x[1].get('msg_stats', {}).get('total_count', 0), reverse=True)
-        title = "💬 <b>ТОП ПО СООБЩЕНИЯМ В ЧАТЕ</b>"
+        title = "💬 <b>ТОП ПО СООБЩЕНИЯМ В ЧАТЕ</b> 😻"
         val_formatter = lambda info: f"<b>{info.get('msg_stats', {}).get('total_count', 0)} смс</b>"
     else:
         sorted_data = []
@@ -4347,8 +4348,8 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
         u_id = info.get('user_id')
         lines.append(f"{idx}. {make_link(chat_id, u_name, u_id, ping=False)} — {val_formatter(info)}")
 
-    if not sorted_data: lines.append("<i>Данных для отображения пока нет...</i>")
-    lines.extend(["──────────────────────", "👇 <i>Нажмите категорию ниже для переключения:</i>"])
+    if not sorted_data: lines.append("<i>Данных для отображения пока нет... 😿</i>")
+    lines.extend(["──────────────────────", "👇 <i>Нажмите категорию ниже для переключения:</i> 😺"])
 
     text = "\n".join(lines)
     if message_id:
@@ -4384,7 +4385,7 @@ def handle_messages(message):
             db['bot_active'] = True
             save_data()
             log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде @{user_username}')
-            bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b>", parse_mode='HTML')
+            bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b> 😻", parse_mode='HTML')
             return
         elif is_super_admin: pass
         else: return
@@ -4409,10 +4410,17 @@ def handle_messages(message):
     if len(user_flood_history[user_id]) >= 5:
         user_flood_muted[user_id] = now_ts + 25
         u_link = make_link(chat_id, user_name, user_id, ping=True)
-        bot.send_message(chat_id, f"🧊 {u_link}, <b>остудись!</b> Слишком частые команды (заморозка на 25 сек).", parse_mode='HTML')
+        bot.send_message(chat_id, f"🧊 {u_link}, <b>остудись!</b> Слишком частые команды (заморозка на 25 сек). 😾", parse_mode='HTML')
         return
 
     add_message_stat(user_id, user_name, username=user_username)
+
+    # ОБИДА (АВТО ГИФКА)
+    if re.search(r'\b(обида|обиделся|обиделась|обиделись)\b', text_lower, re.IGNORECASE):
+        try:
+            bot.copy_message(chat_id, from_chat_id=VD_CHAT_ID, message_id=353903, reply_to_message_id=message.message_id)
+        except Exception: pass
+        return
 
     # ПОВТОРЯЛКА (БОТ СКАЖИ ...)
     m_say = re.match(r'^(?:бот,?\s+)?скажи\s+(.+)$', text, re.IGNORECASE)
@@ -4420,10 +4428,11 @@ def handle_messages(message):
         phrase = m_say.group(1).strip()
         bot.send_message(chat_id, phrase)
         return
+
     # 🎭 СЛУЧАЙНЫЕ РЕАКЦИИ
     if random.random() < 0.04 and len(text) > 2:
         try:
-            rx_list = ['🔥', '🗿', '❤️', '👍', '⚡️', '🤡', '🎉', '👀', '👏', '💔']
+            rx_list = ['🔥', '🗿', '❤️', '👍', '⚡️', '🤡', '🎉', '👀', '👏', '💔', '⚡️']
             chosen_rx = random.choice(rx_list)
             bot.set_message_reaction(chat_id, message.message_id, [ReactionTypeEmoji(chosen_rx)])
         except Exception: pass
@@ -4439,7 +4448,7 @@ def handle_messages(message):
     if calc_match:
         calc_res = safe_calculate_math(calc_match)
         if calc_res is not None:
-            bot.reply_to(message, f"🧮 <b>Результат:</b> <code>{calc_res}</code>", parse_mode='HTML')
+            bot.reply_to(message, f"🧮 <b>Результат:</b> <code>{calc_res}</code> 😸", parse_mode='HTML')
             return
 
     # ⚡️ ВИКТОРИНА
@@ -4450,7 +4459,7 @@ def handle_messages(message):
             add_coins(user_id, user_name, reward, username=user_username)
             add_account_exp(user_id, user_name, 20, username=user_username)
             u_link = make_link(chat_id, user_name, user_id, ping=True)
-            bot.reply_to(message, f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b>\n\nПервым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!", parse_mode='HTML')
+            bot.reply_to(message, f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b> 😻\n\nПервым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!", parse_mode='HTML')
             return
 
     # 👑 КОМАНДЫ СОЗДАТЕЛЯ (GOD MODE)
@@ -4608,7 +4617,7 @@ def handle_messages(message):
     if text_lower.startswith('семейный сейф'):
         econ = get_user_econ(user_id, user_name, username=user_username)
         if not econ.get('marriage'):
-            bot.reply_to(message, "❌ Вы не состоите в браке!")
+            bot.reply_to(message, "❌ Вы не состоите в браке! 😿")
             return
         m = econ['marriage']
         p_id = m.get('partner_id')
@@ -4618,39 +4627,39 @@ def handle_messages(message):
         if 'положить' in text_lower and m_amt:
             amt = int(m_amt.group(1))
             if amt <= 0 or econ['balance'] < amt:
-                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙")
+                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙 😿")
                 return
             econ['balance'] -= amt
             m['vault'] = m.get('vault', 0) + amt
             if p_econ.get('marriage'): p_econ['marriage']['vault'] = m['vault']
             mark_dirty()
-            bot.reply_to(message, f"💍 Вы положили <b>{amt} 🪙</b> в семейный сейф!\nВ сейфе: <b>{m['vault']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💍 Вы положили <b>{amt} 🪙</b> в семейный сейф!\nВ сейфе: <b>{m['vault']} 🪙</b> 😻", parse_mode='HTML')
             return
         elif 'снять' in text_lower and m_amt:
             amt = int(m_amt.group(1))
             cur_vault = m.get('vault', 0)
             if amt <= 0 or cur_vault < amt:
-                bot.reply_to(message, f"❌ В сейфе недостаточно коинов! Накоплено: {cur_vault} 🪙")
+                bot.reply_to(message, f"❌ В сейфе недостаточно коинов! Накоплено: {cur_vault} 🪙 😿")
                 return
             m['vault'] -= amt
             if p_econ.get('marriage'): p_econ['marriage']['vault'] = m['vault']
             econ['balance'] += amt
             mark_dirty()
-            bot.reply_to(message, f"💸 Вы взяли <b>{amt} 🪙</b> из семейного сейфа!\nОстаток: <b>{m['vault']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💸 Вы взяли <b>{amt} 🪙</b> из семейного сейфа!\nОстаток: <b>{m['vault']} 🪙</b> 😸", parse_mode='HTML')
             return
 
     # КВЕСТ СООБЩЕНИЙ
     completed_tasks = track_daily_task(user_id, user_name, 'messages', 1, chat_id, username=user_username)
     if completed_tasks:
         for task_name, reward in completed_tasks:
-            try: bot.send_message(chat_id, f'🎉 {make_link(chat_id, user_name, user_id, ping=True)} выполнил(а) задание: <b>{task_name}</b>! +{reward} 🪙', parse_mode='HTML')
+            try: bot.send_message(chat_id, f'🎉 {make_link(chat_id, user_name, user_id, ping=True)} выполнил(а) задание: <b>{task_name}</b>! +{reward} 🪙 😻', parse_mode='HTML')
             except Exception: pass
 
     if re.search(r'\b(почему|почему\??)\b', text_lower, re.IGNORECASE):
         chosen_msg_id = random.choice(WHY_TG_MSG_IDS)
         copied = False
         try:
-            bot.copy_message(chat_id, from_chat_id=MEDIA_TG_CHAT_ID, message_id=chosen_msg_id, reply_to_message_id=message.message_id)
+            bot.copy_message(chat_id, from_chat_id=VD_CHAT_ID, message_id=chosen_msg_id, reply_to_message_id=message.message_id)
             copied = True
         except Exception: pass
         if not copied:
@@ -4671,25 +4680,25 @@ def handle_messages(message):
             raw_arg = text[8:].strip()
             if raw_arg: target_user_id, target_user = resolve_user_from_string(chat_id, raw_arg)
         if not target_user or target_user_id == user_id:
-            bot.reply_to(message, "❌ Укажите жертву: <code>ограбить @username</code> или ответом на сообщение!", parse_mode='HTML')
+            bot.reply_to(message, "❌ Укажите жертву: <code>ограбить @username</code> или ответом на сообщение! 😾", parse_mode='HTML')
             return
 
         econ = get_user_econ(user_id, user_name, username=user_username)
         if econ['balance'] < 30:
-            bot.reply_to(message, "❌ Чтобы пойти на дело, нужно иметь в кармане хотя бы <b>30 🪙</b> (на случай штрафа)!", parse_mode='HTML')
+            bot.reply_to(message, "❌ Чтобы пойти на дело, нужно иметь в кармане хотя бы <b>30 🪙</b> (на случай штрафа)! 😿", parse_mode='HTML')
             return
 
         now = time.time()
         cooldown = 3600
         left = cooldown_text(econ.get('last_rob_time', 0), cooldown, econ)
         if left:
-            bot.reply_to(message, f"⏳ Полиция на хвосте! Ограбление доступно через: <b>{left}</b>.", parse_mode='HTML')
+            bot.reply_to(message, f"⏳ Полиция на хвосте! Ограбление доступно через: <b>{left}</b>. 🙀", parse_mode='HTML')
             return
 
         t_econ = get_user_econ(target_user_id, target_user)
         t_pocket = t_econ.get('balance', 0)
         if t_pocket < 50:
-            bot.reply_to(message, "❌ У жертвы меньше 50 коинов на руках! Деньги в банке защищены на 100%.", parse_mode='HTML')
+            bot.reply_to(message, "❌ У жертвы меньше 50 коинов на руках! Деньги в банке защищены на 100%. 😿", parse_mode='HTML')
             return
 
         econ['last_rob_time'] = now
@@ -4705,7 +4714,7 @@ def handle_messages(message):
             mark_dirty()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
-            bot.send_message(chat_id, f"🚨🔊 <b>СИГНАЛИЗАЦИЯ СРАБОТАЛА!</b>\n\n{u_link} попытался проникнуть в карман {t_link}, но сработала <b>Охранная сигнализация</b>!\nВор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы! (Карма -5)", parse_mode='HTML')
+            bot.send_message(chat_id, f"🚨🔊 <b>СИГНАЛИЗАЦИЯ СРАБОТАЛА!</b> 🙀\n\n{u_link} попытался проникнуть в карман {t_link}, но сработала <b>Охранная сигнализация</b>!\nВор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы! (Карма -5)", parse_mode='HTML')
             return
 
         rob_chance = 0.40
@@ -4719,7 +4728,7 @@ def handle_messages(message):
             mark_dirty()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
-            bot.send_message(chat_id, f"🥷 <b>УДАЧНОЕ ОГРАБЛЕНИЕ!</b>\n\n{u_link} ловко украл у {t_link} <b>{stolen} Ня-коинов 🪙</b>! (Карма -5)", parse_mode='HTML')
+            bot.send_message(chat_id, f"🥷 <b>УДАЧНОЕ ОГРАБЛЕНИЕ!</b> 😼\n\n{u_link} ловко украл у {t_link} <b>{stolen} Ня-коинов 🪙</b>! (Карма -5)", parse_mode='HTML')
         else:
             fine = min(econ['balance'], random.randint(30, 90))
             if econ.get('active_title') == 'shadow_ninja': fine = int(fine * 0.5)
@@ -4729,7 +4738,7 @@ def handle_messages(message):
             mark_dirty()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
-            bot.send_message(chat_id, f"🚨 <b>ПРОВАЛ ОГРАБЛЕНИЯ!</b>\n\n{u_link} попался с поличным и выплатил {t_link} компенсацию: <b>-{fine} 🪙</b>! (Карма -3)", parse_mode='HTML')
+            bot.send_message(chat_id, f"🚨 <b>ПРОВАЛ ОГРАБЛЕНИЯ!</b> 😿\n\n{u_link} попался с поличным и выплатил {t_link} компенсацию: <b>-{fine} 🪙</b>! (Карма -3)", parse_mode='HTML')
         return
 
     # БАНК ТЕКСТОМ
@@ -4739,26 +4748,26 @@ def handle_messages(message):
         if m_amt:
             amt = int(m_amt.group(1))
             if amt <= 0 or econ['balance'] < amt:
-                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙")
+                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙 😿")
                 return
             econ['balance'] -= amt
             econ['bank_deposit'] = econ.get('bank_deposit', 0) + amt
             econ['last_bank_calc'] = time.time()
             check_achievements(user_id, user_name, 'bank_deposit', amt, chat_id, username=user_username)
             mark_dirty()
-            bot.reply_to(message, f"🏦 Вы внесли <b>{amt} 🪙</b> на депозит в Ня-Банк!\nНа депозите: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"🏦 Вы внесли <b>{amt} 🪙</b> на депозит в Ня-Банк! 😻\nНа депозите: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять всё'):
         econ = get_user_econ(user_id, user_name, username=user_username)
         dep = econ.get('bank_deposit', 0)
         if dep <= 0:
-            bot.reply_to(message, "❌ Ваш банковский депозит пуст!")
+            bot.reply_to(message, "❌ Ваш банковский депозит пуст! 😿")
             return
         econ['balance'] += dep
         econ['bank_deposit'] = 0
         econ['last_bank_calc'] = time.time()
         mark_dirty()
-        bot.reply_to(message, f"💸 Вы забрали весь вклад из банка: <b>+{dep} 🪙</b>!\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+        bot.reply_to(message, f"💸 Вы забрали весь вклад из банка: <b>+{dep} 🪙</b>! 😸\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять'):
         econ = get_user_econ(user_id, user_name, username=user_username)
@@ -4767,13 +4776,13 @@ def handle_messages(message):
             amt = int(m_amt.group(1))
             dep = econ.get('bank_deposit', 0)
             if amt <= 0 or dep < amt:
-                bot.reply_to(message, f"❌ В банке недостаточно средств! На депозите: {dep} 🪙")
+                bot.reply_to(message, f"❌ В банке недостаточно средств! На депозите: {dep} 🪙 😿")
                 return
             econ['bank_deposit'] -= amt
             econ['balance'] += amt
             econ['last_bank_calc'] = time.time()
             mark_dirty()
-            bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта!\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
         return
 
     # ОДИНОЧНЫЕ РП
@@ -4803,7 +4812,7 @@ def handle_messages(message):
 
             if target_user:
                 if target_user_id == user_id:
-                    bot.reply_to(message, "❌ Вы не можете использовать это действие на себе!")
+                    bot.reply_to(message, "❌ Вы не можете использовать это действие на себе! 😾")
                     return
                 sender_link = make_link(chat_id, user_name, user_id, ping=True)
                 target_link = make_link(chat_id, target_user, target_user_id, ping=True)
@@ -4818,7 +4827,7 @@ def handle_messages(message):
                 bot.send_message(chat_id, f"{rp_data['emoji']} {sender_link} <b>{rp_data['verb']}</b> {target_link}!{k_str}", parse_mode='HTML')
                 return
             else:
-                bot.reply_to(message, f"💡 Ответьте на сообщение или укажите ник:\n<code>{rp_cmd} @username</code>", parse_mode='HTML')
+                bot.reply_to(message, f"💡 Ответьте на сообщение или укажите ник:\n<code>{rp_cmd} @username</code> 😸", parse_mode='HTML')
                 return
 
     # КТО ТЫ @username
@@ -4840,11 +4849,11 @@ def handle_messages(message):
         if in_rest and rest_info:
             display_name = rest_info.get('user_name', target_found_name or 'Пользователь')
             user_link = make_link(chat_id, display_name, target_found_id or rest_info.get('user_id'), ping=False)
-            bot.reply_to(message, f"🌴 <b>Пользователь {user_link} находится в ресте!</b>\n📝 <b>Причина:</b> {html.escape(rest_info.get('reason', 'Не указана'))}\n⏱ <b>Срок:</b> {html.escape(rest_info.get('duration', 'Не указан'))}", parse_mode='HTML')
+            bot.reply_to(message, f"🌴 <b>Пользователь {user_link} находится в ресте!</b> 😺\n📝 <b>Причина:</b> {html.escape(rest_info.get('reason', 'Не указана'))}\n⏱ <b>Срок:</b> {html.escape(rest_info.get('duration', 'Не указан'))}", parse_mode='HTML')
         else:
             display_name = target_found_name or 'Пользователь'
             user_link = make_link(chat_id, display_name, target_found_id, ping=False)
-            bot.reply_to(message, f"✅ Пользователь {user_link} сейчас не находится в ресте!", parse_mode='HTML')
+            bot.reply_to(message, f"✅ Пользователь {user_link} сейчас не находится в ресте! 😸", parse_mode='HTML')
         return
 
     for pattern, responses in ALWAYS_ACTIVE_PATTERNS.items():
@@ -4860,7 +4869,7 @@ def handle_messages(message):
             try:
                 bot.delete_message(chat_id, message.message_id)
                 user_link = make_link(chat_id, user_name, user_id, ping=True)
-                warn = bot.send_message(chat_id, f'⚠️ {user_link}, вы находитесь в ресте! Ваше сообщение удалено.', parse_mode='HTML')
+                warn = bot.send_message(chat_id, f'⚠️ {user_link}, вы находитесь в ресте! Ваше сообщение удалено. 😾', parse_mode='HTML')
                 threading.Timer(5, lambda: bot.delete_message(chat_id, warn.message_id)).start()
                 return
             except Exception: pass
@@ -4875,8 +4884,8 @@ def handle_messages(message):
             check_achievements(target_id, target_tag, 'smeh_check', 1, chat_id, username=target_u.username)
             mark_dirty()
             u_link = make_link(chat_id, target_tag, target_id, ping=True)
-            bot.reply_to(message, f"😂 Пользователю {u_link} начислено +1 очко <b>Смехуятинки</b>!\nВсего: <b>{econ['smeh']}</b>", parse_mode='HTML')
-        else: bot.reply_to(message, "❌ Ответьте этой командой на сообщение человека!")
+            bot.reply_to(message, f"😂 Пользователю {u_link} начислено +1 очко <b>Смехуятинки</b>!\nВсего: <b>{econ['smeh']}</b> 😹", parse_mode='HTML')
+        else: bot.reply_to(message, "❌ Ответьте этой командой на сообщение человека! 😾")
         return
 
     # ТЕКСТОВЫЕ КОМАНДЫ (БЕЗ СЛЭША)
@@ -4955,10 +4964,10 @@ def handle_messages(message):
             mark_dirty()
             check_achievements(user_id, user_name, 'bonuses', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'bonus', 1, chat_id, username=user_username)
-            bot.reply_to(message, f"🎲 Вы собрали часовой бонус: <b>+{reward} Ня-коинов 🪙</b>!\nБаланс: <b>{econ['balance']} 💸</b>", parse_mode='HTML')
-            for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+            bot.reply_to(message, f"🎲 Вы собрали часовой бонус: <b>+{reward} Ня-коинов 🪙</b>! 😸\nБаланс: <b>{econ['balance']} 💸</b>", parse_mode='HTML')
+            for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
         else:
-            bot.reply_to(message, f"⏳ Бонус доступен каждый час! Ждать: <b>{left}</b>.", parse_mode='HTML')
+            bot.reply_to(message, f"⏳ Бонус доступен каждый час! Ждать: <b>{left}</b>. 😿", parse_mode='HTML')
         return
 
     # КОСТИ
@@ -4967,12 +4976,15 @@ def handle_messages(message):
         bet = int(match.group(1)) if match and match.group(1) else 0
 
         econ = get_user_econ(user_id, user_name, username=user_username)
-        if bet < 0 or bet > econ['balance']:
-            bot.reply_to(message, '❌ Недостаточно Ня-коинов для ставки!')
+        if bet < 30 and bet != 0:
+            bot.reply_to(message, '❌ Минимальная ставка — 30 Ня-коинов! 😾')
+            return
+        if bet > econ['balance']:
+            bot.reply_to(message, '❌ Недостаточно Ня-коинов для ставки! 😿')
             return
             
         if bet > 0 and not check_casino_limits(econ, bet):
-            bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+            bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
             return
 
         if bet > 0: process_casino_bet(bet)
@@ -4987,7 +4999,7 @@ def handle_messages(message):
             d2 = random.randint(1, 3)
 
         total = d1 + d2
-        result = f'🎲 Выпало: <b>{d1} + {d2} = {total}</b>.'
+        result = f'🎲 Выпало: <b>{d1} + {d2} = {total}</b>. 😺'
         if bet:
             if total == 12:
                 win = bet * 4
@@ -4995,23 +5007,23 @@ def handle_messages(message):
                 econ['balance'] += win
                 econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win - bet)
                 econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win - bet)
-                result += f'\n🎉 Джекпот! Вы выиграли <b>+{win} 🪙</b>!'
+                result += f'\n🎉 Джекпот! Вы выиграли <b>+{win} 🪙</b>! 🙀'
             elif total >= 8:
                 win = bet
                 win = process_casino_win(win)
                 econ['balance'] += win
                 econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + win
                 econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + win
-                result += f'\n✅ Вы выиграли <b>+{win} 🪙</b>!'
+                result += f'\n✅ Вы выиграли <b>+{win} 🪙</b>! 😻'
             else:
                 econ['balance'] -= bet
-                result += f'\n💸 Вы проиграли <b>{bet} 🪙</b>.'
+                result += f'\n💸 Вы проиграли <b>{bet} 🪙</b>. 😿'
         add_account_exp(user_id, user_name, 5, username=user_username)
         mark_dirty()
         check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
         completed = track_daily_task(user_id, user_name, 'dice', 1, chat_id, username=user_username)
-        bot.reply_to(message, result + f"\n💰 Баланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
-        for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+        bot.reply_to(message, result + f"\n💰 Баланс: <b>{econ['balance']} 🪙</b> 😸", parse_mode='HTML')
+        for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
         return
 
     # СЛОТЫ
@@ -5020,15 +5032,15 @@ def handle_messages(message):
         bet = int(match.group(1)) if match and match.group(1) else 0
 
         econ = get_user_econ(user_id, user_name, username=user_username)
-        if bet <= 0:
-            bot.reply_to(message, '❌ Укажите ставку! Пример: <code>слоты 100</code>', parse_mode='HTML')
+        if bet < 30:
+            bot.reply_to(message, '❌ Минимальная ставка — 30 Ня-коинов! 😾', parse_mode='HTML')
             return
         if bet > econ['balance']:
-            bot.reply_to(message, f"❌ Недостаточно коинов! Ваш баланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"❌ Недостаточно коинов! Ваш баланс: <b>{econ['balance']} 🪙</b> 😿", parse_mode='HTML')
             return
             
         if not check_casino_limits(econ, bet):
-            bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра.")
+            bot.reply_to(message, "❌ Достигнут суточный лимит профита в казино! Приходите завтра. 😿")
             return
 
         econ['balance'] -= bet
@@ -5046,46 +5058,46 @@ def handle_messages(message):
             weights = [26, 23, 20, 15, 10 + int(luck_bonus * 0.05), 6 + int(luck_bonus * 0.04)]
             
         roll = random.choices(symbols_pool, weights=weights, k=3)
-        result = f"🎰 <b>[ {roll[0]} | {roll[1]} | {roll[2]} ]</b>\n"
+        result = f"🎰 <b>[ {roll[0]} | {roll[1]} | {roll[2]} ]</b> 😺\n"
 
         if roll[0] == roll[1] == roll[2] == '💎':
             win = process_casino_win(int(bet * 10))
             econ['balance'] += win
             econ['daily_casino_win'] += win - bet
             econ['daily_casino_profit'] += win - bet
-            result += f'\n💎👑 <b>МЕГА ДЖЕКПОТ (10x)!</b> Выигрыш: <b>+{win} 🪙</b>!'
+            result += f'\n💎👑 <b>МЕГА ДЖЕКПОТ (10x)!</b> Выигрыш: <b>+{win} 🪙</b>! 🙀'
         elif roll[0] == roll[1] == roll[2] and roll[0] in ['⭐', '🍀']:
             multiplier = 5 if roll[0] == '⭐' else 4
             win = process_casino_win(int(bet * multiplier))
             econ['balance'] += win
             econ['daily_casino_win'] += win - bet
             econ['daily_casino_profit'] += win - bet
-            result += f'\n🌟 <b>ОГРОМНЫЙ ВЫИГРЫШ ({multiplier}x)!</b> Награда: <b>+{win} 🪙</b>!'
+            result += f'\n🌟 <b>ОГРОМНЫЙ ВЫИГРЫШ ({multiplier}x)!</b> Награда: <b>+{win} 🪙</b>! 😻'
         elif roll[0] == roll[1] == roll[2]:
             win = process_casino_win(int(bet * 2.5))
             econ['balance'] += win
             econ['daily_casino_win'] += win - bet
             econ['daily_casino_profit'] += win - bet
-            result += f'\n🎉 <b>Три в ряд (2.5x)!</b> Выигрыш: <b>+{win} 🪙</b>!'
+            result += f'\n🎉 <b>Три в ряд (2.5x)!</b> Выигрыш: <b>+{win} 🪙</b>! 😸'
         elif roll.count('💎') == 2 or roll.count('⭐') == 2:
             win = process_casino_win(int(bet * 1.5))
             econ['balance'] += win
             econ['daily_casino_win'] += win - bet
             econ['daily_casino_profit'] += win - bet
-            result += f'\n✨ <b>Два редких символа!</b> Выигрыш: <b>+{win} 🪙</b> (1.5x)!'
+            result += f'\n✨ <b>Два редких символа!</b> Выигрыш: <b>+{win} 🪙</b> (1.5x)! 😽'
         elif len(set(roll)) == 2:
             win = process_casino_win(int(bet * 0.8))
             econ['balance'] += win
             result += f'\n🙂 <b>Два совпадения!</b> Возврат: <b>{win} 🪙</b> (0.8x).'
         else:
-            result += f'\n💸 Проигрыш <b>-{bet} 🪙</b>.'
+            result += f'\n💸 Проигрыш <b>-{bet} 🪙</b>. 😿'
 
         add_account_exp(user_id, user_name, 5, username=user_username)
         mark_dirty()
         check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
         completed = track_daily_task(user_id, user_name, 'slots', 1, chat_id, username=user_username)
         bot.reply_to(message, result + f"\n💰 Баланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
-        for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙', parse_mode='HTML')
+        for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
         return
 
     # РЫБАЛКА И ОХОТА
@@ -5094,7 +5106,7 @@ def handle_messages(message):
         cooldown = 7200
         left = cooldown_text(econ.get('last_fish_time', 0), cooldown, econ)
         if left:
-            bot.reply_to(message, f'⏳ Рыбалка доступна раз в 2 часа. Осталось: <b>{left}</b>.', parse_mode='HTML')
+            bot.reply_to(message, f'⏳ Рыбалка доступна раз в 2 часа. Осталось: <b>{left}</b>. 😿', parse_mode='HTML')
             return
 
         luck_bonus = econ['pet'].get('luck_bonus', 0) if econ.get('pet') else 0
@@ -5110,7 +5122,7 @@ def handle_messages(message):
         mark_dirty()
         check_achievements(user_id, user_name, 'fish', 1, chat_id, username=user_username)
         rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""
-        bot.reply_to(message, f'🎣 Вы поймали: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>{rush_info}\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
+        bot.reply_to(message, f'🎣 Вы поймали: <b>{caught[0]}</b> [{caught[1]}]! 😺\n💰 Базовая цена: <b>{caught[2]} 🪙</b>{rush_info}\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
         return
 
     elif text_lower in ['охота', '/hunt']:
@@ -5118,7 +5130,7 @@ def handle_messages(message):
         cooldown = 7200
         left = cooldown_text(econ.get('last_hunt_time', 0), cooldown, econ)
         if left:
-            bot.reply_to(message, f'⏳ Охота доступна раз в 2 часа. Осталось: <b>{left}</b>.', parse_mode='HTML')
+            bot.reply_to(message, f'⏳ Охота доступна раз в 2 часа. Осталось: <b>{left}</b>. 😿', parse_mode='HTML')
             return
 
         luck_bonus = econ['pet'].get('luck_bonus', 0) if econ.get('pet') else 0
@@ -5134,7 +5146,7 @@ def handle_messages(message):
         mark_dirty()
         check_achievements(user_id, user_name, 'hunt', 1, chat_id, username=user_username)
         rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""
-        bot.reply_to(message, f'🏹 Вы добыли: <b>{caught[0]}</b> [{caught[1]}]!\n💰 Базовая цена: <b>{caught[2]} 🪙</b>{rush_info}\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
+        bot.reply_to(message, f'🏹 Вы добыли: <b>{caught[0]}</b> [{caught[1]}]! 😺\n💰 Базовая цена: <b>{caught[2]} 🪙</b>{rush_info}\n💡 Продать: <code>продать</code> | Приготовить: <code>/cook</code>', parse_mode='HTML')
         return
 
     # ПЕРЕВОД КОИНОВ
@@ -5142,16 +5154,16 @@ def handle_messages(message):
         target_id, target_u, amount = parse_transfer_command(message)
 
         if amount <= 0 or not target_u:
-            bot.reply_to(message, "❌ Формат: <code>передать @username 100</code> или ответом на сообщение: <code>передать 100</code>.", parse_mode='HTML')
+            bot.reply_to(message, "❌ Формат: <code>передать @username 100</code> или ответом на сообщение: <code>передать 100</code>. 😾", parse_mode='HTML')
             return
 
         if target_id == user_id:
-            bot.reply_to(message, "❌ Нельзя переводить коины самому себе!")
+            bot.reply_to(message, "❌ Нельзя переводить коины самому себе! 🙀")
             return
 
         sender_econ = get_user_econ(user_id, user_name, username=user_username)
         if sender_econ['balance'] < amount:
-            bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
             return
 
         tax = max(1, int(amount * 0.03))
@@ -5169,9 +5181,9 @@ def handle_messages(message):
         target_link = make_link(chat_id, target_u, target_id, ping=True)
         bot.reply_to(
             message,
-            f"💸 Вы перевели <b>{amount} 🪙</b> пользователю {target_link}!\n"
+            f"💸 Вы перевели <b>{amount} 🪙</b> пользователю {target_link}! 😻\n"
             f"<i>(Комиссия 3%: сожжено {tax} 🪙, зачислено {receive_amount} 🪙)</i>\n"
-            f"Ваш остаток: <b>{sender_econ['balance']} 🪙</b>",
+            f"Ваш остаток: <b>{sender_econ['balance']} 🪙</b> 😸",
             parse_mode='HTML'
         )
         return
@@ -5183,7 +5195,7 @@ def handle_messages(message):
         if target_name and duration_text:
             reward_given, count = apply_rest(chat_id, target_name, duration_text, reason, target_id)
             user_link = make_link(chat_id, target_name, target_id, ping=True)
-            bot.reply_to(message, f'✅ Рест для {user_link} добавлен на {duration_text} (Причина: {reason})!', parse_mode='HTML')
+            bot.reply_to(message, f'✅ Рест для {user_link} добавлен на {duration_text} (Причина: {reason})! 😺', parse_mode='HTML')
 
     elif text_lower.startswith('-рест'):
         if not is_admin(chat_id, user_id): return
@@ -5206,15 +5218,15 @@ def handle_messages(message):
                 mark_dirty()
                 u_link = make_link(chat_id, display_name, target_id or rest_info.get("user_id"), ping=True)
                 log_event('РЕСТ СНЯТ', f'Чат: <code>{chat_id}</code>\nАдмин: @{user_username}\nПользователь: {u_link}')
-                bot.reply_to(message, f'🗑 Рест с {u_link} успешно снят.', parse_mode='HTML')
+                bot.reply_to(message, f'🗑 Рест с {u_link} успешно снят. 😺', parse_mode='HTML')
             else:
-                bot.reply_to(message, f'❌ Рест для указанного пользователя не найден.', parse_mode='HTML')
+                bot.reply_to(message, f'❌ Рест для указанного пользователя не найден. 😿', parse_mode='HTML')
 
     elif text_lower in ['ресты', 'рест']:
         if str_chat not in db['rests'] or not db['rests'][str_chat]:
-            bot.reply_to(message, '🌴 В данный момент никто не находится в ресте.')
+            bot.reply_to(message, '🌴 В данный момент никто не находится в ресте. 😸')
         else:
-            resp = '📋 <b>СПИСОК АКТИВНЫХ РЕСТОВ:</b>\n──────────────────────\n'
+            resp = '📋 <b>СПИСОК АКТИВНЫХ РЕСТОВ:</b> 😺\n──────────────────────\n'
             for r_key, info in db['rests'][str_chat].items():
                 u_name = info.get('user_name', r_key)
                 u_id = info.get('user_id')
@@ -5225,9 +5237,9 @@ def handle_messages(message):
     elif text_lower == 'мой рест':
         in_rest, info, _ = check_user_rest(db.get('rests', {}).get(str_chat, {}), user_id=user_id, user_name=user_name)
         if in_rest and info:
-            bot.reply_to(message, f"🌴 <b>Ваш рест:</b> {info['duration']}\n📝 <b>Причина:</b> {info.get('reason', 'Не указана')}", parse_mode='HTML')
+            bot.reply_to(message, f"🌴 <b>Ваш рест:</b> {info['duration']} 😺\n📝 <b>Причина:</b> {info.get('reason', 'Не указана')}", parse_mode='HTML')
         else:
-            bot.reply_to(message, "✅ Вы сейчас не находитесь в ресте!", parse_mode='HTML')
+            bot.reply_to(message, "✅ Вы сейчас не находитесь в ресте! 😸", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # ОБРАБОТКА CALLBACK КНОПОК
@@ -5278,6 +5290,12 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "❌ Это меню открыто другим пользователем!", show_alert=True)
             return
 
+    # МАГАЗИН: ГЛАВНОЕ МЕНЮ
+    if action_data == 'shop_main':
+        send_shop_menu(chat_id, user_id, user_name, message_id=call.message.message_id)
+        bot.answer_callback_query(call.id)
+        return
+
     # ИГРА КИРПИЧ
     if action_data.startswith('brick_step_'):
         game_id = action_data.replace('brick_step_', '')
@@ -5303,10 +5321,10 @@ def callback_inline(call):
 
         if random.random() < risk:
             bot.edit_message_text(
-                f"🧱 <b>КРАШ НА СТРОЙКЕ!</b>\n\n"
+                f"🧱 <b>КРАШ НА СТРОЙКЕ!</b> 🙀\n\n"
                 f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}\n"
                 f"💥 Кирпич упал на голову на шаге {step+1} (Множитель: {mult}x)!\n"
-                f"💸 Ставка <b>{game['bet']} 🪙</b> утеряна...",
+                f"💸 Ставка <b>{game['bet']} 🪙</b> утеряна... 😿",
                 chat_id=chat_id,
                 message_id=call.message.message_id,
                 parse_mode='HTML'
@@ -5320,11 +5338,11 @@ def callback_inline(call):
         markup = InlineKeyboardMarkup()
         if game['step'] < len(game['mults']) - 1:
             markup.add(InlineKeyboardButton(f"🏗 Сделать шаг (Риск {int(game['risks'][game['step']+1]*100)}%)", callback_data=f"brick_step_{game_id}:{user_id}"))
-        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amt} 🪙 | {mult}x)", callback_data=f"brick_cashout_{game_id}:{user_id}"))
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amt} 🪙 | {mult}x) 😻", callback_data=f"brick_cashout_{game_id}:{user_id}"))
 
         bar = "🟩" * (game['step'] + 1) + "⬜️" * (len(game['mults']) - game['step'] - 1)
         bot.edit_message_text(
-            f"🧱 <b>ИГРА КИРПИЧ (СТРОЙКА)</b>\n"
+            f"🧱 <b>ИГРА КИРПИЧ (СТРОЙКА)</b> 😺\n"
             f"──────────────────────\n"
             f"👤 Строитель: {make_link(chat_id, user_name, user_id, ping=False)}\n"
             f"💰 Ставка: <b>{game['bet']} 🪙</b>\n"
@@ -5359,10 +5377,10 @@ def callback_inline(call):
         mark_dirty()
 
         bot.edit_message_text(
-            f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b>\n\n"
+            f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b> 😻\n\n"
             f"👤 Строитель: {make_link(chat_id, user_name, user_id, ping=False)}\n"
             f"🎉 Выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{mult}x</b>)!\n"
-            f"💵 Баланс: <b>{econ['balance']} 🪙</b>",
+            f"💵 Баланс: <b>{econ['balance']} 🪙</b> 😸",
             chat_id=chat_id,
             message_id=call.message.message_id,
             parse_mode='HTML'
@@ -5371,12 +5389,12 @@ def callback_inline(call):
 
     # НАВИГАЦИЯ СПРАВОЧНИКА
     elif action_data == 'help_main':
-        try: bot.edit_message_text("🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b>\n──────────────────────\nВыберите интересующий вас раздел:", chat_id=chat_id, message_id=call.message.message_id, reply_markup=get_main_menu_markup(user_id), parse_mode='HTML')
+        try: bot.edit_message_text("🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n──────────────────────\nВыберите интересующий вас раздел: 😸", chat_id=chat_id, message_id=call.message.message_id, reply_markup=get_main_menu_markup(user_id), parse_mode='HTML')
         except Exception: pass
 
     elif action_data == 'help_vd':
         text = (
-            "🩸 <b>ФАКТЫ И ВИКТОРИНЫ ПО VIOLENCE DISTRICT</b> 🔪\n"
+            "🩸 <b>ФАКТЫ И ВИКТОРИНЫ ПО VIOLENCE DISTRICT</b> 🔪 😺\n"
             "──────────────────────\n"
             "• <code>факт вд</code> или <code>/fact_vd</code> — случайный секрет разработки или лора игры\n"
             "• В чате игры регулярно проходят экспресс-викторины с призами коинов!\n"
@@ -5390,7 +5408,7 @@ def callback_inline(call):
 
     elif action_data == 'get_instant_vd_fact':
         title, desc = random.choice(VD_FACTS)
-        msg_text = f"🩸 <b>ИНТЕРЕСНЫЙ ФАКТ | VIOLENCE DISTRICT</b> 🔪\n──────────────────────\n📌 <b>{title}</b>\n📖 <i>{desc}</i>\n──────────────────────"
+        msg_text = f"🩸 <b>ИНТЕРЕСНЫЙ ФАКТ | VIOLENCE DISTRICT</b> 🔪 😺\n──────────────────────\n📌 <b>{title}</b>\n📖 <i>{desc}</i>\n──────────────────────"
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🎲 Еще факт", callback_data=f"get_instant_vd_fact:{user_id}"))
         markup.add(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"help_main:{user_id}"))
@@ -5398,7 +5416,7 @@ def callback_inline(call):
 
     elif action_data == 'help_sports':
         text = (
-            "⚽️ <b>СПОРТИВНЫЕ ИГРЫ И КАЗИНО TELEGRAM</b>\n──────────────────────\n"
+            "⚽️ <b>СПОРТИВНЫЕ ИГРЫ И КАЗИНО TELEGRAM</b> 😺\n──────────────────────\n"
             "• 🚀 <code>/crash 100</code> — игра Краш (ракета со взлётом)\n"
             "• 🧱 <code>/brick 100</code> — игра Кирпич (множитель и риск)\n"
             "• ⚽️ <code>футбол 100</code> — пенальти в ворота (гол x1.6 - x1.8)\n"
@@ -5416,7 +5434,7 @@ def callback_inline(call):
 
     elif action_data == 'help_themes_buffs':
         text = (
-            "🎨 <b>ТЕМЫ ПРОФИЛЯ И РАСХОДНИКИ</b>\n──────────────────────\n"
+            "🎨 <b>ТЕМЫ ПРОФИЛЯ И РАСХОДНИКИ</b> 😺\n──────────────────────\n"
             "• <code>/backpack</code> — рюкзак ваших баффов и активация\n"
             "• 🎨 <b>Темы оформления:</b> Сакура, Неон/Киберпанк, Золото, Готика (в /shop)\n"
             "• ⚡️ <b>Энергетик:</b> мгновенный сброс всех таймеров\n"
@@ -5431,7 +5449,7 @@ def callback_inline(call):
 
     elif action_data == 'help_stream_garden':
         text = (
-            "🎥 <b>СТРИМЕР И ОРАНЖЕРЕЯ БОНСАЙ</b> 🪴\n──────────────────────\n"
+            "🎥 <b>СТРИМЕР И ОРАНЖЕРЕЯ БОНСАЙ</b> 🪴 😺\n──────────────────────\n"
             "• <code>/stream [Жанр]</code> — запустить трансляцию (Гейминг, ASMR и др.)\n"
             "• Покупай микрофоны и вебкамеры в магазине для роста аудитории.\n"
             "• <code>/garden</code> — твоя личная оранжерея. Сажай семена, поливай и собирай урожай!\n"
@@ -5443,7 +5461,7 @@ def callback_inline(call):
 
     elif action_data == 'help_karma_rp':
         text = (
-            "⚖️ <b>СИСТЕМА КАРМЫ И РП</b> 😇😈\n──────────────────────\n"
+            "⚖️ <b>СИСТЕМА КАРМЫ И РП</b> 😇😈 😺\n──────────────────────\n"
             "• <code>обнять @user</code>, <code>похвалить</code>, <code>подарок</code> повышают Карму (+)\n"
             "• <code>ударить тапком</code>, <code>плюнуть</code>, <code>ограбить</code> понижают Карму (-)\n"
             "• Проверь свой статус в <code>/profile</code>: от Святого Ангела до Демона!\n"
@@ -5455,7 +5473,7 @@ def callback_inline(call):
 
     elif action_data == 'help_heroes':
         text = (
-            "🏆 <b>УДАРНИКИ И ГЕРОИ ДНЯ</b>\n──────────────────────\n"
+            "🏆 <b>УДАРНИКИ И ГЕРОИ ДНЯ</b> 😺\n──────────────────────\n"
             "• Команда: <code>герои дня</code> или <code>/daily_heroes</code>\n\n"
             "👑 <b>Номинации каждые 24 часа:</b>\n"
             "1. 🗣 <b>Главный спикер</b> — топ по сообщениям в чате за день\n"
@@ -5469,7 +5487,7 @@ def callback_inline(call):
 
     elif action_data == 'help_sims':
         text = (
-            "🍆 <b>МЕМНЫЕ СИМУЛЯТОРЫ, ШАР И ЗАМЕРЫ</b>\n──────────────────────\n"
+            "🍆 <b>МЕМНЫЕ СИМУЛЯТОРЫ, ШАР И ЗАМЕРЫ</b> 😺\n──────────────────────\n"
             "• 🔮 <code>шар [вопрос]</code> — магический шар судьбы\n"
             "• 📊 <code>шанс [событие]</code> — расчет процента вероятности\n"
             "• 🕵️‍♂️ <code>детектор [фраза]</code> — проверка на детекторе лжи\n"
@@ -5485,7 +5503,7 @@ def callback_inline(call):
 
     elif action_data == 'help_rests':
         text = (
-            "🌴 <b>СИСТЕМА РЕСТОВ И ОТПУСКОВ</b>\n──────────────────────\n"
+            "🌴 <b>СИСТЕМА РЕСТОВ И ОТПУСКОВ</b> 😺\n──────────────────────\n"
             "• <code>+рест Иван 3 дня | отпуск</code> — выдать рест\n"
             "• <code>-рест @username</code> — снять рест\n"
             "• <code>история @username</code> — журнал рестов\n"
@@ -5499,7 +5517,7 @@ def callback_inline(call):
 
     elif action_data == 'help_biz':
         text = (
-            "🏢 <b>БИЗНЕСЫ 2.0 И ГАРАЖ</b>\n──────────────────────\n"
+            "🏢 <b>БИЗНЕСЫ 2.0 И ГАРАЖ</b> 😺\n──────────────────────\n"
             "• <code>/business</code> — покупка и прокачка (1-5 LVL)\n"
             "• <code>/miner</code> — майнинг-ферма\n"
             "• <code>/garage</code> — покупка личного транспорта\n"
@@ -5512,7 +5530,7 @@ def callback_inline(call):
 
     elif action_data == 'help_bank':
         text = (
-            "🏦 <b>НЯ-БАНК И ДЕПОЗИТЫ</b>\n──────────────────────\n"
+            "🏦 <b>НЯ-БАНК И ДЕПОЗИТЫ</b> 😺\n──────────────────────\n"
             "• <code>/bank</code> — меню депозита\n"
             "• <code>банк положить 500</code> — внести вклад\n"
             "• <code>банк снять 500</code> — снять деньги\n"
@@ -5526,7 +5544,7 @@ def callback_inline(call):
 
     elif action_data == 'help_crypto':
         text = (
-            "📈 <b>КРИПТО-БИРЖА</b>\n──────────────────────\n"
+            "📈 <b>КРИПТО-БИРЖА</b> 😺\n──────────────────────\n"
             "• <code>биржа</code> — котировки монет\n"
             "• <code>купить крипту NYA 5</code> — покупка\n"
             "• <code>продать крипту NYA 5</code> — продажа\n"
@@ -5539,7 +5557,7 @@ def callback_inline(call):
 
     elif action_data == 'help_pets':
         text = (
-            "🐾 <b>ПИТОМЦЫ, КУЛИНАРИЯ И ОХОТА</b>\n──────────────────────\n"
+            "🐾 <b>ПИТОМЦЫ, КУЛИНАРИЯ И ОХОТА</b> 😺\n──────────────────────\n"
             "• <code>/pet</code> — карточка питомца и уход\n"
             "• <code>/walk</code> — отправить питомца на прогулку за кладом\n"
             "• <code>/cook</code> — приготовить добычу для питомца\n"
@@ -5554,7 +5572,7 @@ def callback_inline(call):
 
     elif action_data == 'help_econ':
         text = (
-            "💰 <b>ЭКОНОМИКА И КВЕСТЫ</b>\n──────────────────────\n"
+            "💰 <b>ЭКОНОМИКА И КВЕСТЫ</b> 😺\n──────────────────────\n"
             "• <code>бонус</code> — часовые коины\n"
             "• <code>баланс</code>, <code>профиль</code> — вся статистика\n"
             "• <code>передать @user 100</code> — перевод коинов\n"
@@ -5569,7 +5587,7 @@ def callback_inline(call):
 
     elif action_data == 'help_full_catalog':
         text = (
-            "📖 <b>ПОЛНЫЙ АЛФАВИТНЫЙ СПРАВОЧНИК КОМАНД:</b>\n──────────────────────\n"
+            "📖 <b>ПОЛНЫЙ АЛФАВИТНЫЙ СПРАВОЧНИК КОМАНД:</b> 😺\n──────────────────────\n"
             "• <b>А</b>: <code>ачивки</code>, <code>аватарка</code>, <code>айкью</code>\n"
             "• <b>Б</b>: <code>баланс</code>, <code>банк</code>, <code>бизнес</code>, <code>биржа</code>, <code>брак</code>, <code>бонус</code>\n"
             "• <b>В</b>: <code>вакансии</code>, <code>/walk</code> (гулять)\n"
@@ -5620,12 +5638,12 @@ def callback_inline(call):
         check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
         mark_dirty()
 
-        bot.answer_callback_query(call.id, f"🎉 Куш забран: +{win_amt} 🪙 ({mult:.2f}x)!", show_alert=True)
+        bot.answer_callback_query(call.id, f"🎉 Куш забран: +{win_amt} 🪙 ({mult:.2f}x)! 😻", show_alert=True)
         try:
             bot.edit_message_text(
-                f"💰 <b>УСПЕШНЫЙ CASHOUT В КРАШЕ!</b>\n\n"
+                f"💰 <b>УСПЕШНЫЙ CASHOUT В КРАШЕ!</b> 😺\n\n"
                 f"👤 Пилот: {make_link(chat_id, user_name, user_id, ping=False)}\n"
-                f"🎉 Зафиксирован выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{mult:.2f}x</b>)!\n"
+                f"🎉 Зафиксирован выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{mult:.2f}x</b>)! 😻\n"
                 f"💵 Баланс: <b>{econ['balance']} 🪙</b>",
                 chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
             )
@@ -5644,31 +5662,31 @@ def callback_inline(call):
         econ['last_train_time'] = 0; econ['last_iq_time'] = 0; econ['last_fat_time'] = 0
         econ['last_foot_time'] = 0; econ['last_chromosomes_time'] = 0; econ['last_dick_time'] = 0
         mark_dirty()
-        bot.answer_callback_query(call.id, "⚡️ Энергетик выпит! Все таймеры мгновенно сброшены!", show_alert=True)
+        bot.answer_callback_query(call.id, "⚡️ Энергетик выпит! Все таймеры мгновенно сброшены! 😻", show_alert=True)
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'use_item_luck_clover':
         econ = get_user_econ(user_id, user_name, username=user_username)
         bp = econ.setdefault('backpack', {})
         if bp.get('luck_clover', 0) <= 0:
-            bot.answer_callback_query(call.id, "❌ У вас нет клевера!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет клевера! 😿", show_alert=True)
             return
         bp['luck_clover'] -= 1
         econ['luck_clover_until'] = time.time() + 3600
         mark_dirty()
-        bot.answer_callback_query(call.id, "🍀 Клевер активирован! +15% к удаче в играх на 1 час!", show_alert=True)
+        bot.answer_callback_query(call.id, "🍀 Клевер активирован! +15% к удаче в играх на 1 час! 😺", show_alert=True)
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'use_item_invis_mask':
         econ = get_user_econ(user_id, user_name, username=user_username)
         bp = econ.setdefault('backpack', {})
         if bp.get('invis_mask', 0) <= 0:
-            bot.answer_callback_query(call.id, "❌ У вас нет маски-невидимки!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет маски-невидимки! 😿", show_alert=True)
             return
         bp['invis_mask'] -= 1
         econ['invis_until'] = time.time() + 86400
         mark_dirty()
-        bot.answer_callback_query(call.id, "🥷 Маска надета! Ваши замеры скрыты из топов на 24 часа!", show_alert=True)
+        bot.answer_callback_query(call.id, "🥷 Маска надета! Ваши замеры скрыты из топов на 24 часа! 😼", show_alert=True)
         render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
     # МАГАЗИН: СТУДИЯ СТРИМЕРА
@@ -5676,7 +5694,7 @@ def callback_inline(call):
         econ = get_user_econ(user_id, user_name)
         studio = econ.setdefault('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
         lines = [
-            "🎙 <b>СТУДИЯ СТРИМЕРА (АПГРЕЙДЫ)</b>", "──────────────────────",
+            "🎙 <b>СТУДИЯ СТРИМЕРА (АПГРЕЙДЫ)</b> 😺", "──────────────────────",
             "<i>Улучшайте оборудование, чтобы привлекать больше зрителей!</i>\n"
         ]
         markup = InlineKeyboardMarkup(row_width=1)
@@ -5699,19 +5717,19 @@ def callback_inline(call):
         studio = econ.setdefault('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
         lvl = studio.get(equip_key, 1)
         if lvl >= 4:
-            bot.answer_callback_query(call.id, "❌ Максимальный уровень!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Максимальный уровень! 🙀", show_alert=True)
             return
         cost = STREAM_EQUIP[equip_key]['levels'][lvl]
         if econ['balance'] < cost:
-            bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙!", show_alert=True)
+            bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
             return
         econ['balance'] -= cost
         studio[equip_key] = lvl + 1
         mark_dirty()
-        bot.answer_callback_query(call.id, f"🎉 Вы улучшили {STREAM_EQUIP[equip_key]['name']} до {lvl+1} уровня!")
+        bot.answer_callback_query(call.id, f"🎉 Вы улучшили {STREAM_EQUIP[equip_key]['name']} до {lvl+1} уровня! 😻")
         
         markup = InlineKeyboardMarkup(row_width=1)
-        lines = ["🎙 <b>СТУДИЯ СТРИМЕРА (АПГРЕЙДЫ)</b>", "──────────────────────", "<i>Улучшайте оборудование, чтобы привлекать больше зрителей!</i>\n"]
+        lines = ["🎙 <b>СТУДИЯ СТРИМЕРА (АПГРЕЙДЫ)</b> 😺", "──────────────────────", "<i>Улучшайте оборудование, чтобы привлекать больше зрителей!</i>\n"]
         for k, v in STREAM_EQUIP.items():
             curlvl = studio.get(k, 1)
             if curlvl < 4:
@@ -5726,8 +5744,8 @@ def callback_inline(call):
 
     elif action_data == 'shop_cat_garden':
         lines = [
-            "🪴 <b>СЕМЕНА ОРАНЖЕРЕИ БОНСАЙ</b>", "──────────────────────",
-            "<i>Посадите семечко, поливайте его и соберите ценный урожай!</i>\n"
+            "🪴 <b>СЕМЕНА ОРАНЖЕРЕИ БОНСАЙ</b> 😺", "──────────────────────",
+            "<i>Посадите семечко, поливайте его и соберите ценный урожай!</i> 😸\n"
         ]
         for s_id, s_info in GARDEN_SEEDS.items():
             hrs = s_info['grow_time'] // 3600
@@ -5746,15 +5764,15 @@ def callback_inline(call):
             seed = GARDEN_SEEDS[s_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ.get('garden'):
-                bot.answer_callback_query(call.id, "❌ У вас уже растет растение в саду! Сначала соберите его.", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ У вас уже растет растение в саду! Сначала соберите его. 😾", show_alert=True)
                 return
             if econ['balance'] < seed['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {seed['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {seed['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= seed['price']
             econ['garden'] = {'seed': s_id, 'planted_at': time.time(), 'water_count': 0}
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы посадили {seed['name']}! Зайдите в /garden", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы посадили {seed['name']}! Зайдите в /garden 😻", show_alert=True)
             render_garden_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'water_plant':
@@ -5763,11 +5781,11 @@ def callback_inline(call):
         if not garden: return
         seed_info = GARDEN_SEEDS[garden['seed']]
         if garden['water_count'] >= seed_info['water_req']:
-            bot.answer_callback_query(call.id, "💦 Растение уже достаточно полито!", show_alert=True)
+            bot.answer_callback_query(call.id, "💦 Растение уже достаточно полито! 😸", show_alert=True)
             return
         garden['water_count'] += 1
         mark_dirty()
-        bot.answer_callback_query(call.id, "💦 Вы успешно полили растение!")
+        bot.answer_callback_query(call.id, "💦 Вы успешно полили растение! 😺")
         render_garden_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'harvest_plant':
@@ -5777,19 +5795,19 @@ def callback_inline(call):
         seed_info = GARDEN_SEEDS[garden['seed']]
         elapsed = time.time() - garden['planted_at']
         if elapsed < seed_info['grow_time']:
-            bot.answer_callback_query(call.id, "❌ Урожай еще не созрел!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Урожай еще не созрел! 😿", show_alert=True)
             return
         if garden['water_count'] < seed_info['water_req']:
-            bot.answer_callback_query(call.id, "❌ Растению не хватило воды! Полейте его.", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Растению не хватило воды! Полейте его. 😾", show_alert=True)
             return
         reward = random.randint(seed_info['reward_min'], seed_info['reward_max'])
         econ['balance'] += reward
         econ['garden'] = None
         change_karma(user_id, user_name, 2)
         mark_dirty()
-        bot.answer_callback_query(call.id, f"🎉 Урожай собран: +{reward} 🪙!")
+        bot.answer_callback_query(call.id, f"🎉 Урожай собран: +{reward} 🪙! 😻")
         bot.edit_message_text(
-            f"🪴 <b>СБОР УРОЖАЯ</b>\n──────────────────────\n"
+            f"🪴 <b>СБОР УРОЖАЯ</b> 😺\n──────────────────────\n"
             f"Вы собрали великолепный урожай {seed_info['name']} и продали его за <b>{reward} Ня-коинов 🪙</b>!\n"
             f"Карма повышена: <b>+2 😇</b>",
             chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
@@ -5799,13 +5817,13 @@ def callback_inline(call):
         econ = get_user_econ(user_id, user_name)
         econ['garden'] = None
         mark_dirty()
-        bot.answer_callback_query(call.id, "❌ Растение выкорчевано.")
+        bot.answer_callback_query(call.id, "❌ Растение выкорчевано. 😿")
         render_garden_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'shop_cat_buffs':
         lines = [
-            "🧰 <b>МАГАЗИН РАСХОДНИКОВ И БАФФОВ</b>", "──────────────────────",
-            "<i>Используйте расходники из рюкзака (/backpack) для преимуществ!</i>\n"
+            "🧰 <b>МАГАЗИН РАСХОДНИКОВ И БАФФОВ</b> 😺", "──────────────────────",
+            "<i>Используйте расходники из рюкзака (/backpack) для преимуществ!</i> 😸\n"
         ]
         for b_id, b_info in BUFF_ITEMS.items():
             lines.append(f"• <b>{b_info['name']}</b> — <code>{b_info['price']} 🪙</code>\n  <i>{b_info['desc']}</i>\n")
@@ -5822,18 +5840,18 @@ def callback_inline(call):
             item = BUFF_ITEMS[b_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ['balance'] < item['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= item['price']
             bp = econ.setdefault('backpack', {})
             bp[b_id] = bp.get(b_id, 0) + 1
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Куплен предмет: {item['short']}! Откройте /backpack", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Куплен предмет: {item['short']}! Откройте /backpack 😻", show_alert=True)
 
     elif action_data == 'shop_cat_themes':
         lines = [
-            "🎨 <b>КАТАЛОГ ТЕМ ОФОРМЛЕНИЯ ПРОФИЛЯ</b>", "──────────────────────",
-            "<i>Тема полностью меняет графический стиль и рамки команды /profile!</i>\n"
+            "🎨 <b>КАТАЛОГ ТЕМ ОФОРМЛЕНИЯ ПРОФИЛЯ</b> 😺", "──────────────────────",
+            "<i>Тема полностью меняет графический стиль и рамки команды /profile!</i> 😸\n"
         ]
         for t_k, t_v in THEMES.items():
             if t_k != 'default': lines.append(f"• <b>{t_v['name']}</b> — <code>{t_v['price']} 🪙</code>")
@@ -5851,16 +5869,16 @@ def callback_inline(call):
             econ = get_user_econ(user_id, user_name, username=user_username)
             purchased = econ.setdefault('purchased_themes', ['default'])
             if t_key in purchased:
-                bot.answer_callback_query(call.id, "❌ Эта тема уже куплена!", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Эта тема уже куплена! 😾", show_alert=True)
                 return
             if econ['balance'] < theme['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {theme['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {theme['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= theme['price']
             purchased.append(t_key)
             econ['profile_theme'] = t_key
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Куплена и активирована тема {theme['name']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Куплена и активирована тема {theme['name']}! 😻", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     elif action_data.startswith('set_theme_'):
@@ -5869,29 +5887,29 @@ def callback_inline(call):
         if t_key in econ.get('purchased_themes', ['default']):
             econ['profile_theme'] = t_key
             mark_dirty()
-            bot.answer_callback_query(call.id, f"✅ Установлен стиль: {THEMES[t_key]['name']}!")
+            bot.answer_callback_query(call.id, f"✅ Установлен стиль: {THEMES[t_key]['name']}! 😸")
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     # САПЁР
     elif action_data.startswith('mines_open_'):
         m_match = re.match(r"^mines_open_(m_\d+_\d+)_(\d+)$", action_data)
         if not m_match:
-            bot.answer_callback_query(call.id, "❌ Ошибка данных игры!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка данных игры! 🙀", show_alert=True)
             return
         game_id = m_match.group(1)
         cell_idx = int(m_match.group(2))
         game = active_mines.get(game_id)
         if not game or game.get('finished'):
-            bot.answer_callback_query(call.id, "❌ Игра уже завершена!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Игра уже завершена! 😿", show_alert=True)
             return
         if user_id != game['user_id']:
-            bot.answer_callback_query(call.id, "❌ Это не ваше игровое поле!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Это не ваше игровое поле! 😾", show_alert=True)
             return
 
         if cell_idx in game['bombs']:
             game['finished'] = True
             text_board, markup = render_mines_board(game_id)
-            loss_text = f"💥 <b>БАБАХ! ВЫ НАСТУПИЛИ НА МИНУ!</b>\n\n💸 Вы потеряли ставку: <b>{game['bet']} Ня-коинов 🪙</b>!\n\n{text_board}"
+            loss_text = f"💥 <b>БАБАХ! ВЫ НАСТУПИЛИ НА МИНУ!</b> 🙀\n\n💸 Вы потеряли ставку: <b>{game['bet']} Ня-коинов 🪙</b>!\n\n{text_board}"
             bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             del active_mines[game_id]
             return
@@ -5910,7 +5928,7 @@ def callback_inline(call):
                 check_achievements(user_id, user_name, 'mines_wins', 1, chat_id, username=user_username)
                 mark_dirty()
                 text_board, markup = render_mines_board(game_id)
-                win_text = f"🏆 <b>НЕВЕРОЯТНО! ВСЕ 13 КРИСТАЛЛОВ НАЙДЕНЫ!</b>\n\n💰 Выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
+                win_text = f"🏆 <b>НЕВЕРОЯТНО! ВСЕ 13 КРИСТАЛЛОВ НАЙДЕНЫ!</b> 😻\n\n💰 Выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
                 bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 del active_mines[game_id]
                 return
@@ -5922,10 +5940,10 @@ def callback_inline(call):
         game_id = action_data.replace('mines_cashout_', '')
         game = active_mines.get(game_id)
         if not game or game.get('finished'):
-            bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Игра окончена! 😿", show_alert=True)
             return
         if user_id != game['user_id']:
-            bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Это не ваша игра! 😾", show_alert=True)
             return
 
         game['finished'] = True
@@ -5937,7 +5955,7 @@ def callback_inline(call):
         mark_dirty()
 
         text_board, markup = render_mines_board(game_id)
-        cash_text = f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b>\n\n🎉 Начислено: <b>+{win_amt} Ня-коинов 🪙</b> (Коэффициент: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
+        cash_text = f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b> 😻\n\n🎉 Начислено: <b>+{win_amt} Ня-коинов 🪙</b> (Коэффициент: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
         bot.edit_message_text(cash_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
         del active_mines[game_id]
 
@@ -5946,40 +5964,40 @@ def callback_inline(call):
         econ = get_user_econ(user_id, user_name, username=user_username)
         pet = econ.get('pet')
         if not pet:
-            bot.answer_callback_query(call.id, "❌ У вас нет питомца!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет питомца! 😿", show_alert=True)
             return
         if pet.get('hunger', 100) >= 100:
-            bot.answer_callback_query(call.id, "🍖 Питомец сыт!", show_alert=True)
+            bot.answer_callback_query(call.id, "🍖 Питомец сыт! 😸", show_alert=True)
             return
         if econ['balance'] < 30:
-            bot.answer_callback_query(call.id, "❌ Нужно 30 🪙 для корма!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Нужно 30 🪙 для корма! 😿", show_alert=True)
             return
         econ['balance'] -= 30
         pet['hunger'] = min(100, pet.get('hunger', 0) + 35)
         pet['pet_exp'] = pet.get('pet_exp', 0) + 10
         check_achievements(user_id, user_name, 'pet_care', 1, chat_id, username=user_username)
         mark_dirty()
-        bot.answer_callback_query(call.id, "🍖 Питомец вкусно покушал (+10 EXP)!")
+        bot.answer_callback_query(call.id, "🍖 Питомец вкусно покушал (+10 EXP)! 😻")
         render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'pet_wash':
         econ = get_user_econ(user_id, user_name, username=user_username)
         pet = econ.get('pet')
         if not pet:
-            bot.answer_callback_query(call.id, "❌ У вас нет питомца!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет питомца! 😿", show_alert=True)
             return
         if pet.get('cleanliness', 100) >= 100:
-            bot.answer_callback_query(call.id, "🧼 Питомец уже чистый!", show_alert=True)
+            bot.answer_callback_query(call.id, "🧼 Питомец уже чистый! 😸", show_alert=True)
             return
         if econ['balance'] < 20:
-            bot.answer_callback_query(call.id, "❌ Нужно 20 🪙 на шампунь!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Нужно 20 🪙 на шампунь! 😿", show_alert=True)
             return
         econ['balance'] -= 20
         pet['cleanliness'] = min(100, pet.get('cleanliness', 0) + 40)
         pet['pet_exp'] = pet.get('pet_exp', 0) + 10
         check_achievements(user_id, user_name, 'pet_care', 1, chat_id, username=user_username)
         mark_dirty()
-        bot.answer_callback_query(call.id, "🧼 Питомец искупан до блеска (+10 EXP)!")
+        bot.answer_callback_query(call.id, "🧼 Питомец искупан до блеска (+10 EXP)! 😻")
         render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'pet_walk_btn':
@@ -5995,16 +6013,16 @@ def callback_inline(call):
             biz_levels = econ.setdefault('biz_levels', {})
             cur_lvl = biz_levels.get(b_id, 1)
             if cur_lvl >= 5:
-                bot.answer_callback_query(call.id, "❌ Достигнут максимальный 5-й уровень!", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Достигнут максимальный 5-й уровень! 😸", show_alert=True)
                 return
             cost = b_info['upgrade_cost'] * cur_lvl
             if econ['balance'] < cost:
-                bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= cost
             biz_levels[b_id] = cur_lvl + 1
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 {b_info['short']} улучшен(а) до {cur_lvl+1} уровня!")
+            bot.answer_callback_query(call.id, f"🎉 {b_info['short']} улучшен(а) до {cur_lvl+1} уровня! 😻")
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
     elif action_data.startswith('buy_biz_'):
@@ -6015,17 +6033,17 @@ def callback_inline(call):
             user_biz = econ.setdefault('businesses', {})
             biz_levels = econ.setdefault('biz_levels', {})
             if b_id in user_biz:
-                bot.answer_callback_query(call.id, "❌ Этот бизнес уже приобретен!", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Этот бизнес уже приобретен! 😾", show_alert=True)
                 return
             if econ['balance'] < b_info['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= b_info['price']
             user_biz[b_id] = time.time()
             biz_levels[b_id] = 1
             check_achievements(user_id, user_name, 'biz_bought', 1, chat_id, username=user_username)
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}!")
+            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}! 😻")
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
     elif action_data == 'collect_biz_profit':
@@ -6036,7 +6054,7 @@ def callback_inline(call):
         hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
         base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
         if base_profit <= 0:
-            bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась!", show_alert=True)
+            bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась! 😿", show_alert=True)
             return
 
         in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(chat_id), {}), user_id=user_id, user_name=user_name)
@@ -6046,7 +6064,7 @@ def callback_inline(call):
         econ['balance'] += total_profit
         econ['last_biz_collect'] = now
         mark_dirty()
-        bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit} 🪙!", show_alert=True)
+        bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit} 🪙! 😻", show_alert=True)
         render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
     elif action_data.startswith('buy_veh_'):
@@ -6059,19 +6077,19 @@ def callback_inline(call):
             new_tier = v_info.get('tier', 1)
 
             if cur_veh == v_id:
-                bot.answer_callback_query(call.id, "❌ Этот транспорт уже в вашем гараже!", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Этот транспорт уже в вашем гараже! 😸", show_alert=True)
                 return
             if cur_tier > new_tier:
-                bot.answer_callback_query(call.id, f"❌ У вас уже есть более мощный транспорт ({VEHICLES[cur_veh]['name']})! Даунгрейд заблокирован.", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ У вас уже есть более мощный транспорт ({VEHICLES[cur_veh]['name']})! Даунгрейд заблокирован. 😾", show_alert=True)
                 return
             if econ['balance'] < v_info['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {v_info['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {v_info['price']} 🪙! 😿", show_alert=True)
                 return
 
             econ['balance'] -= v_info['price']
             econ['vehicle'] = v_id
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}! 😻", show_alert=True)
             render_garage_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data.startswith('buy_rod_'):
@@ -6080,12 +6098,12 @@ def callback_inline(call):
             r_info = RODS[r_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ['balance'] < r_info['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= r_info['price']
             econ['equipped_rod'] = r_id
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы экипировали {r_info['name']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы экипировали {r_info['name']}! 😻", show_alert=True)
 
     elif action_data.startswith('buy_bow_'):
         b_id = action_data.replace('buy_bow_', '')
@@ -6093,12 +6111,12 @@ def callback_inline(call):
             b_info = BOWS[b_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ['balance'] < b_info['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= b_info['price']
             econ['equipped_bow'] = b_id
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы экипировали {b_info['name']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы экипировали {b_info['name']}! 😻", show_alert=True)
 
     # БАНК КНОПКИ
     elif action_data == 'bank_refresh':
@@ -6107,49 +6125,49 @@ def callback_inline(call):
     elif action_data == 'bank_dep_100':
         econ = get_user_econ(user_id, user_name, username=user_username)
         if econ['balance'] < 100:
-            bot.answer_callback_query(call.id, "❌ Недостаточно средств на руках!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Недостаточно средств на руках! 😿", show_alert=True)
             return
         econ['balance'] -= 100
         econ['bank_deposit'] = econ.get('bank_deposit', 0) + 100
         check_achievements(user_id, user_name, 'bank_deposit', 100, chat_id, username=user_username)
         mark_dirty()
-        bot.answer_callback_query(call.id, "✅ Внесено 100 🪙 на депозит!")
+        bot.answer_callback_query(call.id, "✅ Внесено 100 🪙 на депозит! 😸")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'bank_dep_all':
         econ = get_user_econ(user_id, user_name, username=user_username)
         b = econ.get('balance', 0)
         if b <= 0:
-            bot.answer_callback_query(call.id, "❌ У вас нет наличных коинов!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет наличных коинов! 😿", show_alert=True)
             return
         econ['balance'] = 0
         econ['bank_deposit'] = econ.get('bank_deposit', 0) + b
         check_achievements(user_id, user_name, 'bank_deposit', b, chat_id, username=user_username)
         mark_dirty()
-        bot.answer_callback_query(call.id, f"✅ Внесено {b} 🪙 на депозит!")
+        bot.answer_callback_query(call.id, f"✅ Внесено {b} 🪙 на депозит! 😻")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'bank_wd_100':
         econ = get_user_econ(user_id, user_name, username=user_username)
         if econ.get('bank_deposit', 0) < 100:
-            bot.answer_callback_query(call.id, "❌ В банке меньше 100 🪙!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ В банке меньше 100 🪙! 😿", show_alert=True)
             return
         econ['bank_deposit'] -= 100
         econ['balance'] += 100
         mark_dirty()
-        bot.answer_callback_query(call.id, "✅ Снято 100 🪙 с депозита!")
+        bot.answer_callback_query(call.id, "✅ Снято 100 🪙 с депозита! 😸")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
     elif action_data == 'bank_wd_all':
         econ = get_user_econ(user_id, user_name, username=user_username)
         dep = econ.get('bank_deposit', 0)
         if dep <= 0:
-            bot.answer_callback_query(call.id, "❌ В банке нет средств!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ В банке нет средств! 😿", show_alert=True)
             return
         econ['bank_deposit'] = 0
         econ['balance'] += dep
         mark_dirty()
-        bot.answer_callback_query(call.id, f"✅ Снят весь вклад: {dep} 🪙!")
+        bot.answer_callback_query(call.id, f"✅ Снят весь вклад: {dep} 🪙! 😻")
         render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
     # ЛОТЕРЕЯ
@@ -6159,7 +6177,7 @@ def callback_inline(call):
         econ = get_user_econ(user_id, user_name, username=user_username)
 
         if econ['balance'] < cost:
-            bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙!", show_alert=True)
+            bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
             return
 
         econ['balance'] -= cost
@@ -6168,7 +6186,7 @@ def callback_inline(call):
         t_dict[str(user_id)] = t_dict.get(str(user_id), 0) + count
         lottery['pot'] = lottery.get('pot', 0) + cost
 
-        bot.answer_callback_query(call.id, f"🎟 Куплено {count} бил.!")
+        bot.answer_callback_query(call.id, f"🎟 Куплено {count} бил.! 😸")
         total_tickets = sum(t_dict.values())
 
         if total_tickets >= 10:
@@ -6185,7 +6203,7 @@ def callback_inline(call):
 
             w_link = make_link(chat_id, w_econ.get('display_name', 'Игрок'), winner_id, ping=True)
             log_event('ЛОТЕРЕЯ: ДЖЕКПОТ', f'Победитель {w_link} сорвал джекпот <b>{win_pot} 🪙</b>!')
-            bot.send_message(chat_id, f"🎉 <b>РОЗЫГРЫШ ЛОТЕРЕИ СОСТОЯЛСЯ!</b>\n\n🏆 Джекпот <b>+{win_pot} Ня-коинов 🪙</b> забирает {w_link}!\nСледующий тираж уже открыт!", parse_mode='HTML')
+            bot.send_message(chat_id, f"🎉 <b>РОЗЫГРЫШ ЛОТЕРЕИ СОСТОЯЛСЯ!</b> 😻\n\n🏆 Джекпот <b>+{win_pot} Ня-коинов 🪙</b> забирает {w_link}!\nСледующий тираж уже открыт! 😸", parse_mode='HTML')
         else:
             mark_dirty()
             render_lottery_view(chat_id, user_id, user_name, call.message.message_id)
@@ -6195,7 +6213,7 @@ def callback_inline(call):
         drop_id = raw_data.replace('claim_', '').split(':')[0]
         drop = active_drops.get(drop_id)
         if not drop or drop.get('claimed'):
-            bot.answer_callback_query(call.id, "❌ Этот подарок уже кто-то забрал!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Этот подарок уже кто-то забрал! 😿", show_alert=True)
             return
 
         drop['claimed'] = True
@@ -6203,10 +6221,10 @@ def callback_inline(call):
         add_coins(user_id, user_name, reward, username=user_username)
         add_account_exp(user_id, user_name, 15, username=user_username)
 
-        bot.answer_callback_query(call.id, f"🎉 Вы забрали +{reward} 🪙!")
+        bot.answer_callback_query(call.id, f"🎉 Вы забрали +{reward} 🪙! 😻")
         u_link = make_link(chat_id, user_name, user_id, ping=True)
         bot.edit_message_text(
-            f"🎁 <b>ПОДАРОК ЗАБРАН!</b>\n\nБыстрее всех оказался(лась) {u_link} и забрал(а) <b>+{reward} Ня-коинов 🪙</b>!",
+            f"🎁 <b>ПОДАРОК ЗАБРАН!</b> 😺\n\nБыстрее всех оказался(лась) {u_link} и забрал(а) <b>+{reward} Ня-коинов 🪙</b>! 😸",
             chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
         )
 
@@ -6217,8 +6235,8 @@ def callback_inline(call):
         if success:
             econ = get_user_econ(user_id, user_name, username=user_username)
             lines = [
-                "💼 <b>БИРЖА ТРУДА И ВАКАНСИЙ</b>", "──────────────────────",
-                f"👤 Ваш опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n", "<b>Доступные вакансии:</b>"
+                "💼 <b>БИРЖА ТРУДА И ВАКАНСИЙ</b> 😺", "──────────────────────",
+                f"👤 Ваш опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n", "<b>Доступные вакансии:</b> 😸"
             ]
             for j_id, j in JOBS.items(): lines.append(f"• <b>{j['name']}</b>: от <code>{j['req_exp']} EXP</code> (З/П: {j['min_pay']}-{j['max_pay']} 🪙)")
             lines.append("──────────────────────")
@@ -6237,13 +6255,13 @@ def callback_inline(call):
             job = JOBS[job_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ.get('work_exp', 0) < job['req_exp']:
-                bot.answer_callback_query(call.id, f"❌ Нужно минимум {job['req_exp']} EXP опыта!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно минимум {job['req_exp']} EXP опыта! 😿", show_alert=True)
                 return
             now = time.time()
             cooldown = 1800
             left = cooldown_text(econ.get('last_work_time', 0), cooldown, econ)
             if left:
-                bot.answer_callback_query(call.id, f"⏳ Отдохните еще: {left}", show_alert=True)
+                bot.answer_callback_query(call.id, f"⏳ Отдохните еще: {left} 😿", show_alert=True)
                 return
             econ['last_work_time'] = now
             if random.randint(1, 100) <= job['chance']:
@@ -6253,23 +6271,23 @@ def callback_inline(call):
                 add_account_exp(user_id, user_name, job['exp_gain'], username=user_username)
                 check_achievements(user_id, user_name, 'work_shifts', 1, chat_id, username=user_username)
                 mark_dirty()
-                bot.answer_callback_query(call.id, f"✅ Зарплата: +{pay} 🪙 (+{job['exp_gain']} EXP)!", show_alert=True)
-                bot.send_message(chat_id, f"💼 {make_link(chat_id, user_name, user_id, ping=True)} заработал(а) <b>+{pay} 🪙</b> на должности <b>{job['name']}</b>!", parse_mode='HTML')
+                bot.answer_callback_query(call.id, f"✅ Зарплата: +{pay} 🪙 (+{job['exp_gain']} EXP)! 😻", show_alert=True)
+                bot.send_message(chat_id, f"💼 {make_link(chat_id, user_name, user_id, ping=True)} заработал(а) <b>+{pay} 🪙</b> на должности <b>{job['name']}</b>! 😸", parse_mode='HTML')
             else:
                 econ['work_exp'] = econ.get('work_exp', 0) + 2
                 add_account_exp(user_id, user_name, 2, username=user_username)
                 mark_dirty()
-                bot.answer_callback_query(call.id, "❌ Вы ошиблись на смене! Получено +2 EXP.", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Вы ошиблись на смене! Получено +2 EXP. 😿", show_alert=True)
 
     # БРАКИ
     elif raw_data.startswith('m_yes_') or raw_data.startswith('m_no_'):
         prop_id = raw_data[6:].split(':')[0]
         prop = pending_marriages.get(prop_id)
         if not prop:
-            bot.answer_callback_query(call.id, "❌ Предложение устарело!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Предложение устарело! 😿", show_alert=True)
             return
         if user_id != prop['to_id'] and prop['to_id'] is not None:
-            bot.answer_callback_query(call.id, "❌ Это предложение адресовано не вам!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Это предложение адресовано не вам! 😾", show_alert=True)
             return
 
         from_econ = get_user_econ(prop['from_id'], prop['from_tag'])
@@ -6284,12 +6302,12 @@ def callback_inline(call):
             mark_dirty()
             ring_emoji = RINGS.get(prop['ring'], {}).get('emoji', '💍')
             bot.edit_message_text(
-                f"💒 <b>Горько! Свадьба состоялась!</b> 🎉\n\n{ring_emoji} {make_link(chat_id, prop['from_tag'], prop['from_id'], ping=True)} и {make_link(chat_id, user_name, user_id, ping=True)} теперь законные супруги! ❤️",
+                f"💒 <b>Горько! Свадьба состоялась!</b> 🎉 😻\n\n{ring_emoji} {make_link(chat_id, prop['from_tag'], prop['from_id'], ping=True)} и {make_link(chat_id, user_name, user_id, ping=True)} теперь законные супруги! ❤️",
                 chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
             )
         else:
             bot.edit_message_text(
-                f"💔 {make_link(chat_id, user_name, user_id, ping=False)} отклонил(а) предложение руки и сердца.",
+                f"💔 {make_link(chat_id, user_name, user_id, ping=False)} отклонил(а) предложение руки и сердца. 😿",
                 chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
             )
         del pending_marriages[prop_id]
@@ -6299,10 +6317,10 @@ def callback_inline(call):
         game_id = action_data.split('_', 2)[2]
         game = active_bj_games.get(game_id)
         if not game or game.get('finished'):
-            bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Игра окончена! 😿", show_alert=True)
             return
         if user_id != game['user_id']:
-            bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Это не ваша игра! 😾", show_alert=True)
             return
 
         if action_data.startswith('bj_hit_'):
@@ -6310,12 +6328,12 @@ def callback_inline(call):
             p_score = calculate_bj_score(game['p_cards'])
             if p_score > 21:
                 game['finished'] = True
-                bot.edit_message_text(f"💥 <b>Перебор ({p_score})!</b> Вы проиграли <b>{game['bet']} 🪙</b>.\nВаши карты: {game['p_cards']}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
+                bot.edit_message_text(f"💥 <b>Перебор ({p_score})!</b> Вы проиграли <b>{game['bet']} 🪙</b>. 😿\nВаши карты: {game['p_cards']}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
                 del active_bj_games[game_id]
                 return
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}:{user_id}"), InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}:{user_id}"))
-            bot.edit_message_text(f"🃏 Ваши карты: {game['p_cards']} (Сумма: <b>{p_score}</b>)\nДилер: [{game['d_cards'][0]}, ❓]", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text(f"🃏 Ваши карты: {game['p_cards']} (Сумма: <b>{p_score}</b>)\nДилер: [{game['d_cards'][0]}, ❓] 😺", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
         else:
             game['finished'] = True
             p_score = calculate_bj_score(game['p_cards'])
@@ -6326,12 +6344,12 @@ def callback_inline(call):
                 win = process_casino_win(game['bet'] * 2)
                 add_coins(user_id, user_name, win, username=user_username)
                 add_account_exp(user_id, user_name, 10, username=user_username)
-                res = f"🎉 <b>Вы выиграли +{win} 🪙!</b>"
+                res = f"🎉 <b>Вы выиграли +{win} 🪙!</b> 😻"
             elif p_score == d_score:
                 add_coins(user_id, user_name, game['bet'], username=user_username)
-                res = f"🤝 <b>Ничья!</b> Ставка {game['bet']} 🪙 возвращена."
+                res = f"🤝 <b>Ничья!</b> Ставка {game['bet']} 🪙 возвращена. 😸"
             else:
-                res = f"💸 <b>Дилер выиграл!</b> Проигрыш {game['bet']} 🪙."
+                res = f"💸 <b>Дилер выиграл!</b> Проигрыш {game['bet']} 🪙. 😿"
 
             bot.edit_message_text(f"{res}\n\n👤 Ваши карты: {game['p_cards']} ({p_score})\n🤖 Карты дилера: {game['d_cards']} ({d_score})", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
             del active_bj_games[game_id]
@@ -6340,13 +6358,13 @@ def callback_inline(call):
     elif action_data.startswith('rps_'):
         m_rps = re.match(r"^rps_([rsp])_(rps_\d+_\d+_\d+)$", action_data)
         if not m_rps:
-            bot.answer_callback_query(call.id, "❌ Ошибка данных дуэли!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка данных дуэли! 🙀", show_alert=True)
             return
         choice = m_rps.group(1)
         game_id = m_rps.group(2)
         game = active_rps_games.get(game_id)
         if not game:
-            bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Игра устарела! 😿", show_alert=True)
             return
 
         if user_id == game['p1_id']: game['p1_choice'] = choice
@@ -6355,69 +6373,69 @@ def callback_inline(call):
             game['p2_tag'] = user_name
             game['p2_choice'] = choice
         else:
-            bot.answer_callback_query(call.id, "❌ Вы не участвуете в этой дуэли!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Вы не участвуете в этой дуэли! 😾", show_alert=True)
             return
 
-        bot.answer_callback_query(call.id, "✅ Ваш выбор принят!")
+        bot.answer_callback_query(call.id, "✅ Ваш выбор принят! 😸")
 
         if game['p1_choice'] and game['p2_choice']:
             c_map = {'r': '🪨 Камень', 's': '✂️ Ножницы', 'p': '📄 Бумага'}
             c1, c2 = game['p1_choice'], game['p2_choice']
             bet = game['bet']
-            if c1 == c2: res = "🤝 <b>Ничья!</b> Коины возвращены игрокам."
+            if c1 == c2: res = "🤝 <b>Ничья!</b> Коины возвращены игрокам. 😸"
             elif (c1 == 'r' and c2 == 's') or (c1 == 's' and c2 == 'p') or (c1 == 'p' and c2 == 'r'):
                 add_coins(game['p1_id'], game['p1_tag'], bet * 2)
-                res = f"🏆 Победил(а) {make_link(chat_id, game['p1_tag'], game['p1_id'], ping=True)}! (+{bet*2} 🪙)"
+                res = f"🏆 Победил(а) {make_link(chat_id, game['p1_tag'], game['p1_id'], ping=True)}! (+{bet*2} 🪙) 😻"
             else:
                 add_coins(game['p2_id'], game['p2_tag'], bet * 2)
-                res = f"🏆 Победил(а) {make_link(chat_id, game['p2_tag'], game['p2_id'], ping=True)}! (+{bet*2} 🪙)"
+                res = f"🏆 Победил(а) {make_link(chat_id, game['p2_tag'], game['p2_id'], ping=True)}! (+{bet*2} 🪙) 😻"
 
-            bot.edit_message_text(f"✌️ <b>ИТОГИ ДУЭЛИ ЦУ-Е-ФА:</b>\n──────────────────────\n• {game['p1_tag']}: {c_map[c1]}\n• {game['p2_tag']}: {c_map[c2]}\n\n{res}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
+            bot.edit_message_text(f"✌️ <b>ИТОГИ ДУЭЛИ ЦУ-Е-ФА:</b> 😺\n──────────────────────\n• {game['p1_tag']}: {c_map[c1]}\n• {game['p2_tag']}: {c_map[c2]}\n\n{res}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
             del active_rps_games[game_id]
 
     # НАСТРОЙКИ (КНОПКИ)
     elif action_data == 'set_max_days':
         if not is_admin(chat_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Только для админов! 😾", show_alert=True)
             return
         sett = get_chat_settings(chat_id)
         opts = [14, 30, 60]
         next_opt = opts[(opts.index(sett['max_days']) + 1) % len(opts)]
         sett['max_days'] = next_opt
         mark_dirty()
-        bot.answer_callback_query(call.id, f'✅ Лимит изменен на {next_opt} дней!')
+        bot.answer_callback_query(call.id, f'✅ Лимит изменен на {next_opt} дней! 😸')
         render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
     elif action_data == 'toggle_del_msg':
         if not is_admin(chat_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Только для админов! 😾", show_alert=True)
             return
         sett = get_chat_settings(chat_id)
         sett['delete_rest_msg'] = not sett['delete_rest_msg']
         mark_dirty()
-        bot.answer_callback_query(call.id, f"✅ Авто-удаление: {'Включено' if sett['delete_rest_msg'] else 'Выключено'}")
+        bot.answer_callback_query(call.id, f"✅ Авто-удаление: {'Включено' if sett['delete_rest_msg'] else 'Выключено'} 😸")
         render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
     elif action_data == 'toggle_summer_music':
         if not is_admin(chat_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Только для админов! 😾", show_alert=True)
             return
         sett = get_chat_settings(chat_id)
         sett['summer_music'] = not sett.get('summer_music', True)
         mark_dirty()
-        bot.answer_callback_query(call.id, f"✅ Музыка лета: {'Включена' if sett['summer_music'] else 'Выключена'}")
+        bot.answer_callback_query(call.id, f"✅ Музыка лета: {'Включена' if sett['summer_music'] else 'Выключена'} 😸")
         render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
     elif action_data == 'set_remind_time':
         if not is_admin(chat_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Только для админов!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Только для админов! 😾", show_alert=True)
             return
         sett = get_chat_settings(chat_id)
         opts = [10, 60, 1440]
         next_opt = opts[(opts.index(sett.get('remind_minutes', 60)) + 1) % len(opts)]
         sett['remind_minutes'] = next_opt
         mark_dirty()
-        bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин!')
+        bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин! 😸')
         render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
     # МАГАЗИН ПАГИНАЦИЯ (ЗНАЧКИ)
@@ -6431,7 +6449,7 @@ def callback_inline(call):
         end_idx = start_idx + items_per_page
         current_items = items[start_idx:end_idx]
 
-        lines = ["✨ <b>КАТАЛОГ ЗНАЧКОВ ДЛЯ ПРОФИЛЯ</b>", "──────────────────────", "<i>Значок отображается рядом с вашим ником в чате!</i>\n"]
+        lines = ["✨ <b>КАТАЛОГ ЗНАЧКОВ ДЛЯ ПРОФИЛЯ</b> 😺", "──────────────────────", "<i>Значок отображается рядом с вашим ником в чате!</i> 😸\n"]
         for b_k, b_v in current_items:
             lines.append(f"• {b_v['emoji']} <b>{b_v['name']}</b> — <code>{b_v['price']} 🪙</code>")
         lines.append(f"\nСтраница {page+1} из {total_pages}")
@@ -6460,7 +6478,7 @@ def callback_inline(call):
         end_idx = start_idx + items_per_page
         current_items = items[start_idx:end_idx]
 
-        lines = ["👑 <b>КАТАЛОГ ТИТУЛОВ С ПАССИВНЫМИ БАФФАМИ</b>", "──────────────────────", "<i>Каждый титул дает постоянный бонус к удаче или доходу!</i>\n"]
+        lines = ["👑 <b>КАТАЛОГ ТИТУЛОВ С ПАССИВНЫМИ БАФФАМИ</b> 😺", "──────────────────────", "<i>Каждый титул дает постоянный бонус к удаче или доходу!</i> 😸\n"]
         for t_k, t_v in current_items:
             lines.append(f"• <b>{t_v['text']}</b> — <code>{t_v['price']} 🪙</code> ({t_v['desc']})")
         lines.append(f"\nСтраница {page+1} из {total_pages}")
@@ -6492,7 +6510,7 @@ def callback_inline(call):
         end_idx = start_idx + items_per_page
         current_items = items[start_idx:end_idx]
 
-        lines = ["🐾 <b>ЗОМАГАЗИН: ПИТОМЦЫ 2.0</b>", "──────────────────────", "<i>Питомцы помогают в охоте, рыбалке, и дают бонусы!</i>\n"]
+        lines = ["🐾 <b>ЗОМАГАЗИН: ПИТОМЦЫ 2.0</b> 😺", "──────────────────────", "<i>Питомцы помогают в охоте, рыбалке, и дают бонусы!</i> 😸\n"]
         for p_k, p_v in current_items:
             lines.append(f"• <b>{p_v['name']}</b> — <code>{p_v['price']} 🪙</code>\n  <i>{p_v['desc']}</i>")
         lines.append(f"\nСтраница {page+1} из {total_pages}")
@@ -6517,12 +6535,12 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, '❌ Сертификат уже куплен! Введите /custom_title', show_alert=True)
             return
         if econ['balance'] < CUSTOM_TITLE_CERT_PRICE:
-            bot.answer_callback_query(call.id, f'❌ Нужно {CUSTOM_TITLE_CERT_PRICE} 🪙!', show_alert=True)
+            bot.answer_callback_query(call.id, f'❌ Нужно {CUSTOM_TITLE_CERT_PRICE} 🪙! 😿', show_alert=True)
             return
         econ['balance'] -= CUSTOM_TITLE_CERT_PRICE
         econ['has_custom_title_cert'] = True
         mark_dirty()
-        bot.answer_callback_query(call.id, '🎉 Сертификат приобретен! Установите титул: /custom_title Ваш Титул', show_alert=True)
+        bot.answer_callback_query(call.id, '🎉 Сертификат приобретен! Установите титул: /custom_title Ваш Титул 😻', show_alert=True)
 
     elif action_data.startswith('buy_ring_'):
         r_id = action_data.replace('buy_ring_', '')
@@ -6530,12 +6548,12 @@ def callback_inline(call):
             r_info = RINGS[r_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ['balance'] < r_info['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= r_info['price']
             econ.setdefault('rings', []).append(r_id)
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {r_info['name']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы приобрели {r_info['name']}! 😻", show_alert=True)
 
     elif action_data.startswith('buy_title_'):
         title_key = action_data.replace('buy_title_', '')
@@ -6543,17 +6561,17 @@ def callback_inline(call):
             item = TITLES[title_key]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if title_key in econ.get('titles', []):
-                bot.answer_callback_query(call.id, '❌ Титул уже куплен!', show_alert=True)
+                bot.answer_callback_query(call.id, '❌ Титул уже куплен! 😾', show_alert=True)
                 return
             if econ['balance'] < item['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= item['price']
             econ.setdefault('titles', []).append(title_key)
             econ['active_title'] = title_key
             econ['custom_title'] = None
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Куплен титул {item['text']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Куплен титул {item['text']}! 😻", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     elif action_data.startswith('buy_badge_'):
@@ -6562,16 +6580,16 @@ def callback_inline(call):
             item = BADGES[badge_key]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if item['emoji'] in econ.get('inventory', []):
-                bot.answer_callback_query(call.id, f"Значок {item['emoji']} уже есть!", show_alert=True)
+                bot.answer_callback_query(call.id, f"Значок {item['emoji']} уже есть! 😾", show_alert=True)
                 return
             if econ['balance'] < item['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= item['price']
             econ.setdefault('inventory', []).append(item['emoji'])
             econ['badge'] = item['emoji']
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Куплен значок {item['emoji']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Куплен значок {item['emoji']}! 😻", show_alert=True)
 
     elif action_data.startswith('buy_pet_'):
         pet_id = action_data.replace('buy_pet_', '')
@@ -6579,12 +6597,12 @@ def callback_inline(call):
             p_data = PETS_DATA[pet_id]
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ['balance'] < p_data['price']:
-                bot.answer_callback_query(call.id, f"❌ Нужно {p_data['price']} 🪙!", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ Нужно {p_data['price']} 🪙! 😿", show_alert=True)
                 return
             econ['balance'] -= p_data['price']
             econ['pet'] = {'id': pet_id, 'name': p_data['name'], 'luck_bonus': p_data['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
             mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Вы завели питомца {p_data['name']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 Вы завели питомца {p_data['name']}! 😻", show_alert=True)
             render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
     # УПРАВЛЕНИЕ ПРОФИЛЕМ (ТИТУЛЫ И ЗНАЧКИ)
@@ -6595,7 +6613,7 @@ def callback_inline(call):
             econ['active_title'] = title_key
             econ['custom_title'] = None
             mark_dirty()
-            bot.answer_callback_query(call.id, f"✅ Надет титул {TITLES[title_key]['text']}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"✅ Надет титул {TITLES[title_key]['text']}! 😸", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     elif action_data == 'remove_title':
@@ -6603,7 +6621,7 @@ def callback_inline(call):
         econ['active_title'] = None
         econ['custom_title'] = None
         mark_dirty()
-        bot.answer_callback_query(call.id, '❌ Титул снят!', show_alert=True)
+        bot.answer_callback_query(call.id, '❌ Титул снят! 😿', show_alert=True)
         send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     elif action_data.startswith('set_badge_'):
@@ -6612,14 +6630,14 @@ def callback_inline(call):
         if selected_emoji in econ.get('inventory', []):
             econ['badge'] = selected_emoji
             mark_dirty()
-            bot.answer_callback_query(call.id, f"✅ Надет значок {selected_emoji}!", show_alert=True)
+            bot.answer_callback_query(call.id, f"✅ Надет значок {selected_emoji}! 😸", show_alert=True)
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
     elif action_data == 'remove_badge':
         econ = get_user_econ(user_id, user_name, username=user_username)
         econ['badge'] = None
         mark_dirty()
-        bot.answer_callback_query(call.id, "❌ Значок снят!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Значок снят! 😿", show_alert=True)
         send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
 # ---------------------------------------------------------
@@ -6629,5 +6647,5 @@ setup_bot_commands()
 start_background_threads()
 keep_alive()
 
-print('Бот успешно запущен со всеми обновлениями (Карма, Стример, Сад, Краш, Защита, Режим Бога, Банк, Кирпич)!')
+print('Бот успешно запущен со всеми обновлениями (Смайлики, Безлимитное казино, Исправления магазина)! 😸')
 bot.infinity_polling()
