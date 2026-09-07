@@ -2642,34 +2642,52 @@ def cmd_wheel(message):
     bot.reply_to(message, anim_text, parse_mode='HTML')
 
 # ---------------------------------------------------------
-# САПЁР / МИНЫ (/mines)
+# САПЁР / МИНЫ (/mines) С ВЫБОРОМ ПОЛЯ И МИН
 # ---------------------------------------------------------
+def calculate_mines_multiplier(total_cells, mines_count, safe_opened, rtp=0.95):
+    """Честная формула казино с 95% отдачей (RTP 0.95), исключающая инфляцию."""
+    prob = 1.0
+    for i in range(safe_opened):
+        prob *= (total_cells - mines_count - i) / (total_cells - i)
+    if prob <= 0:
+        return 1.05
+    mult = (1.0 / prob) * rtp
+    return round(max(1.05, mult), 2)
+
 def render_mines_board(game_id):
     game = active_mines.get(game_id)
     if not game: return None, None
     u_id = game['user_id']
-    markup = InlineKeyboardMarkup(row_width=4)
+    size = game.get('size', 4)
+    total_cells = size * size
+
+    markup = InlineKeyboardMarkup(row_width=size)
     buttons = []
 
-    for i in range(16):
-        if i in game['revealed']: buttons.append(InlineKeyboardButton("💎", callback_data="noop"))
-        elif game['finished'] and i in game['bombs']: buttons.append(InlineKeyboardButton("💣", callback_data="noop"))
-        elif game['finished']: buttons.append(InlineKeyboardButton("▫️", callback_data="noop"))
-        else: buttons.append(InlineKeyboardButton("❓", callback_data=f"mines_open_{game_id}_{i}:{u_id}"))
+    for i in range(total_cells):
+        if i in game['revealed']:
+            buttons.append(InlineKeyboardButton("💎", callback_data="noop"))
+        elif game['finished'] and i in game['bombs']:
+            buttons.append(InlineKeyboardButton("💣", callback_data="noop"))
+        elif game['finished']:
+            buttons.append(InlineKeyboardButton("▫️", callback_data="noop"))
+        else:
+            buttons.append(InlineKeyboardButton("❓", callback_data=f"mop_{game_id}_{i}:{u_id}"))
 
-    for row_idx in range(0, 16, 4):
-        markup.add(*buttons[row_idx:row_idx+4])
+    for row_idx in range(0, total_cells, size):
+        markup.add(*buttons[row_idx:row_idx+size])
 
     if not game['finished'] and len(game['revealed']) > 0:
         cashout_amount = int(game['bet'] * game['current_multiplier'])
-        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x) 😻", callback_data=f"mines_cashout_{game_id}:{u_id}"))
+        markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amount} 🪙 | {game['current_multiplier']:.2f}x) 😻", callback_data=f"mco_{game_id}:{u_id}"))
 
+    max_safe = total_cells - len(game['bombs'])
     text = (
-        f"💣 <b>САПЁР (ПОЛЕ 4х4)</b> 😺\n"
+        f"💣 <b>САПЁР (ПОЛЕ {size}х{size})</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Игрок: {game['user_tag']}\n"
         f"💰 Ставка: <b>{game['bet']} 🪙</b> | Мин на поле: <b>{len(game['bombs'])} шт.</b>\n"
-        f"💎 Найдено кристаллов: <b>{len(game['revealed'])}/13</b>\n"
+        f"💎 Найдено кристаллов: <b>{len(game['revealed'])}/{max_safe}</b>\n"
         f"📈 Множитель: <b>{game['current_multiplier']:.2f}x</b>\n"
         f"──────────────────────\n"
         f"<i>Открывайте безопасные клетки или заберите куш!</i> 😸"
@@ -2701,23 +2719,36 @@ def cmd_mines(message):
     process_casino_bet(bet)
 
     game_id = f"m_{user_id}_{int(time.time())}"
-    bombs = set(random.sample(range(16), 3))
-
     active_mines[game_id] = {
         'user_id': user_id,
         'user_tag': user_name,
         'username': message.from_user.username,
         'bet': bet,
-        'bombs': bombs,
+        'size': 4,
+        'bombs': set(),
         'revealed': set(),
         'current_multiplier': 1.0,
         'finished': False,
         'start_time': time.time()
     }
 
-    text, markup = render_mines_board(game_id)
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("3x3 (9 кл.)", callback_data=f"msz_{game_id}_3:{user_id}"),
+        InlineKeyboardButton("4x4 (16 кл.)", callback_data=f"msz_{game_id}_4:{user_id}"),
+        InlineKeyboardButton("5x5 (25 кл.)", callback_data=f"msz_{game_id}_5:{user_id}")
+    )
+    markup.add(InlineKeyboardButton("❌ Отмена (вернуть ставку)", callback_data=f"mcancel_{game_id}:{user_id}"))
 
+    bot.reply_to(
+        message,
+        f"💣 <b>НАСТРОЙКА ИГРЫ «САПЁР»</b> 😺\n"
+        f"──────────────────────\n"
+        f"💰 Ставка: <b>{bet} 🪙</b>\n\n"
+        f"Шаг 1: <b>Выберите размер игрового поля:</b> 😸",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
 # ---------------------------------------------------------
 # МЕМНЫЕ СИМУЛЯТОРЫ: РАСШИРЕННЫЙ ПИСЮН И ФАП
 # ---------------------------------------------------------
@@ -5890,15 +5921,65 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"✅ Установлен стиль: {THEMES[t_key]['name']}! 😸")
             send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
-    # САПЁР
-    elif action_data.startswith('mines_open_'):
-        m_match = re.match(r"^mines_open_(m_\d+_\d+)_(\d+)$", action_data)
-        if not m_match:
-            bot.answer_callback_query(call.id, "❌ Ошибка данных игры! 🙀", show_alert=True)
-            return
-        game_id = m_match.group(1)
-        cell_idx = int(m_match.group(2))
+    # САПЁР: ШАГ 1 — ВЫБОР РАЗМЕРА ПОЛЯ
+    elif action_data.startswith('msz_'):
+        m_parts = action_data.split('_')
+        game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
+        chosen_size = int(m_parts[4])
         game = active_mines.get(game_id)
+        if not game:
+            bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
+            return
+
+        game['size'] = chosen_size
+        markup = InlineKeyboardMarkup(row_width=3)
+
+        if chosen_size == 3:
+            mines_options = [1, 2, 3, 5]
+        elif chosen_size == 4:
+            mines_options = [2, 3, 5, 8]
+        else:
+            mines_options = [3, 5, 8, 12, 18]
+
+        btns = [InlineKeyboardButton(f"💣 {cnt} мин", callback_data=f"mbm_{game_id}_{cnt}:{user_id}") for cnt in mines_options]
+        markup.add(*btns)
+        markup.add(InlineKeyboardButton("❌ Отмена (вернуть ставку)", callback_data=f"mcancel_{game_id}:{user_id}"))
+
+        bot.edit_message_text(
+            f"💣 <b>НАСТРОЙКА ИГРЫ «САПЁР» ({chosen_size}х{chosen_size})</b> 😺\n"
+            f"──────────────────────\n"
+            f"💰 Ставка: <b>{game['bet']} 🪙</b>\n\n"
+            f"Шаг 2: <b>Сколько мин разместить на поле?</b>\n"
+            f"<i>(Больше мин = выше множитель выигрыша!)</i> 😻",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+
+    # САПЁР: ШАГ 2 — ВЫБОР МИН И СТАРТ ИГРЫ
+    elif action_data.startswith('mbm_'):
+        m_parts = action_data.split('_')
+        game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
+        mines_count = int(m_parts[4])
+        game = active_mines.get(game_id)
+        if not game:
+            bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
+            return
+
+        total_cells = game['size'] * game['size']
+        game['bombs'] = set(random.sample(range(total_cells), mines_count))
+
+        text_board, markup = render_mines_board(game_id)
+        bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    # САПЁР: КЛИК ПО КЛЕТКЕ
+    elif action_data.startswith('mop_'):
+        m_parts = action_data.split('_')
+        game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
+        cell_idx = int(m_parts[4])
+        game = active_mines.get(game_id)
+
         if not game or game.get('finished'):
             bot.answer_callback_query(call.id, "❌ Игра уже завершена! 😿", show_alert=True)
             return
@@ -5906,20 +5987,28 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "❌ Это не ваше игровое поле! 😾", show_alert=True)
             return
 
+        total_cells = game['size'] * game['size']
+        mines_count = len(game['bombs'])
+
         if cell_idx in game['bombs']:
             game['finished'] = True
             text_board, markup = render_mines_board(game_id)
-            loss_text = f"💥 <b>БАБАХ! ВЫ НАСТУПИЛИ НА МИНУ!</b> 🙀\n\n💸 Вы потеряли ставку: <b>{game['bet']} Ня-коинов 🪙</b>!\n\n{text_board}"
+            loss_text = (
+                f"💥 <b>БАБАХ! ВЫ НАСТУПИЛИ НА МИНУ!</b> 🙀\n\n"
+                f"💸 Ставка <b>{game['bet']} Ня-коинов 🪙</b> сгорела...\n\n{text_board}"
+            )
             bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             del active_mines[game_id]
             return
         else:
             game['revealed'].add(cell_idx)
             safe_opened = len(game['revealed'])
-            mult_map = {1: 1.25, 2: 1.60, 3: 2.10, 4: 2.80, 5: 3.80, 6: 5.20, 7: 7.50, 8: 11.0, 9: 16.0, 10: 25.0, 11: 40.0, 12: 70.0, 13: 150.0}
-            game['current_multiplier'] = mult_map.get(safe_opened, 1.25)
 
-            if safe_opened >= 13:
+            # Расчёт множителя по формуле
+            game['current_multiplier'] = calculate_mines_multiplier(total_cells, mines_count, safe_opened)
+
+            max_safe = total_cells - mines_count
+            if safe_opened >= max_safe:
                 game['finished'] = True
                 win_amt = int(game['bet'] * game['current_multiplier'])
                 win_amt = process_casino_win(win_amt)
@@ -5927,8 +6016,12 @@ def callback_inline(call):
                 add_account_exp(user_id, user_name, 50, username=user_username)
                 check_achievements(user_id, user_name, 'mines_wins', 1, chat_id, username=user_username)
                 mark_dirty()
+
                 text_board, markup = render_mines_board(game_id)
-                win_text = f"🏆 <b>НЕВЕРОЯТНО! ВСЕ 13 КРИСТАЛЛОВ НАЙДЕНЫ!</b> 😻\n\n💰 Выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Множитель: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
+                win_text = (
+                    f"🏆 <b>НЕВЕРОЯТНО! ВСЕ {max_safe} КРИСТАЛЛОВ НАЙДЕНЫ!</b> 😻\n\n"
+                    f"💰 Чистый выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Коэфф: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
+                )
                 bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 del active_mines[game_id]
                 return
@@ -5936,8 +6029,9 @@ def callback_inline(call):
             text_board, markup = render_mines_board(game_id)
             bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
-    elif action_data.startswith('mines_cashout_'):
-        game_id = action_data.replace('mines_cashout_', '')
+    # САПЁР: CASHOUT (ЗАБРАТЬ ВЫИГРЫШ)
+    elif action_data.startswith('mco_'):
+        game_id = action_data.replace('mco_', '')
         game = active_mines.get(game_id)
         if not game or game.get('finished'):
             bot.answer_callback_query(call.id, "❌ Игра окончена! 😿", show_alert=True)
@@ -5955,10 +6049,23 @@ def callback_inline(call):
         mark_dirty()
 
         text_board, markup = render_mines_board(game_id)
-        cash_text = f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b> 😻\n\n🎉 Начислено: <b>+{win_amt} Ня-коинов 🪙</b> (Коэффициент: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
+        cash_text = (
+            f"💰 <b>ВЫ УСПЕШНО ЗАБРАЛИ КУШ!</b> 😻\n\n"
+            f"🎉 Начислено: <b>+{win_amt} Ня-коинов 🪙</b> (Коэффициент: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
+        )
         bot.edit_message_text(cash_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
         del active_mines[game_id]
 
+    # САПЁР: ОТМЕНА
+    elif action_data.startswith('mcancel_'):
+        game_id = action_data.replace('mcancel_', '')
+        game = active_mines.get(game_id)
+        if game:
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            econ['balance'] += game['bet']
+            mark_dirty()
+            del active_mines[game_id]
+        bot.edit_message_text("❌ Игра отменена, ставка возвращена на баланс. 😸", chat_id=chat_id, message_id=call.message.message_id)
     # УХОД ЗА ПИТОМЦЕМ
     elif action_data == 'pet_feed':
         econ = get_user_econ(user_id, user_name, username=user_username)
