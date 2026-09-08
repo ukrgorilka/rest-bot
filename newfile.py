@@ -536,6 +536,7 @@ active_drops = {}
 active_mines = {}
 active_crash = {}
 active_brick = {}
+active_c_mines = {}
 
 gold_rush_event = {'active': False, 'until': 0}
 current_quiz = {'question': None, 'answer': None, 'reward': 0, 'chat_id': None}
@@ -2746,6 +2747,125 @@ def cmd_mines(message):
         f"──────────────────────\n"
         f"💰 Ставка: <b>{bet} 🪙</b>\n\n"
         f"Шаг 1: <b>Выберите размер игрового поля:</b> 😸",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
+# ---------------------------------------------------------
+# БЕСПЛАТНЫЙ КЛАССИЧЕСКИЙ САПЁР (СКИЛЛ И ЛОГИКА)
+# ---------------------------------------------------------
+NUM_EMOJIS = {
+    0: '⬜',
+    1: '1⃣',
+    2: '2⃣',
+    3: '3⃣',
+    4: '4⃣',
+    5: '5⃣',
+    6: '6⃣',
+    7: '7⃣',
+    8: '8⃣'
+}
+
+CSAPER_DIFFICULTIES = {
+    'easy': {'name': '🟢 Новичок (5х5)', 'size': 5, 'mines': 4, 'reward': 100, 'exp': 30},
+    'med': {'name': '🟡 Любитель (6х6)', 'size': 6, 'mines': 7, 'reward': 250, 'exp': 60},
+    'hard': {'name': '🔴 Эксперт (7х7)', 'size': 7, 'mines': 11, 'reward': 600, 'exp': 120}
+}
+
+def get_adjacent_indices(idx, size):
+    r, c = divmod(idx, size)
+    neighbors = []
+    for dr in [-1, 0, 1]:
+        for dc in [-1, 0, 1]:
+            if dr == 0 and dc == 0:
+                continue
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < size and 0 <= nc < size:
+                neighbors.append(nr * size + nc)
+    return neighbors
+
+def reveal_cascade_cells(game, start_idx):
+    size = game['size']
+    to_visit = [start_idx]
+    
+    while to_visit:
+        curr = to_visit.pop()
+        if curr in game['revealed']:
+            continue
+        if curr in game['flags']:
+            game['flags'].remove(curr)
+            
+        game['revealed'].add(curr)
+        
+        if game['numbers'].get(curr, 0) == 0:
+            for neighbor in get_adjacent_indices(curr, size):
+                if neighbor not in game['revealed'] and neighbor not in game['bombs']:
+                    to_visit.append(neighbor)
+
+def render_classic_mines_board(game_id):
+    game = active_c_mines.get(game_id)
+    if not game:
+        return None, None
+        
+    size = game['size']
+    total_cells = size * size
+    u_id = game['user_id']
+    mode = game.get('mode', 'dig')
+    
+    markup = InlineKeyboardMarkup(row_width=size)
+    buttons = []
+    
+    for i in range(total_cells):
+        if i in game['revealed']:
+            cnt = game['numbers'].get(i, 0)
+            buttons.append(InlineKeyboardButton(NUM_EMOJIS.get(cnt, '⬜'), callback_data="noop"))
+        elif game['finished']:
+            if i in game['bombs']:
+                buttons.append(InlineKeyboardButton("💣", callback_data="noop"))
+            elif i in game['flags']:
+                buttons.append(InlineKeyboardButton("🚩", callback_data="noop"))
+            else:
+                buttons.append(InlineKeyboardButton("▫️", callback_data="noop"))
+        else:
+            if i in game['flags']:
+                buttons.append(InlineKeyboardButton("🚩", callback_data=f"cmo_{game_id}_{i}:{u_id}"))
+            else:
+                buttons.append(InlineKeyboardButton("⬛", callback_data=f"cmo_{game_id}_{i}:{u_id}"))
+                
+    for row_idx in range(0, total_cells, size):
+        markup.add(*buttons[row_idx:row_idx+size])
+        
+    if not game['finished']:
+        mode_btn = "⛏ Режим: КОПАТЬ" if mode == 'dig' else "🚩 Режим: ФЛАГ"
+        markup.add(InlineKeyboardButton(mode_btn, callback_data=f"cmmode_{game_id}:{u_id}"))
+        
+    mines_left = max(0, game['mines_count'] - len(game['flags']))
+    text = (
+        f"🕹 <b>САПЁР: {game['diff_name'].upper()}</b> 😺\n"
+        f"──────────────────────\n"
+        f"👤 Сапёр: {game['user_name']}\n"
+        f"💣 Мин на поле: <b>{game['mines_count']} шт.</b> | Осталось: <b>{mines_left}</b>\n"
+        f"🎯 Режим: <b>{'⛏ Открывать клетки' if mode == 'dig' else '🚩 Ставить / Убирать флаги'}</b>\n"
+        f"🏆 Награда за разминирование: <b>+{game['reward']} 🪙</b>\n"
+        f"──────────────────────\n"
+        f"<i>Используйте логику! Первый ход всегда безопасен.</i> 😸"
+    )
+    return text, markup
+
+@bot.message_handler(commands=['minesweeper', 'csaper', 'сапер_классик', 'сапёр'])
+def cmd_classic_mines(message):
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for d_key, d_val in CSAPER_DIFFICULTIES.items():
+        markup.add(InlineKeyboardButton(f"{d_val['name']} — приз {d_val['reward']} 🪙", callback_data=f"cstart_{d_key}:{user_id}"))
+        
+    bot.reply_to(
+        message,
+        "🕹 <b>КЛАССИЧЕСКИЙ САПЁР (БЕЗ СТАВОК)</b> 🧠 😺\n"
+        "──────────────────────\n"
+        "Игра полностью бесплатная и проверяет только вашу логику и ум!\n\n"
+        "👇 <b>Выберите уровень сложности:</b>",
         reply_markup=markup,
         parse_mode='HTML'
     )
@@ -4973,6 +5093,7 @@ def handle_messages(message):
     elif text_lower.startswith(('дартс', 'дротик')): cmd_darts(message); return
     elif text_lower.startswith(('боулинг', 'страйк')): cmd_bowling(message); return
     elif text_lower.startswith(('сапер', 'мины')): cmd_mines(message); return
+    elif text_lower in ['классический сапер', 'сапер классик', 'csaper', 'сапёр']: cmd_classic_mines(message); return
     elif text_lower.startswith(('краш', 'ракета')): cmd_crash(message); return
     elif text_lower.startswith(('блэкджек', '21', 'очко')): cmd_bj(message); return
     elif text_lower.startswith(('кирпич', 'стройка')): cmd_brick(message); return
@@ -6066,6 +6187,139 @@ def callback_inline(call):
             mark_dirty()
             del active_mines[game_id]
         bot.edit_message_text("❌ Игра отменена, ставка возвращена на баланс. 😸", chat_id=chat_id, message_id=call.message.message_id)
+        # ВЫБОР СЛОЖНОСТИ КЛАССИЧЕСКОГО САПЁРА
+    elif action_data.startswith('cstart_'):
+        diff_key = action_data.replace('cstart_', '')
+        if diff_key in CSAPER_DIFFICULTIES:
+            d_info = CSAPER_DIFFICULTIES[diff_key]
+            game_id = f"cm_{user_id}_{int(time.time())}"
+            active_c_mines[game_id] = {
+                'user_id': user_id,
+                'user_name': user_name,
+                'username': user_username,
+                'size': d_info['size'],
+                'mines_count': d_info['mines'],
+                'reward': d_info['reward'],
+                'exp': d_info['exp'],
+                'diff_name': d_info['name'],
+                'bombs': set(),
+                'numbers': {},
+                'revealed': set(),
+                'flags': set(),
+                'mode': 'dig',
+                'first_click': True,
+                'finished': False,
+                'start_time': time.time()
+            }
+            text_board, markup = render_classic_mines_board(game_id)
+            bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+
+    # ПЕРЕКЛЮЧЕНИЕ РЕЖИМА (КОПАТЬ / ФЛАГ)
+    elif action_data.startswith('cmmode_'):
+        game_id = action_data.replace('cmmode_', '')
+        game = active_c_mines.get(game_id)
+        if not game or game.get('finished'):
+            bot.answer_callback_query(call.id, "❌ Игра окончена!", show_alert=True)
+            return
+        if user_id != game['user_id']:
+            bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
+            return
+
+        game['mode'] = 'flag' if game.get('mode', 'dig') == 'dig' else 'dig'
+        bot.answer_callback_query(call.id, "🚩 Режим флага" if game['mode'] == 'flag' else "⛏ Режим копания")
+        text_board, markup = render_classic_mines_board(game_id)
+        try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+
+    # НАЖАТИЕ НА КЛЕТКУ
+    elif action_data.startswith('cmo_'):
+        m_parts = action_data.split('_')
+        game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
+        cell_idx = int(m_parts[4])
+        game = active_c_mines.get(game_id)
+
+        if not game or game.get('finished'):
+            bot.answer_callback_query(call.id, "❌ Игра завершена!", show_alert=True)
+            return
+        if user_id != game['user_id']:
+            bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
+            return
+
+        size = game['size']
+        total_cells = size * size
+
+        if game.get('mode') == 'flag':
+            if cell_idx in game['revealed']:
+                bot.answer_callback_query(call.id, "Клетка уже открыта!")
+                return
+            if cell_idx in game['flags']:
+                game['flags'].remove(cell_idx)
+            else:
+                game['flags'].add(cell_idx)
+            text_board, markup = render_classic_mines_board(game_id)
+            try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception: pass
+            bot.answer_callback_query(call.id)
+            return
+
+        if cell_idx in game['flags']:
+            bot.answer_callback_query(call.id, "🚩 Сначала снимите флаг!", show_alert=True)
+            return
+
+        if game.get('first_click', True):
+            game['first_click'] = False
+            forbidden = set(get_adjacent_indices(cell_idx, size) + [cell_idx])
+            available = [i for i in range(total_cells) if i not in forbidden]
+            if len(available) < game['mines_count']:
+                available = [i for i in range(total_cells) if i != cell_idx]
+                
+            game['bombs'] = set(random.sample(available, game['mines_count']))
+            
+            numbers = {}
+            for i in range(total_cells):
+                if i not in game['bombs']:
+                    bomb_count = sum(1 for neighbor in get_adjacent_indices(i, size) if neighbor in game['bombs'])
+                    numbers[i] = bomb_count
+            game['numbers'] = numbers
+
+        if cell_idx in game['bombs']:
+            game['finished'] = True
+            text_board, markup = render_classic_mines_board(game_id)
+            loss_text = (
+                f"💥 <b>БАБАХ! МИНА СДЕТОНИРОВАЛА!</b> 🙀\n\n"
+                f"Не расстраивайтесь, попробуйте еще раз! 😸\n\n{text_board}"
+            )
+            try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception: pass
+            del active_c_mines[game_id]
+            return
+
+        reveal_cascade_cells(game, cell_idx)
+
+        max_safe = total_cells - len(game['bombs'])
+        if len(game['revealed']) >= max_safe:
+            game['finished'] = True
+            reward = game['reward']
+            exp_gain = game['exp']
+
+            add_coins(user_id, user_name, reward, username=user_username)
+            add_account_exp(user_id, user_name, exp_gain, username=user_username)
+            check_achievements(user_id, user_name, 'mines_wins', 1, chat_id, username=user_username)
+
+            text_board, markup = render_classic_mines_board(game_id)
+            win_text = (
+                f"🏆🧠 <b>ВЕЛИКОЛЕПНО! ПОЛЕ ПОЛНОСТЬЮ РАЗМИНИРОВАНО!</b> 😻\n\n"
+                f"🎉 Награда за интеллект: <b>+{reward} Ня-коинов 🪙</b> (+{exp_gain} EXP)!\n\n{text_board}"
+            )
+            try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception: pass
+            del active_c_mines[game_id]
+            return
+
+        text_board, markup = render_classic_mines_board(game_id)
+        try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+        bot.answer_callback_query(call.id)
     # УХОД ЗА ПИТОМЦЕМ
     elif action_data == 'pet_feed':
         econ = get_user_econ(user_id, user_name, username=user_username)
