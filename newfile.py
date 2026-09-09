@@ -1869,18 +1869,24 @@ def goodbye_left_member(message):
 # ---------------------------------------------------------
 # ГЛАВНОЕ МЕНЮ И СПРАВОЧНИК
 # ---------------------------------------------------------
-elif action_data == 'help_main':
-        welcome_text = (
-            "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
-            "──────────────────────\n"
-            "Добро пожаловать в центр управления экономикой, играми, бизнесами, рестами и фактами VD! 😻\n\n"
-            "📖 <b>Официальный Teletype гайд:</b> <a href=\"https://teletype.in/@ukrgorilka/Nya\">teletype.in/@ukrgorilka/Nya</a>\n\n"
-            "💡 <i>Есть идеи или нашли баг? Пишите:</i> @ukrgorilka ✨\n"
-            "──────────────────────\n"
-            "👇 <i>Выберите интересующий раздел:</i> 😸"
-        )
-        try: bot.edit_message_text(welcome_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=get_main_menu_markup(user_id), parse_mode='HTML', disable_web_page_preview=True)
-        except Exception: pass
+@bot.message_handler(commands=['start', 'help', 'menu', 'info'])
+def send_welcome(message):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("📚 ЧИТАТЬ ПОЛНЫЙ ГАЙД В TELETYPE 🌐", url="https://teletype.in/@ukrgorilka/Nya")
+    )
+    
+    welcome_text = (
+        "🤖 <b>ГЛАВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
+        "──────────────────────\n"
+        "Добро пожаловать! Все команды, механики экономики, рестов, бизнесов и игр собраны в официальном руководстве: 😻\n\n"
+        "📖 <b>Официальный Teletype гайд:</b>\n"
+        "👉 https://teletype.in/@ukrgorilka/Nya\n\n"
+        "💡 <i>Есть крутые идеи, предложения по улучшению или нашли баг? Напишите создателю:</i> @ukrgorilka ✨\n"
+        "──────────────────────\n"
+        "👇 <i>Нажмите кнопку ниже, чтобы открыть статью:</i> 😸"
+    )
+    bot.reply_to(message, welcome_text, reply_markup=markup, parse_mode='HTML')
 # ---------------------------------------------------------
 # ИГРА КИРПИЧ (/brick)
 # ---------------------------------------------------------
