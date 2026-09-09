@@ -2742,25 +2742,27 @@ NUM_EMOJIS = {
 }
 
 CSAPER_DIFFICULTIES = {
-    'easy': {'name': '🟢 Новичок (5х5)', 'size': 5, 'mines': 4, 'reward': 100, 'exp': 30},
-    'med': {'name': '🟡 Любитель (6х6)', 'size': 6, 'mines': 7, 'reward': 250, 'exp': 60},
-    'hard': {'name': '🔴 Эксперт (7х7)', 'size': 7, 'mines': 11, 'reward': 600, 'exp': 120}
+    'easy': {'name': '🟢 Новичок (5х5)', 'cols': 5, 'rows': 5, 'mines': 4, 'reward': 100, 'exp': 30},
+    'med': {'name': '🟡 Любитель (6х6)', 'cols': 6, 'rows': 6, 'mines': 7, 'reward': 250, 'exp': 60},
+    'hard': {'name': '🔴 Эксперт (7х7)', 'cols': 7, 'rows': 7, 'mines': 11, 'reward': 600, 'exp': 120},
+    'titan': {'name': '🟣 Титан (8х12 / 96 кл.)', 'cols': 8, 'rows': 12, 'mines': 20, 'reward': 1500, 'exp': 300}
 }
 
-def get_adjacent_indices(idx, size):
-    r, c = divmod(idx, size)
+def get_adjacent_indices(idx, cols, rows):
+    r, c = divmod(idx, cols)
     neighbors = []
     for dr in [-1, 0, 1]:
         for dc in [-1, 0, 1]:
             if dr == 0 and dc == 0:
                 continue
             nr, nc = r + dr, c + dc
-            if 0 <= nr < size and 0 <= nc < size:
-                neighbors.append(nr * size + nc)
+            if 0 <= nr < rows and 0 <= nc < cols:
+                neighbors.append(nr * cols + nc)
     return neighbors
 
 def reveal_cascade_cells(game, start_idx):
-    size = game['size']
+    cols = game.get('cols', game.get('size', 5))
+    rows = game.get('rows', game.get('size', 5))
     to_visit = [start_idx]
     
     while to_visit:
@@ -2773,7 +2775,7 @@ def reveal_cascade_cells(game, start_idx):
         game['revealed'].add(curr)
         
         if game['numbers'].get(curr, 0) == 0:
-            for neighbor in get_adjacent_indices(curr, size):
+            for neighbor in get_adjacent_indices(curr, cols, rows):
                 if neighbor not in game['revealed'] and neighbor not in game['bombs']:
                     to_visit.append(neighbor)
 
@@ -2782,12 +2784,13 @@ def render_classic_mines_board(game_id):
     if not game:
         return None, None
         
-    size = game['size']
-    total_cells = size * size
+    cols = game.get('cols', game.get('size', 5))
+    rows = game.get('rows', game.get('size', 5))
+    total_cells = cols * rows
     u_id = game['user_id']
     mode = game.get('mode', 'dig')
     
-    markup = InlineKeyboardMarkup(row_width=size)
+    markup = InlineKeyboardMarkup(row_width=cols)
     buttons = []
     
     for i in range(total_cells):
@@ -2807,8 +2810,8 @@ def render_classic_mines_board(game_id):
             else:
                 buttons.append(InlineKeyboardButton("⬛", callback_data=f"cmo_{game_id}_{i}:{u_id}"))
                 
-    for row_idx in range(0, total_cells, size):
-        markup.add(*buttons[row_idx:row_idx+size])
+    for row_idx in range(0, total_cells, cols):
+        markup.add(*buttons[row_idx:row_idx+cols])
         
     if not game['finished']:
         mode_btn = "⛏ Режим: КОПАТЬ" if mode == 'dig' else "🚩 Режим: ФЛАГ"
@@ -2826,7 +2829,6 @@ def render_classic_mines_board(game_id):
         f"<i>Используйте логику! Первый ход всегда безопасен.</i> 😸"
     )
     return text, markup
-
 @bot.message_handler(commands=['minesweeper', 'csaper', 'сапер_классик', 'сапёр'])
 def cmd_classic_mines(message):
     user_id = message.from_user.id
@@ -6179,12 +6181,15 @@ def callback_inline(call):
         diff_key = action_data.replace('cstart_', '')
         if diff_key in CSAPER_DIFFICULTIES:
             d_info = CSAPER_DIFFICULTIES[diff_key]
+            cols = d_info.get('cols', d_info.get('size', 5))
+            rows = d_info.get('rows', d_info.get('size', 5))
             game_id = f"cm_{user_id}_{int(time.time())}"
             active_c_mines[game_id] = {
                 'user_id': user_id,
                 'user_name': user_name,
                 'username': user_username,
-                'size': d_info['size'],
+                'cols': cols,
+                'rows': rows,
                 'mines_count': d_info['mines'],
                 'reward': d_info['reward'],
                 'exp': d_info['exp'],
@@ -6232,8 +6237,9 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "❌ Это не ваша игра!", show_alert=True)
             return
 
-        size = game['size']
-        total_cells = size * size
+        cols = game.get('cols', game.get('size', 5))
+        rows = game.get('rows', game.get('size', 5))
+        total_cells = cols * rows
 
         if game.get('mode') == 'flag':
             if cell_idx in game['revealed']:
@@ -6255,7 +6261,7 @@ def callback_inline(call):
 
         if game.get('first_click', True):
             game['first_click'] = False
-            forbidden = set(get_adjacent_indices(cell_idx, size) + [cell_idx])
+            forbidden = set(get_adjacent_indices(cell_idx, cols, rows) + [cell_idx])
             available = [i for i in range(total_cells) if i not in forbidden]
             if len(available) < game['mines_count']:
                 available = [i for i in range(total_cells) if i != cell_idx]
@@ -6265,7 +6271,7 @@ def callback_inline(call):
             numbers = {}
             for i in range(total_cells):
                 if i not in game['bombs']:
-                    bomb_count = sum(1 for neighbor in get_adjacent_indices(i, size) if neighbor in game['bombs'])
+                    bomb_count = sum(1 for neighbor in get_adjacent_indices(i, cols, rows) if neighbor in game['bombs'])
                     numbers[i] = bomb_count
             game['numbers'] = numbers
 
