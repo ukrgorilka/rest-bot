@@ -5384,14 +5384,13 @@ def handle_messages(message):
                 u_id = info.get('user_id')
                 resp += f"• {make_link(chat_id, u_name, u_id, ping=False)} — {info['duration']} (Причина: {info.get('reason', 'Не указана')})\n"
             resp += '──────────────────────'
-            bot.reply_to(message, resp, parse_mode='HTML')
 
-    elif text_lower == 'мой рест':
-        in_rest, info, _ = check_user_rest(db.get('rests', {}).get(str_chat, {}), user_id=user_id, user_name=user_name)
-        if in_rest and info:
-            bot.reply_to(message, f"🌴 <b>Ваш рест:</b> {info['duration']} 😺\n📝 <b>Причина:</b> {info.get('reason', 'Не указана')}", parse_mode='HTML')
-        else:
-            bot.reply_to(message, "✅ Вы сейчас не находитесь в ресте! 😸", parse_mode='HTML')
+            markup = None
+            if is_admin(chat_id, user_id):
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🗑 Снять рест (Выбрать)", callback_data=f"rest_remove_menu:{user_id}"))
+
+            bot.reply_to(message, resp, reply_markup=markup, parse_mode='HTML')
 
 # ---------------------------------------------------------
 # ОБРАБОТКА CALLBACK КНОПОК
@@ -6754,6 +6753,74 @@ def callback_inline(call):
             bot.edit_message_text(f"✌️ <b>ИТОГИ ДУЭЛИ ЦУ-Е-ФА:</b> 😺\n──────────────────────\n• {game['p1_tag']}: {c_map[c1]}\n• {game['p2_tag']}: {c_map[c2]}\n\n{res}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
             del active_rps_games[game_id]
 
+   # МЕНЮ ВЫБОРА КОГО СНЯТЬ С РЕСТА
+    elif action_data == 'rest_remove_menu':
+        if not is_admin(chat_id, user_id):
+            bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+            return
+
+        chat_rests = db.get('rests', {}).get(str(chat_id), {})
+        if not chat_rests:
+            bot.answer_callback_query(call.id, "🌴 В ресте никого нет!", show_alert=True)
+            return
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        for r_key, info in chat_rests.items():
+            u_name = info.get('user_name', r_key)
+            markup.add(InlineKeyboardButton(f"❌ Снять: {u_name}", callback_data=f"del_rest_user_{r_key}:{user_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад", callback_data=f"rest_cancel_menu:{user_id}"))
+
+        bot.edit_message_text(
+            "🗑 <b>ВЫБЕРИТЕ ПОЛЬЗОВАТЕЛЯ ДЛЯ СНЯТИЯ С РЕСТА:</b> 😺\n──────────────────────\nНажмите на кнопку с именем нужного человека:",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+
+    # КЛИК ПО ПОЛЬЗОВАТЕЛЮ ДЛЯ СНЯТИЯ
+    elif action_data.startswith('del_rest_user_'):
+        if not is_admin(chat_id, user_id):
+            bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+            return
+
+        target_r_key = action_data.replace('del_rest_user_', '')
+        str_chat = str(chat_id)
+        chat_rests = db.get('rests', {}).get(str_chat, {})
+
+        if target_r_key in chat_rests:
+            info = chat_rests.pop(target_r_key)
+            u_name = info.get('user_name', target_r_key)
+            t_uid = info.get('user_id')
+            
+            add_to_history(str_chat, u_name, 'Снят', 'Досрочно по кнопке админом', t_uid, "Снят рест (кнопка)")
+            mark_dirty()
+
+            u_link = make_link(chat_id, u_name, t_uid, ping=True)
+            log_event('РЕСТ СНЯТ (КНОПКА)', f'Чат: <code>{chat_id}</code>\nАдмин: @{user_username}\nПользователь: {u_link}')
+            bot.answer_callback_query(call.id, f"✅ Рест с {u_name} снят!")
+            bot.edit_message_text(f"🗑 Рест с {u_link} успешно снят по кнопке! 😺", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
+        else:
+            bot.answer_callback_query(call.id, "❌ Пользователь уже не в ресте!", show_alert=True)
+
+    # ОТМЕНА / НАЗАД
+    elif action_data == 'rest_cancel_menu':
+        chat_rests = db.get('rests', {}).get(str(chat_id), {})
+        if not chat_rests:
+            bot.edit_message_text('🌴 В данный момент никто не находится в ресте. 😸', chat_id=chat_id, message_id=call.message.message_id)
+            return
+
+        resp = '📋 <b>СПИСОК АКТИВНЫХ РЕСТОВ:</b> 😺\n──────────────────────\n'
+        for r_key, info in chat_rests.items():
+            u_name = info.get('user_name', r_key)
+            u_id = info.get('user_id')
+            resp += f"• {make_link(chat_id, u_name, u_id, ping=False)} — {info['duration']} (Причина: {info.get('reason', 'Не указана')})\n"
+        resp += '──────────────────────'
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🗑 Снять рест (Выбрать)", callback_data=f"rest_remove_menu:{user_id}"))
+        bot.edit_message_text(resp, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        
     # НАСТРОЙКИ (КНОПКИ)
     elif action_data == 'set_max_days':
         if not is_admin(chat_id, user_id):
