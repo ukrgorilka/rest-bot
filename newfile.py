@@ -1869,48 +1869,18 @@ def goodbye_left_member(message):
 # ---------------------------------------------------------
 # ГЛАВНОЕ МЕНЮ И СПРАВОЧНИК
 # ---------------------------------------------------------
-def get_main_menu_markup(owner_id):
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🌴 Ресты и Отпуск", callback_data=f"help_rests:{owner_id}"),
-        InlineKeyboardButton("🏢 Бизнес 2.0 и Гараж", callback_data=f"help_biz:{owner_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("⚽️ Спорт & Казино", callback_data=f"help_sports:{owner_id}"),
-        InlineKeyboardButton("🏦 Ня-Банк (+1%/6ч)", callback_data=f"help_bank:{owner_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("🎨 Темы и Рюкзак", callback_data=f"help_themes_buffs:{owner_id}"),
-        InlineKeyboardButton("📈 Крипто-Биржа", callback_data=f"help_crypto:{owner_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("🐾 Питомцы и Охота", callback_data=f"help_pets:{owner_id}"),
-        InlineKeyboardButton("🍆 Мемы, Шар и IQ", callback_data=f"help_sims:{owner_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("🎥 Стример и Сад", callback_data=f"help_stream_garden:{owner_id}"),
-        InlineKeyboardButton("⚖️ Карма и РП", callback_data=f"help_karma_rp:{owner_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("🩸 Факты Violence District", callback_data=f"help_vd:{owner_id}"),
-        InlineKeyboardButton("🏆 Ударники Дня", callback_data=f"help_heroes:{owner_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("💰 Экономика и Квесты", callback_data=f"help_econ:{owner_id}"),
-        InlineKeyboardButton("📖 ПОЛНЫЙ СПРАВОЧНИК (А-Я)", callback_data=f"help_full_catalog:{owner_id}")
-    )
-    return markup
-
-@bot.message_handler(commands=['start', 'help', 'menu', 'info'])
-def send_welcome(message):
-    welcome_text = (
-        "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
-        "──────────────────────\n"
-        "Добро пожаловать в центр управления экономикой, спорт-играми, бизнесами, фактами VD и рестами! 😻\n\n"
-        "👇 <i>Выберите интересующий вас раздел из меню ниже:</i> 😸"
-    )
-    bot.reply_to(message, welcome_text, reply_markup=get_main_menu_markup(message.from_user.id), parse_mode='HTML')
-
+elif action_data == 'help_main':
+        welcome_text = (
+            "🤖 <b>ГЛАВНЫЙ ИНТЕРАКТИВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
+            "──────────────────────\n"
+            "Добро пожаловать в центр управления экономикой, играми, бизнесами, рестами и фактами VD! 😻\n\n"
+            "📖 <b>Официальный Teletype гайд:</b> <a href=\"https://teletype.in/@ukrgorilka/Nya\">teletype.in/@ukrgorilka/Nya</a>\n\n"
+            "💡 <i>Есть идеи или нашли баг? Пишите:</i> @ukrgorilka ✨\n"
+            "──────────────────────\n"
+            "👇 <i>Выберите интересующий раздел:</i> 😸"
+        )
+        try: bot.edit_message_text(welcome_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=get_main_menu_markup(user_id), parse_mode='HTML', disable_web_page_preview=True)
+        except Exception: pass
 # ---------------------------------------------------------
 # ИГРА КИРПИЧ (/brick)
 # ---------------------------------------------------------
@@ -4543,6 +4513,18 @@ def handle_messages(message):
 
     last_chat_activity[chat_id] = now_ts
 
+    # 🛑 ИГНОРИРОВАНИЕ КОМАНД, АДРЕСОВАННЫХ ДРУГИМ БОТАМ
+    if text.startswith('/'):
+        cmd_part = text.split()[0]
+        if '@' in cmd_part:
+            target_bot = cmd_part.split('@')[1].lower()
+            try:
+                my_bot_username = bot.get_me().username.lower()
+            except Exception:
+                my_bot_username = ""
+            if my_bot_username and target_bot != my_bot_username:
+                return  # Команда вызвана для другого бота, молчим!
+                
     # 🛡 АНТИ-ФЛУД
     econ = get_user_econ(user_id, user_name, username=user_username)
     if text_lower.startswith('/') or any(kw in text_lower for kw in ['рест', 'профиль', 'баланс', 'топ', 'шанс']):
