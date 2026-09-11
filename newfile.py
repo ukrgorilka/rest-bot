@@ -66,17 +66,17 @@ DATA_FILE = 'rests_data.json'
 
 ADMIN_USERNAME = 'ukrgorilka'
 
-# ---------------------------------------------------------
-# ЧЕРНЫЙ СПИСОК ЧАТОВ
-# ---------------------------------------------------------
-BANNED_CHAT_IDS = {
-    normalize_tg_id(os.environ.get('BANNED_CHAT_ID', '-1003703264754'))
-}
+# Принудительный выход из запрещенного чата при запуске
+try:
+    bot.leave_chat(-1003703264754)
+except Exception:
+    pass
 
 def is_chat_banned(chat_id):
     if not chat_id:
         return False
-    return normalize_tg_id(chat_id) in BANNED_CHAT_IDS
+    # Блокирует любой вариант ID (с -100 или без)
+    return '3703264754' in str(chat_id)
 # Медиа-канал и летнее аудиосообщение
 MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
 WHY_TG_MSG_IDS = [350503, 350504]
@@ -1200,18 +1200,18 @@ def process_casino_win(win):
 # ЕДИНЫЙ ШЛЮЗ ПРОВЕРКИ СПЯЩЕГО РЕЖИМА И АНОНИМНЫХ ОТПРАВИТЕЛЕЙ
 # ---------------------------------------------------------
 def can_process_user_message(message):
-    """
-    Проверяет валидность пользователя и статус спящего режима (/stop_bot).
-    Предотвращает AttributeError при сообщениях от каналов и анонимов.
-    В спящем режиме команды разрешены ТОЛЬКО создателю (@ukrgorilka).
-    """
+    # ПРОВЕРКА ЧЕРНОГО СПИСКА (первой строкой!)
+    if message and getattr(message, 'chat', None):
+        if is_chat_banned(message.chat.id):
+            try:
+                bot.leave_chat(message.chat.id)  # Бот сразу выходит из группы
+            except Exception:
+                pass
+            return False
+
     if not message or not getattr(message, 'from_user', None):
         return False
-    
-    chat_id = getattr(message, 'chat', None) and message.chat.id
-    if is_chat_banned(chat_id):
-        return False
-        
+
     user_username = (message.from_user.username or '').lower()
     is_super_admin = (user_username == ADMIN_USERNAME.lower())
 
