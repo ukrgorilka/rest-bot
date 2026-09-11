@@ -5202,17 +5202,19 @@ def cmd_top(message):
         return
     render_top_menu(message.chat.id, user_id=message.from_user.id, category='rich')
     # ---------------------------------------------------------
+#  ---------------------------------------------------------
 # ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ И КОМАНД
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     if not message or not getattr(message, 'from_user', None):
         return
-chat_id = message.chat.id
+
+    chat_id = message.chat.id
     if is_chat_banned(chat_id):
         return
+
     text = message.text.strip() if message.text else ''
-    chat_id = message.chat.id
     str_chat = str(chat_id)
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
@@ -5221,7 +5223,6 @@ chat_id = message.chat.id
     now_ts = time.time()
 
     is_super_admin = (user_username == ADMIN_USERNAME.lower())
-
     # 🛑 ПРОВЕРКА РЕЖИМА ОБСЛУЖИВАНИЯ / СНА (/stop_bot)
     bot_is_active = db.get('bot_active', True)
     if not bot_is_active:
