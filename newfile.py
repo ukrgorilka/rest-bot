@@ -6218,14 +6218,10 @@ def callback_inline(call):
     try:
         if not call or not getattr(call, 'from_user', None) or not getattr(call, 'message', None):
             return
+        chat_id = call.message.chat.id
         if is_chat_banned(chat_id):
             bot.answer_callback_query(call.id, "❌ Работа бота в этом чате запрещена!", show_alert=True)
             return
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-        user_name = (f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}").strip() or call.from_user.username
-        user_username = (call.from_user.username or '').lower()
-        now_ts = time.time()
 
         # 🛑 ПРОВЕРКА РЕЖИМА СНА
         bot_is_active = db.get('bot_active', True)
