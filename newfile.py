@@ -79,7 +79,8 @@ def is_chat_banned(chat_id):
     return '3703264754' in str(chat_id)
 # Медиа-канал и летнее аудиосообщение
 MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
-WHY_TG_MSG_IDS = [350503, 350504]
+WHY_TG_MSG_IDS = [597, 598]
+OBIDA_TG_MSG_ID = 599
 SUMMER_SONG_MSG_ID = 307
 
 WHY_GIFS = [
@@ -5319,10 +5320,10 @@ def handle_messages(message):
     # ОБИДА (АВТО ГИФКА)
     if re.search(r'\b(обида|обиделся|обиделась|обиделись)\b', text_lower, re.IGNORECASE):
         try:
-            bot.copy_message(chat_id, from_chat_id=VD_CHAT_ID, message_id=353903, reply_to_message_id=message.message_id)
+            bot.copy_message(chat_id, from_chat_id=MEDIA_TG_CHAT_ID, message_id=OBIDA_TG_MSG_ID, reply_to_message_id=message.message_id)
         except Exception: pass
         return
-
+        
     # ПОВТОРЯЛКА (БОТ СКАЖИ ...)
     m_say = re.match(r'^(?:бот,?\s+)?скажи\s+(.+)$', text, re.IGNORECASE)
     if m_say:
@@ -5573,15 +5574,10 @@ def handle_messages(message):
         chosen_msg_id = random.choice(WHY_TG_MSG_IDS)
         copied = False
         try:
-            bot.copy_message(chat_id, from_chat_id=VD_CHAT_ID, message_id=chosen_msg_id, reply_to_message_id=message.message_id)
+            bot.copy_message(chat_id, from_chat_id=MEDIA_TG_CHAT_ID, message_id=chosen_msg_id, reply_to_message_id=message.message_id)
             copied = True
         except Exception: pass
-        if not copied:
-            chosen_gif = random.choice(WHY_GIFS)
-            try: bot.send_animation(chat_id, chosen_gif, reply_to_message_id=message.message_id)
-            except Exception: bot.reply_to(message, chosen_gif)
-        return
-
+            
     # ОГРАБЛЕНИЕ
     if text_lower.startswith('ограбить'):
         target_user = None
@@ -6219,6 +6215,11 @@ def callback_inline(call):
         if not call or not getattr(call, 'from_user', None) or not getattr(call, 'message', None):
             return
         chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        user_username = (call.from_user.username or '').lower()
+        user_name = (f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}").strip() or call.from_user.username or 'Пользователь'
+        now_ts = time.time()
+
         if is_chat_banned(chat_id):
             bot.answer_callback_query(call.id, "❌ Работа бота в этом чате запрещена!", show_alert=True)
             return
@@ -6226,9 +6227,6 @@ def callback_inline(call):
         # 🛑 ПРОВЕРКА РЕЖИМА СНА
         bot_is_active = db.get('bot_active', True)
         is_super_admin = (user_username == ADMIN_USERNAME.lower())
-        if not bot_is_active and not is_super_admin:
-            bot.answer_callback_query(call.id, "⏳ Бот временно на техобслуживании!", show_alert=True)
-            return
 
         # Защита от автокликера
         user_hist = user_flood_history.setdefault(user_id, [])
