@@ -42,7 +42,7 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = os.environ.get("BOT_TOKEN", "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0")  # Рекомендуется задать BOT_TOKEN в ENV
+TOKEN = os.environ.get("BOT_TOKEN", "")  # Рекомендуется задать BOT_TOKEN в ENV
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
 db_dirty = False
@@ -239,6 +239,7 @@ def apply_font(text_str, font_key='default'):
     return "".join(f_map.get(ch, ch) for ch in text_str)
 
 BUFF_ITEMS = {
+    'fertilizer': {'name': '🧪 Супер-Удобрение для сада', 'short': '🧪 Удобрение', 'price': 250, 'desc': 'Ускоряет рост растения в 2 раза и восстанавливает влажность почвы'},
     'energy_drink': {'name': '⚡️ Энергетик Red Cat', 'short': '⚡️ Энергетик', 'price': 400, 'desc': 'Мгновенный сброс всех кулдаунов работы, замеров, мусорки и охоты (кд 30 мин)'},
     'luck_clover': {'name': '🍀 Клевер Удачи (1 час)', 'short': '🍀 Клевер', 'price': 700, 'desc': '+15% к удаче во всех играх казино на 1 час'},
     'alarm_system': {'name': '🛡 Охранная сигнализация', 'short': '🛡 Сигнализация', 'price': 600, 'desc': 'Защита от 1 ограбления (вор оглушается и платит вам штраф)'},
@@ -1091,7 +1092,7 @@ def can_process_user_message(message):
 
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
-    is_super_admin = (user_id == ADMIN_ID or user_username == ADMIN_USERNAME.lower())
+    is_super_admin = (user_id == ADMIN_ID)
 
     bot_is_active = db.get('bot_active', True)
     if not bot_is_active and not is_super_admin:
@@ -1246,27 +1247,25 @@ def add_inventory_item(inventory, item_name):
     inventory[item_name] = inventory.get(item_name, 0) + 1
 
 def make_link(chat_id, user_name, user_id=None, ping=True):
-    name = clean_tag(user_name)
+    name = html.escape(clean_tag(user_name))
     badge_str = ""
     title_str = ""
     user_econ = get_user_econ(user_id, user_name)
 
     if user_econ.get('badge'):
-        badge_str = f" [{user_econ['badge']}]"
+        badge_str = f" [{html.escape(str(user_econ['badge']))}]"
 
     if user_econ.get('custom_title'):
-        title_str = f" [{user_econ['custom_title']}]"
+        title_str = f" [{html.escape(str(user_econ['custom_title']))}]"
     else:
         active_title = user_econ.get('active_title')
         if active_title in TITLES:
-            title_str = f" [{TITLES[active_title]['text']}]"
+            title_str = f" [{html.escape(str(TITLES[active_title]['text']))}]"
 
-    if not ping:
-        return f'<b>{html.escape(name)}</b>{badge_str}{title_str}'
+    if not ping or not user_id:
+        return f'<b>{name}</b>{badge_str}{title_str}'
 
-    if user_id:
-        return f'<a href="tg://user?id={user_id}">{html.escape(name)}</a>{badge_str}{title_str}'
-    return f'<b>{html.escape(name)}</b>{badge_str}{title_str}'
+    return f'<a href="tg://user?id={user_id}">{name}</a>{badge_str}{title_str}'
 
 def is_admin(chat_id, user_id):
     if user_id == ADMIN_ID:
@@ -1750,17 +1749,7 @@ def memory_and_debt_worker():
                 for k in list(dict_ref.keys()):
                     game_obj = dict_ref[k]
                     if now - game_obj.get('start_time', now) > 900:
-                        bet_amt = game_obj.get('bet', 0)
-                        if bet_amt > 0 and not game_obj.get('finished', False):
-                            if dict_ref is active_rps_games:
-                                if game_obj.get('p1_id'): add_coins(game_obj['p1_id'], game_obj.get('p1_tag'), bet_amt)
-                                if game_obj.get('p2_id'): add_coins(game_obj['p2_id'], game_obj.get('p2_tag'), bet_amt)
-                            elif dict_ref is active_durak:
-                                for p in game_obj.get('players', []):
-                                    if p.get('id') and p['id'] != 'bot':
-                                        add_coins(p['id'], p.get('name'), bet_amt)
-                            elif game_obj.get('user_id'):
-                                add_coins(game_obj['user_id'], game_obj.get('user_name') or game_obj.get('user_tag'), bet_amt)
+                        # Если игра заброшена, ставка сгорает в пользу казино пула (защита от Free-Roll абуза)
                         del dict_ref[k]
 
             for k in list(pending_marriages.keys()):
@@ -1771,22 +1760,27 @@ def memory_and_debt_worker():
                 if now - int(k.split('_')[1]) > 1800:
                     del active_drops[k]
 
-            # Коллекторы по кредитам
+            # Коллекторы по кредитам: корректное списание без обнуления депозита
             for key, econ in list(db.get('economy', {}).items()):
                 loan = econ.get('loan')
-                if loan and loan.get('amount', 0) > 0 and now > loan.get('due', 0) and not loan.get('defaulted'):
+                if loan and loan.get('amount', 0) > 0 and now > loan.get('due', 0):
                     amount = loan['amount']
                     if econ['balance'] >= amount:
                         econ['balance'] -= amount
                         econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
                     else:
-                        paid = econ['balance'] + econ.get('bank_deposit', 0)
+                        need = amount - econ['balance']
                         econ['balance'] = 0
-                        econ['bank_deposit'] = 0
-                        rem_loan = max(0, amount - paid)
-                        econ['loan']['amount'] = rem_loan
-                        econ['loan']['defaulted'] = True
-                        econ['karma'] -= 20
+                        bank_dep = econ.get('bank_deposit', 0)
+                        if bank_dep >= need:
+                            econ['bank_deposit'] = bank_dep - need
+                            econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
+                        else:
+                            econ['bank_deposit'] = 0
+                            econ['loan']['amount'] = need - bank_dep
+                            econ['loan']['defaulted'] = True
+                            econ['loan']['due'] = now + 86400  # повторная попытка через 24ч
+                            econ['karma'] = max(-100, econ.get('karma', 0) - 20)
                     mark_dirty()
         except Exception as e:
             print(f"[MEMORY WORKER ERROR] {e}")
@@ -3413,29 +3407,40 @@ def cmd_durak(message):
         bot.reply_to(message, f"❌ Недостаточно коинов для ставки! Ваш баланс: {econ['balance']} 🪙 😿", parse_mode='HTML')
         return
 
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🤖 Соло (Против Бота)", callback_data=f"durak_mode_1_{bet}:{user_id}"),
-        InlineKeyboardButton("👥 2 Игрока", callback_data=f"durak_mode_2_{bet}:{user_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("👥 3 Игрока", callback_data=f"durak_mode_3_{bet}:{user_id}"),
-        InlineKeyboardButton("👥 4 Игрока", callback_data=f"durak_mode_4_{bet}:{user_id}")
-    )
-    markup.add(
-        InlineKeyboardButton("👥 5 Игроков", callback_data=f"durak_mode_5_{bet}:{user_id}"),
-        InlineKeyboardButton("👥 6 Игроков", callback_data=f"durak_mode_6_{bet}:{user_id}")
-    )
+    if bet > 0:
+        econ['balance'] -= bet
+        process_casino_bet(bet)
+        mark_dirty()
 
-    bot.reply_to(
-        message,
-        f"🃏 <b>КАРТОЧНАЯ ИГРА «ДУРАК» (36 КАРТ)</b> 😺\n"
-        f"──────────────────────\n"
-        f"💰 Ставка: <b>{bet} Ня-коинов 🪙</b>\n\n"
-        f"Выберите режим игры на кнопках ниже: 😸",
-        reply_markup=markup,
-        parse_mode='HTML'
-            )
+    game_id = f"durak_{user_id}_{int(time.time())}"
+    deck = create_durak_deck()
+    trump_card = deck[0]
+    trump_suit = trump_card['suit']
+
+    p_human = {'id': user_id, 'name': user_name, 'hand': []}
+    p_bot = {'id': 'bot', 'name': '🤖 Ня-Бот', 'hand': []}
+    players = [p_human, p_bot]
+    game = {
+        'mode_name': 'Соло против Бота',
+        'target_players': 2,
+        'bet': bet,
+        'players': players,
+        'deck': deck,
+        'trump': trump_suit,
+        'table': [],
+        'attacker_idx': 0,
+        'defender_idx': 1,
+        'started': True,
+        'finished': False,
+        'status_text': 'Игра началась! Вы ходите первым.',
+        'start_time': time.time(),
+        'chat_id': message.chat.id
+    }
+    durak_deal_cards(game)
+    active_durak[game_id] = game
+    text_board, markup = render_durak_board(game_id, viewer_id=user_id)
+    sent_m = bot.reply_to(message, text_board, reply_markup=markup, parse_mode='HTML')
+    game['msg_id'] = sent_m.message_id
     # ---------------------------------------------------------
 # МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
 # ---------------------------------------------------------
@@ -5272,7 +5277,7 @@ def handle_messages(message):
     text_lower = text.lower()
     now_ts = time.time()
 
-    is_super_admin = (user_id == ADMIN_ID or user_username == ADMIN_USERNAME.lower())
+    is_super_admin = (user_id == ADMIN_ID)
 
     bot_is_active = db.get('bot_active', True)
     if not bot_is_active:
