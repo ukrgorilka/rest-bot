@@ -44,7 +44,7 @@ def keep_alive():
 # ---------------------------------------------------------
 TOKEN = os.environ.get("BOT_TOKEN", "")
 bot = telebot.TeleBot(TOKEN)
-db_lock = threading.Lock()
+db_lock = threading.RLock()
 db_dirty = False
 
 ADMIN_ID = 6081930693
@@ -68,10 +68,12 @@ LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-100436951756
 VD_CHAT_ID = normalize_tg_id(os.environ.get('VD_CHAT_ID', '-1003703264754'))
 DATA_FILE = 'rests_data.json'
 
-try:
-    bot.leave_chat(-1003703264754)
-except Exception:
-    pass
+def safe_init_leave():
+    try:
+        if TOKEN:
+            bot.leave_chat(-1003703264754)
+    except Exception:
+        pass
 
 def is_chat_banned(chat_id):
     if not chat_id:
@@ -96,9 +98,9 @@ MONTHS = {
 }
 
 DURATION_PATTERN = (
-    r'(?:(?:до\s+)?\d+\s*(?:дней|дня|день|д|часов|часа|час|ч|минут|мин|м)|'
-    r'(?:до\s+)?\d{1,2}[\.\/]\d{1,2}(?:[\.\/]\d{2,4})?|'
-    r'(?:до\s+)?\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|'
+    r'(?:\b(?:до\s+)?\d+\s*(?:дней|дня|день|д|часов|часа|час|ч|минут|мин|м)\b|'
+    r'\b(?:до\s+)?\d{1,2}[\.\/]\d{1,2}(?:[\.\/]\d{2,4})?|'
+    r'\b(?:до\s+)?\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|'
     r'январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)|'
     r'на\s+неопредел[её]нный\s+срок|неопредел[её]нный\s+срок|бессрочно|без\s+срока|навсегда)'
 )
@@ -287,6 +289,140 @@ BUFF_ITEMS = {
     'alarm_system': {'name': '🛡 Охранная сигнализация', 'short': '🛡 Сигнализация', 'price': 600, 'desc': 'Защита от 1 ограбления (вор оглушается и платит вам штраф)'},
     'invis_mask': {'name': '🥷 Маска-невидимка (24 часа)', 'short': '🥷 Невидимка', 'price': 500, 'desc': 'Скрывает мемные замеры в общих топах чата'}
 }
+
+# ---------------------------------------------------------
+# ЭКОНОМИКА: ВОССТАНОВЛЕННЫЕ ДАННЫЕ (ОРУЖИЕ, БИЗНЕСЫ, ПИТОМЦЫ, КВЕСТЫ)
+# ---------------------------------------------------------
+CUSTOM_TITLE_CERT_PRICE = 15000
+MAX_CASINO_BET = 5000
+
+VEHICLES = {
+    'scooter': {'name': 'Самокат Xiaomi', 'short': '🛴 Самокат', 'price': 800, 'tier': 1, 'cd_cut': 0.05, 'desc': '-5% к КД'},
+    'bike': {'name': 'Спортивный Велосипед', 'short': '🚲 Велик', 'price': 2200, 'tier': 2, 'cd_cut': 0.10, 'desc': '-10% к КД'},
+    'moped': {'name': 'Мопед Honda Dio', 'short': '🛵 Мопед', 'price': 5000, 'tier': 3, 'cd_cut': 0.15, 'desc': '-15% к КД'},
+    'zhiga': {'name': 'Боевая ВАЗ 2107', 'short': '🚗 Жига', 'price': 12000, 'tier': 4, 'cd_cut': 0.20, 'desc': '-20% к КД'},
+    'skyline': {'name': 'Nissan Skyline R34', 'short': '🏎 Скайлайн', 'price': 35000, 'tier': 5, 'cd_cut': 0.30, 'desc': '-30% к КД'},
+    'cyber_truck': {'name': 'Tesla Cybertruck', 'short': '⚡️ Кибертрак', 'price': 90000, 'tier': 6, 'cd_cut': 0.45, 'desc': '-45% к КД'}
+}
+
+RODS = {
+    'bamboo_rod': {'name': 'Бамбуковая удочка', 'short': '🎋 Бамбуковая', 'price': 350, 'luck': 10},
+    'fiber_rod': {'name': 'Стеклопластиковый спиннинг', 'short': '🎣 Стеклопластик', 'price': 1200, 'luck': 25},
+    'carbon_rod': {'name': 'Карбоновый спиннинг PRO', 'short': '✨ Карбон', 'price': 3800, 'luck': 50},
+    'titan_rod': {'name': 'Титановый морской спиннинг', 'short': '🔱 Титан', 'price': 11000, 'luck': 90}
+}
+
+BOWS = {
+    'wooden_bow': {'name': 'Простой деревянный лук', 'short': '🏹 Деревянный', 'price': 400, 'luck': 10},
+    'recurve_bow': {'name': 'Рекурсивный охотничий лук', 'short': '🎯 Рекурсивный', 'price': 1400, 'luck': 25},
+    'composite_bow': {'name': 'Блочный компаунд-лук', 'short': '⚙️ Компаунд', 'price': 4200, 'luck': 50},
+    'plasma_bow': {'name': 'Плазменный арбалет', 'short': '⚡️ Плазменный', 'price': 12000, 'luck': 90}
+}
+
+BUSINESSES = {
+    'kiosk': {'name': 'Шаурмичная у Котика', 'short': '🌯 Шаурма', 'price': 1500, 'base_income': 45, 'upgrade_cost': 800},
+    'coffee': {'name': 'Уютная Кофейня', 'short': '☕️ Кофейня', 'price': 4500, 'base_income': 120, 'upgrade_cost': 2200},
+    'bar': {'name': 'Аниме-Бар «Токио»', 'short': '🏮 Бар', 'price': 12000, 'base_income': 320, 'upgrade_cost': 5500},
+    'crypto_farm': {'name': 'Криптоферма NYA Mining', 'short': '💻 Ферма', 'price': 18000, 'base_income': 500, 'upgrade_cost': 9000},
+    'nightclub': {'name': 'Неоновый Ночной Клуб', 'short': '🪩 Клуб', 'price': 50000, 'base_income': 1400, 'upgrade_cost': 24000}
+}
+
+PETS_DATA = {
+    'cat': {'name': '🐱 Котик Няша', 'short': '🐱 Котик', 'price': 800, 'luck_bonus': 10, 'desc': '+10% к удаче в играх и ловле'},
+    'dog': {'name': '🐶 Верный Пёс Сиба', 'short': '🐶 Пёс', 'price': 1500, 'luck_bonus': 15, 'desc': '+15% к удаче, защищает от воров'},
+    'raccoon': {'name': '🦝 Енот-Ворюга', 'short': '🦝 Енот', 'price': 3500, 'luck_bonus': 15, 'desc': '+10% к шансу успешного ограбления'},
+    'panda': {'name': '🐼 Ленивая Панда', 'short': '🐼 Панда', 'price': 7000, 'luck_bonus': 20, 'desc': '+35% к часовому бонусу /bonus'},
+    'dragon_pet': {'name': '🐲 Ручной Дракончик', 'short': '🐲 Дракон', 'price': 25000, 'luck_bonus': 35, 'desc': '+35% к удаче во всех играх'}
+}
+
+MARKET_DEFAULT = {
+    'NYA': {'name': 'NyaCoin', 'price': 120.0, 'old_price': 120.0, 'min_price': 20.0, 'max_price': 800.0, 'volatility': 0.18, 'last_update': 0},
+    'BTC': {'name': 'Bitcoin', 'price': 950.0, 'old_price': 950.0, 'min_price': 200.0, 'max_price': 3500.0, 'volatility': 0.12, 'last_update': 0},
+    'ETH': {'name': 'Ethereum', 'price': 450.0, 'old_price': 450.0, 'min_price': 80.0, 'max_price': 1800.0, 'volatility': 0.15, 'last_update': 0},
+    'TON': {'name': 'Toncoin', 'price': 65.0, 'old_price': 65.0, 'min_price': 10.0, 'max_price': 400.0, 'volatility': 0.22, 'last_update': 0}
+}
+
+FISH_TYPES = [
+    ('🐟 Карасик', 'Обычная', 35, 60),
+    ('🐠 Окунь', 'Обычная', 60, 45),
+    ('🐡 Форель', 'Редкая', 120, 25),
+    ('🦞 Речной Рак', 'Редкая', 180, 18),
+    ('🦈 Белая Акула', 'Эпическая', 450, 8),
+    ('👑 Золотая Рыбка', 'Легендарная', 1200, 3),
+    ('🌌 Левиафан Глубин', 'Мифическая', 3500, 1)
+]
+
+HUNT_TYPES = [
+    ('🐇 Лесной Кролик', 'Обычная', 40, 60),
+    ('🦆 Дикая Утка', 'Обычная', 70, 45),
+    ('🦊 Рыжая Лисица', 'Редкая', 140, 25),
+    ('🐗 Дикий Кабан', 'Редкая', 220, 18),
+    ('🐻 Бурый Медведь', 'Эпическая', 500, 8),
+    ('🦄 Белый Единорог', 'Легендарная', 1400, 3),
+    ('🐉 Древний Василиск', 'Мифическая', 4000, 1)
+]
+
+JOBS = {
+    'cleaner': {'name': '🧹 Уборщик чата', 'req_exp': 0, 'min_pay': 30, 'max_pay': 70, 'exp_gain': 5, 'chance': 95},
+    'courier': {'name': '🚴 Курьер онигири', 'req_exp': 50, 'min_pay': 70, 'max_pay': 150, 'exp_gain': 10, 'chance': 88},
+    'barista': {'name': '☕️ Бариста в мэйд-кафе', 'req_exp': 180, 'min_pay': 160, 'max_pay': 320, 'exp_gain': 15, 'chance': 82},
+    'coder': {'name': '💻 Джуниор Python разработчик', 'req_exp': 500, 'min_pay': 350, 'max_pay': 750, 'exp_gain': 25, 'chance': 75},
+    'streamer_job': {'name': '🎥 Топ-стример Твича', 'req_exp': 1200, 'min_pay': 800, 'max_pay': 1800, 'exp_gain': 40, 'chance': 68},
+    'director': {'name': '👑 Генеральный Директор', 'req_exp': 3000, 'min_pay': 2000, 'max_pay': 4500, 'exp_gain': 60, 'chance': 60}
+}
+
+ACHIEVEMENTS = {
+    'first_bonus': {'title': 'Первая монетка', 'desc': 'Заберите часовой бонус', 'stat': 'bonuses', 'target': 1, 'reward': 100},
+    'gambler': {'title': 'Азартный игрок', 'desc': 'Сыграйте 20 игр в казино', 'stat': 'games', 'target': 20, 'reward': 300},
+    'fisherman': {'title': 'Старый рыбак', 'desc': 'Поймайте 15 рыб', 'stat': 'fish', 'target': 15, 'reward': 400},
+    'hunter': {'title': 'Меткий глаз', 'desc': 'Добудьте 15 охотничьих трофеев', 'stat': 'hunt', 'target': 15, 'reward': 400},
+    'businessman': {'title': 'Первый капитал', 'desc': 'Приобретите 1 бизнес', 'stat': 'biz_bought', 'target': 1, 'reward': 500},
+    'banker': {'title': 'Инвестор', 'desc': 'Накопите на депозите 10,000 🪙', 'stat': 'bank_deposit', 'target': 10000, 'reward': 1000},
+    'married': {'title': 'Совет да любовь', 'desc': 'Вступите в законный брак', 'stat': 'marriages', 'target': 1, 'reward': 500},
+    'sapper_master': {'title': 'Мастер-Сапёр', 'desc': 'Выиграйте 5 раундов в Сапёре', 'stat': 'mines_wins', 'target': 5, 'reward': 600}
+}
+
+DAILY_TASKS = [
+    [('messages', 'Написать сообщений в чате', 15, 60), ('bonus', 'Собрать часовой бонус', 3, 80), ('dice', 'Сыграть в кости', 3, 90)],
+    [('messages', 'Написать сообщений в чате', 20, 80), ('slots', 'Крутить слоты', 3, 100), ('iq', 'Пройти тест на IQ', 2, 70)],
+    [('messages', 'Написать сообщений в чате', 20, 80), ('bonus', 'Собрать часовой бонус', 4, 100), ('fat', 'Измерить жирок', 2, 70)],
+    [('messages', 'Написать сообщений в чате', 25, 90), ('dice', 'Сыграть в кости', 4, 120), ('chromosomes', 'Проверить хромосомы', 2, 80)],
+    [('messages', 'Написать сообщений в чате', 30, 110), ('slots', 'Сыграть в слоты', 5, 140), ('transfer', 'Сделать перевод другу', 1, 90)],
+    [('messages', 'Написать сообщений в чате', 35, 130), ('bonus', 'Собрать часовой бонус', 5, 120), ('dice', 'Сыграть в кости', 5, 130)],
+    [('messages', 'Написать сообщений в чате', 40, 150), ('slots', 'Сыграть в слоты', 6, 160), ('transfer', 'Сделать перевод другу', 2, 120)]
+]
+
+WEEKLY_TASKS = [
+    ('messages', 'Написать 120 сообщений в чатах', 120, 400),
+    ('bonus', 'Забрать бонус 20 раз за неделю', 20, 500),
+    ('games', 'Сыграть 30 игр в казино', 30, 600),
+    ('work_shifts', 'Отработать 15 рабочих смен', 15, 550)
+]
+
+RP_ACTIONS = {
+    'обнять': {'verb': 'крепко обнял(а)', 'emoji': '🤗', 'karma': 2},
+    'поцеловать': {'verb': 'нежно поцеловал(а)', 'emoji': '💋', 'karma': 2},
+    'ударить': {'verb': 'отвесил(а) смачного леща', 'emoji': '🖐', 'karma': -2},
+    'погладить': {'verb': 'нежно погладил(а) по голове', 'emoji': '🐱', 'karma': 1},
+    'укусить': {'verb': 'игриво укусил(а) за ушко', 'emoji': '🦷', 'karma': 0},
+    'пнуть': {'verb': 'дал(а) волшебного пинка', 'emoji': '🦶', 'karma': -1},
+    'покормить': {'verb': 'угостил(а) вкусняшкой', 'emoji': '🍰', 'karma': 2}
+}
+
+RP_SOLO_ACTIONS = {
+    'плакать': ('заливается горькими слезами в углу... 😿', '😭'),
+    'смеяться': ('громко смеётся на весь чат! 😹', '😂'),
+    'спать': ('укутался(лась) в плед и сладко спит... 💤', '😴'),
+    'танцевать': ('зажигает на танцполе под фонк! 💃', '🕺'),
+    'курить': ('задумчиво пускает кольца дыма в потолок... 🚬', '🚬')
+}
+
+ALWAYS_ACTIVE_PATTERNS = {
+    r'\b(мяу|ня|няша|мяукни)\b': ['Мяу! 🐾 😺', 'Няяя! 😻', 'Муррр... 😽', 'Котики правят миром! 🐱'],
+    r'\b(доброе\s+утро)\b': ['Доброе утречко! ☀️ Выпей кофе и улыбнись! ☕️ 😺', 'С добрым утром! Пусть день будет продуктивным! 🌸'],
+    r'\b(спокойной\s+ночи)\b': ['Сладких снов и мягких лапок! 🌙 😴', 'Спокойной ночи! Не забудь зарядить телефон! 💤']
+}
+
 
 # ---------------------------------------------------------
 # ИГРОВЫЕ СТРУКТУРЫ
@@ -587,12 +723,14 @@ def update_bank_interest(econ):
 
     periods = int(hours_passed // 6)
     if periods > 0:
-        new_dep = bank_dep
+        # Балансировка: проценты начисляются максимум на 100,000 коинов
+        calc_base = min(100000, bank_dep)
+        new_dep = calc_base
         for _ in range(min(periods, 120)):
             new_dep = int(new_dep * 1.0025)
 
-        earned = new_dep - bank_dep
-        econ['bank_deposit'] = new_dep
+        earned = new_dep - calc_base
+        econ['bank_deposit'] = bank_dep + earned
         econ['last_bank_calc'] = last_calc + (periods * 6 * 3600)
         return earned
     return 0
@@ -859,10 +997,10 @@ def log_event(event_type, message_text):
     if not LOG_CHANNEL_ID:
         return
     try:
-        clean_text = message_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        clean_text = re.sub(r'&lt;b&gt;(.*?)&lt;/b&gt;', r'<b></b>', clean_text)
-        clean_text = re.sub(r'&lt;code&gt;(.*?)&lt;/code&gt;', r'<code></code>', clean_text)
-        clean_text = re.sub(r'&lt;a href="(.*?)"&gt;(.*?)&lt;/a&gt;', r'<a href=""></a>', clean_text)
+        clean_text = html.escape(message_text)
+        clean_text = re.sub(r'&lt;b&gt;(.*?)&lt;/b&gt;', r'<b>\1</b>', clean_text)
+        clean_text = re.sub(r'&lt;code&gt;(.*?)&lt;/code&gt;', r'<code>\1</code>', clean_text)
+        clean_text = re.sub(r'&lt;a href="([^"]+)"&gt;(.*?)&lt;/a&gt;', r'<a href="\1">\2</a>', clean_text)
 
         full_msg = f"📌 <b>[{html.escape(event_type)}]</b>\n⏱ <i>{now_msk().strftime('%Y-%m-%d %H:%M:%S')}</i>\n\n{clean_text}"
         bot.send_message(LOG_CHANNEL_ID, full_msg, parse_mode='HTML')
@@ -1453,19 +1591,36 @@ def apply_rest(chat_id, user_name, duration_text, reason='Не указана', 
     log_event('РЕСТ ВЫДАН', f'Чат: <code>{chat_id}</code>\nПользователь: {make_link(chat_id, clean_user, target_user_id, ping=False)}\nСрок: <b>{duration_text}</b>\nПричина: {reason}')
     return reward_given, econ['rest_rewards_count']
 
+import operator as op_math
+
+MATH_OPERATORS = {
+    ast.Add: op_math.add, ast.Sub: op_math.sub, ast.Mult: op_math.mul,
+    ast.Div: op_math.truediv, ast.FloorDiv: op_math.floordiv, ast.Mod: op_math.mod,
+    ast.USub: op_math.neg, ast.UAdd: op_math.pos
+}
+
 def safe_calculate_math(expr_str):
     if len(expr_str) > 60: return None
     clean_expr = expr_str.strip().replace('×', '*').replace('÷', '/').replace(':', '/')
     if not re.match(r'^[\d\s\+\-\*\/\%\(\)\.]+$', clean_expr): return None
     try:
+        def _eval(node):
+            if isinstance(node, ast.Expression):
+                return _eval(node.body)
+            elif isinstance(node, (ast.Num, ast.Constant)):
+                return node.n if hasattr(node, 'n') else node.value
+            elif isinstance(node, ast.BinOp):
+                left = _eval(node.left)
+                right = _eval(node.right)
+                return MATH_OPERATORS[type(node.op)](left, right)
+            elif isinstance(node, ast.UnaryOp):
+                return MATH_OPERATORS[type(node.op)](_eval(node.operand))
+            raise TypeError("Unsupported node")
+
         tree = ast.parse(clean_expr, mode='eval')
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Num, 
-                                     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.USub, ast.UAdd)):
-                return None
-        res = eval(compile(tree, filename='', mode='eval'), {"__builtins__": None}, {})
+        res = _eval(tree)
         if isinstance(res, (int, float)):
-            if abs(res) > 1e14: return None
+            if abs(res) > 1e12: return None
             if isinstance(res, float) and res.is_integer(): return int(res)
             return round(res, 4)
     except Exception:
@@ -1916,8 +2071,8 @@ def cmd_brick(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
-    m = re.search(r'(?:/brick|кирпич)\\s*(\\d+)?', message.text, re.IGNORECASE)
-    bet = int(m.group(1)) if m and m.group(1) else 50
+    m = re.search(r'(?:/brick|кирпич)\s*(\d+)?', message.text, re.IGNORECASE)
+    bet = min(MAX_CASINO_BET, int(m.group(1)) if m and m.group(1) else 50)
 
     if bet <= 0:
         bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
@@ -1963,10 +2118,10 @@ def cmd_brick(message):
 # ИГРА КРАШ (/crash)
 # ---------------------------------------------------------
 def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, crash_point):
-    steps = [1.03, 1.08, 1.15, 1.25, 1.38, 1.55, 1.75, 2.00, 2.35, 2.80, 3.40, 4.20, 5.20, 6.50, 8.00, 10.00]
+    steps = [1.10, 1.25, 1.50, 1.85, 2.30, 3.00, 4.00, 5.50, 7.50, 10.00]
     
     for mult in steps:
-        time.sleep(1.2)
+        time.sleep(1.6)
         game = active_crash.get(game_id)
         if not game or game.get('cashed_out') or game.get('exploded'):
             return
@@ -2039,8 +2194,8 @@ def cmd_crash(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
-    m = re.search(r'(?:/crash|краш|ракета)\\s*(\\d+)?', message.text, re.IGNORECASE)
-    bet = int(m.group(1)) if m and m.group(1) else 50
+    m = re.search(r'(?:/crash|краш|ракета)\s*(\d+)?', message.text, re.IGNORECASE)
+    bet = min(MAX_CASINO_BET, int(m.group(1)) if m and m.group(1) else 50)
 
     if bet <= 0:
         bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
@@ -2308,7 +2463,7 @@ def cmd_loan(message):
         bot.reply_to(message, "❌ Ваша кредитная история испорчена (Вы в черном списке банка)! 🙀", parse_mode='HTML')
         return
 
-    m = re.search(r'(?:/loan|кредит)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    m = re.search(r'(?:/loan|кредит)\s*(\d+)?', message.text, re.IGNORECASE)
     amount = int(m.group(1)) if m and m.group(1) else 0
     
     lvl, _, _, _ = get_account_level(econ.get('account_exp', 0))
@@ -2381,7 +2536,7 @@ def process_sport_dice_game(message, game_type, bet):
     msg = bot.send_dice(chat_id, emoji=dice_emoji)
     val = msg.dice.value
 
-    time.sleep(3.5)
+    time.sleep(1.5)
     has_clover = (econ.get('luck_clover_until', 0) > time.time())
     clover_str = " (🍀 Бонус клевера)" if has_clover else ""
     result_text = ""
@@ -2468,7 +2623,7 @@ def process_sport_dice_game(message, game_type, bet):
 def cmd_football(message):
     if not can_process_user_message(message):
         return
-    m = re.search(r'(?:/football|футбол|пенальти)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    m = re.search(r'(?:/football|футбол|пенальти)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(m.group(1)) if m and m.group(1) else 50
     process_sport_dice_game(message, 'football', bet)
 
@@ -2476,7 +2631,7 @@ def cmd_football(message):
 def cmd_basketball(message):
     if not can_process_user_message(message):
         return
-    m = re.search(r'(?:/basketball|баскетбол)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    m = re.search(r'(?:/basketball|баскетбол)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(m.group(1)) if m and m.group(1) else 50
     process_sport_dice_game(message, 'basketball', bet)
 
@@ -2484,7 +2639,7 @@ def cmd_basketball(message):
 def cmd_darts(message):
     if not can_process_user_message(message):
         return
-    m = re.search(r'(?:/darts|дартс)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    m = re.search(r'(?:/darts|дартс)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(m.group(1)) if m and m.group(1) else 50
     process_sport_dice_game(message, 'darts', bet)
 
@@ -2492,7 +2647,7 @@ def cmd_darts(message):
 def cmd_bowling(message):
     if not can_process_user_message(message):
         return
-    m = re.search(r'(?:/bowling|боулинг)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    m = re.search(r'(?:/bowling|боулинг)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(m.group(1)) if m and m.group(1) else 50
     process_sport_dice_game(message, 'bowling', bet)
 
@@ -2512,7 +2667,7 @@ BALL_RESPONSES = [
 def cmd_magic_ball(message):
     if not can_process_user_message(message):
         return
-    q = re.sub(r'^(?:/ball|шар)\\s*', '', message.text, flags=re.IGNORECASE).strip()
+    q = re.sub(r'^(?:/ball|шар)\s*', '', message.text, flags=re.IGNORECASE).strip()
     if not q:
         bot.reply_to(message, "🔮 Задайте вопрос шару судьбы!\nПример: <code>шар пойду ли я сегодня спать вовремя?</code>", parse_mode='HTML')
         return
@@ -2523,7 +2678,7 @@ def cmd_magic_ball(message):
 def cmd_chance(message):
     if not can_process_user_message(message):
         return
-    q = re.sub(r'^(?:/chance|шанс)\\s*', '', message.text, flags=re.IGNORECASE).strip()
+    q = re.sub(r'^(?:/chance|шанс)\s*', '', message.text, flags=re.IGNORECASE).strip()
     if not q:
         bot.reply_to(message, "📊 Укажите событие для замера вероятности!\nПример: <code>шанс выиграть джекпот</code>", parse_mode='HTML')
         return
@@ -2540,7 +2695,7 @@ def cmd_chance(message):
 def cmd_detector(message):
     if not can_process_user_message(message):
         return
-    q = re.sub(r'^(?:/detector|детектор|правда\\s+ли\\s+что|правда)\\s*', '', message.text, flags=re.IGNORECASE).strip()
+    q = re.sub(r'^(?:/detector|детектор|правда\s+ли\s+что|правда)\s*', '', message.text, flags=re.IGNORECASE).strip()
     if not q:
         bot.reply_to(message, "🕵️‍♂️ Введите утверждение для проверки на полиграфе!\nПример: <code>детектор я самый красивый в чате</code>", parse_mode='HTML')
         return
@@ -2765,7 +2920,7 @@ def cmd_mines(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
-    match = re.search(r'(?:/mines|мины|сапер)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    match = re.search(r'(?:/mines|мины|сапер)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(match.group(1)) if match and match.group(1) else 50
 
     if bet <= 0:
@@ -3218,7 +3373,7 @@ def cmd_durak(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
-    m = re.search(r'(?:/durak|дурак)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    m = re.search(r'(?:/durak|дурак)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(m.group(1)) if m and m.group(1) else 0
 
     if bet > 0 and econ['balance'] < bet:
@@ -3767,7 +3922,7 @@ def cmd_collect(message):
 
     now = time.time()
     last_collect = econ.get('last_biz_collect', now)
-    hours_passed = (now - last_collect) / 3600.0
+    hours_passed = min(24.0, (now - last_collect) / 3600.0)
 
     if hours_passed < 0.05:
         bot.reply_to(message, "⏳ Прибыль еще не накопилась, загляните чуть позже! 😿")
@@ -4569,7 +4724,7 @@ def process_bj_game(message, bet):
 def cmd_bj(message):
     if not can_process_user_message(message):
         return
-    match = re.search(r'(?:/bj|blackjack|блэкджек|21)\\s*(\\d+)?', message.text, re.IGNORECASE)
+    match = re.search(r'(?:/bj|blackjack|блэкджек|21)\s*(\d+)?', message.text, re.IGNORECASE)
     bet = int(match.group(1)) if match and match.group(1) else 50
     process_bj_game(message, bet)
 
@@ -5294,7 +5449,7 @@ def handle_messages(message):
                 ru = message.reply_to_message.from_user
                 t_uid = ru.id
                 t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
-                m_a = re.search(r'\d+', rem)
+                m_a = re.search(r'\b\d+\b', rem)
                 t_amt = int(m_a.group(0)) if m_a else 0
             else:
                 m_split = re.search(r'^(.*?)\s+(\d+)$', rem)
@@ -5321,7 +5476,7 @@ def handle_messages(message):
                 ru = message.reply_to_message.from_user
                 t_uid = ru.id
                 t_uname = (f"{ru.first_name or ''} {ru.last_name or ''}").strip() or ru.username
-                m_a = re.search(r'\d+', rem)
+                m_a = re.search(r'\b\d+\b', rem)
                 t_amt = int(m_a.group(0)) if m_a else 0
             else:
                 m_split = re.search(r'^(.*?)\s+(\d+)$', rem)
@@ -5361,6 +5516,9 @@ def handle_messages(message):
         p_econ = get_user_econ(p_id, p_tag)
         m_amt = re.search(r'(\d+)', text_lower)
         if 'положить' in text_lower and m_amt:
+            if econ.get('loan', {}).get('amount', 0) > 0:
+                bot.reply_to(message, f"❌ У вас есть непогашенный кредит на <b>{econ['loan']['amount']} 🪙</b>! Пополнение сейфа заблокировано. 😾", parse_mode='HTML')
+                return
             amt = int(m_amt.group(1))
             if amt <= 0 or econ['balance'] < amt:
                 bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙 😿")
@@ -5440,8 +5598,9 @@ def handle_messages(message):
             bot.send_message(chat_id, f"🚨🔊 <b>СИГНАЛИЗАЦИЯ СРАБОТАЛА!</b> 🙀\n\n{u_link} попытался проникнуть в карман {t_link}, но сработала <b>Охранная сигнализация</b>!\nВор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы! (Карма -5)", parse_mode='HTML')
             return
 
-        rob_chance = 0.40
-        if econ.get('pet') and econ['pet'].get('id') == 'raccoon': rob_chance += 0.20
+        rob_chance = 0.30
+        if econ.get('pet') and econ['pet'].get('id') == 'raccoon': rob_chance += 0.10
+        if econ.get('active_title') == 'shadow_ninja': rob_chance += 0.05
 
         if random.random() <= rob_chance:
             stolen = max(10, min(500, int(t_pocket * random.uniform(0.08, 0.18))))
@@ -5722,7 +5881,7 @@ def handle_messages(message):
 
     # КОСТИ
     elif text_lower.startswith(('кости', '/dice', 'кубик')):
-        match = re.search(r'(?:кости|/dice|кубик)\\s*(\\d+)?', text, re.IGNORECASE)
+        match = re.search(r'(?:кости|/dice|кубик)\s*(\d+)?', text, re.IGNORECASE)
         bet = int(match.group(1)) if match and match.group(1) else 0
 
         econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5763,7 +5922,7 @@ def handle_messages(message):
 
     # СЛОТЫ
     elif text_lower.startswith(('слоты', '/slots', 'казино')):
-        match = re.search(r'(?:слоты|/slots|казино)\\s*(\\d+)?', text, re.IGNORECASE)
+        match = re.search(r'(?:слоты|/slots|казино)\s*(\d+)?', text, re.IGNORECASE)
         bet = int(match.group(1)) if match and match.group(1) else 0
 
         econ = get_user_econ(user_id, user_name, username=user_username)
@@ -5892,6 +6051,10 @@ def handle_messages(message):
             return
 
         sender_econ = get_user_econ(user_id, user_name, username=user_username)
+        # Защита от мультиаккаунтного вывода кредита:
+        if sender_econ.get('loan', {}).get('amount', 0) > 0:
+            bot.reply_to(message, f"❌ У вас есть активный кредит на <b>{sender_econ['loan']['amount']} 🪙</b>! Переводы заблокированы службой безопасности банка до погашения (/repay). 😾", parse_mode='HTML')
+            return
         if sender_econ['balance'] < amount:
             bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
             return
@@ -7315,7 +7478,7 @@ def callback_inline(call):
             user_biz = econ.get('businesses', {})
             biz_levels = econ.get('biz_levels', {})
             now = time.time()
-            hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
+            hours_passed = min(24.0, (now - econ.get('last_biz_collect', now)) / 3600.0)
             base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
             if base_profit <= 0:
                 bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась! 😿", show_alert=True)
@@ -7990,6 +8153,7 @@ def callback_inline(call):
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ---------------------------------------------------------
+safe_init_leave()
 setup_bot_commands()
 start_background_threads()
 keep_alive()
