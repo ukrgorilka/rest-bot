@@ -226,17 +226,26 @@ FONTS = {
 FONT_MAPS = {
     'bold_serif': {'A':'𝐀','B':'𝐁','C':'𝐂','D':'𝐃','E':'𝐄','F':'𝐅','G':'𝐆','H':'𝐇','I':'𝐈','J':'𝐉','K':'𝐊','L':'𝐋','M':'𝐌','N':'𝐍','O':'𝐎','P':'𝐏','Q':'𝐐','R':'𝐑','S':'𝐒','T':'𝐓','U':'𝐔','V':'𝐕','W':'𝐖','X':'𝐗','Y':'𝐘','Z':'𝐙','a':'𝐚','b':'𝐛','c':'𝐜','d':'𝐝','e':'𝐞','f':'𝐟','g':'𝐠','h':'𝐡','i':'𝐢','j':'𝐣','k':'𝐤','l':'𝐥','m':'𝐦','n':'𝐧','o':'𝐨','p':'𝐩','q':'𝐪','r':'𝐫','s':'𝐬','t':'𝐭','u':'𝐮','v':'𝐯','w':'𝐰','x':'𝐱','y':'𝐲','z':'𝐳','0':'𝟎','1':'𝟏','2':'𝟐','3':'𝟑','4':'𝟒','5':'𝟓','6':'𝟔','7':'𝟕','8':'𝟖','9':'𝟗'},
     'script': {'A':'𝒜','B':'𝐵','C':'𝒞','D':'𝒟','E':'𝐸','F':'𝐹','G':'𝒢','H':'𝐻','I':'𝐼','J':'𝒥','K':'𝒦','L':'𝐿','M':'𝑀','N':'𝒩','O':'𝒪','P':'𝒫','Q':'𝒬','R':'𝑅','S':'𝒮','T':'𝒯','U':'𝒰','V':'𝒱','W':'𝒲','X':'𝒳','Y':'𝒴','Z':'𝒵','a':'𝒶','b':'𝒷','c':'𝒸','d':'𝒹','e':'𝑒','f':'𝒻','g':'𝑔','h':'𝒽','i':'𝒾','j':'𝒿','k':'𝓀','l':'𝓁','m':'𝓂','n':'𝓃','o':'𝑜','p':'𝓅','q':'𝓆','r':'𝓇','s':'𝓈','t':'𝓉','u':'𝓊','v':'𝓋','w':'𝓌','x':'𝓍','y':'𝓎','z':'𝓏'},
-    'fraktur': {'A':'𝔄','B':'𝔅','C':'ℭ','D':'𝔇','E':'𝔈','F':'𝔉','G':'𝔊','H':'ℌ','I':'ℑ','J':'𝔍','K':'𝔎','L':'𝔏','M':'𝔐','N':'𝔑','O':'𝔒','P':'𝔓','Q':'𝔔','R':'ℜ','S':'𝔖','T':'𝔗','U':'𝔘','V':'𝔙','W':'𝔚','X':'𝔛','Y':'𝔜','Z':'ℨ','a':'𝔞','b':'𝟷','c':'𝔠','d':'𝔡','e':'𝔢','f':'𝔣','g':'𝔤','h':'𝔥','i':'𝔦','j':'𝔧','k':'𝔨','l':'𝔩','m':'𝔪','n':'','o':'𝔬','p':'𝔭','q':'𝔮','r':'𝔯','s':'𝔰','t':'𝔱','u':'𝔲','v':'𝔳','w':'𝔴','x':'𝔵','y':'𝔶','z':'𝔷'},
+    'fraktur': {'A':'𝔄','B':'𝔅','C':'ℭ','D':'𝔇','E':'𝔈','F':'𝔉','G':'𝔊','H':'ℌ','I':'ℑ','J':'𝔍','K':'𝔎','L':'𝔏','M':'𝔐','N':'𝔑','O':'𝔒','P':'𝔓','Q':'𝔔','R':'ℜ','S':'𝔖','T':'𝔗','U':'𝔘','V':'𝔙','W':'𝔚','X':'𝔛','Y':'𝔜','Z':'ℨ','a':'𝔞','b':'𝔟','c':'𝔠','d':'𝔡','e':'𝔢','f':'𝔣','g':'𝔤','h':'𝔥','i':'𝔦','j':'𝔧','k':'𝔨','l':'𝔩','m':'𝔪','n':'𝔫','o':'𝔬','p':'𝔭','q':'𝔮','r':'𝔯','s':'𝔰','t':'𝔱','u':'𝔲','v':'𝔳','w':'𝔴','x':'𝔵','y':'𝔶','z':'𝔷'},
     'bubbles': {'A':'Ⓐ','B':'Ⓑ','C':'Ⓒ','D':'Ⓓ','E':'Ⓔ','F':'Ⓕ','G':'Ⓖ','H':'Ⓗ','I':'Ⓘ','J':'Ⓙ','K':'Ⓚ','L':'Ⓛ','M':'Ⓜ','N':'Ⓝ','O':'Ⓞ','P':'Ⓟ','Q':'Ⓠ','R':'Ⓡ','S':'Ⓢ','T':'Ⓣ','U':'Ⓤ','V':'Ⓥ','W':'Ⓦ','X':'Ⓧ','Y':'Ⓨ','Z':'Ⓩ','a':'ⓐ','b':'ⓑ','c':'ⓒ','d':'ⓓ','e':'ⓔ','f':'ⓕ','g':'ⓖ','h':'ⓗ','i':'ⓘ','j':'ⓙ','k':'ⓚ','l':'ⓛ','m':'ⓜ','n':'ⓝ','o':'ⓞ','p':'ⓟ','q':'ⓠ','r':'ⓡ','s':'ⓢ','t':'ⓣ','u':'ⓤ','v':'ⓥ','w':'ⓦ','x':'ⓧ','y':'ⓨ','z':'ⓩ','0':'⓪','1':'①','2':'②','3':'③','4':'④','5':'⑤','6':'⑥','7':'⑦','8':'⑧','9':'⑨'}
 }
 
 def apply_font(text_str, font_key='default'):
+    if not text_str or font_key == 'default':
+        return text_str
     if font_key == 'monospace':
-        return f"<code>{text_str}</code>"
+        return f"<pre>{text_str}</pre>"
     f_map = FONT_MAPS.get(font_key)
     if not f_map:
         return text_str
-    return "".join(f_map.get(ch, ch) for ch in text_str)
+    tokens = re.split(r'(<[^>]+>)', text_str)
+    res = []
+    for token in tokens:
+        if token.startswith('<') and token.endswith('>'):
+            res.append(token)
+        else:
+            res.append("".join(f_map.get(ch, ch) for ch in token))
+    return "".join(res)
 
 BUFF_ITEMS = {
     'fertilizer': {'name': '🧪 Супер-Удобрение для сада', 'short': '🧪 Удобрение', 'price': 250, 'desc': 'Ускоряет рост растения в 2 раза и восстанавливает влажность почвы'},
@@ -612,9 +621,9 @@ def save_data(send_backup=False):
     with db_lock:
         try:
             temp_file = f"{DATA_FILE}.tmp"
-            db_copy = copy.deepcopy(db)
+            dumped_str = json.dumps(db, ensure_ascii=False, indent=4)
             with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(db_copy, f, ensure_ascii=False, indent=4)
+                f.write(dumped_str)
             os.replace(temp_file, DATA_FILE)
             db_dirty = False
 
@@ -711,7 +720,6 @@ def get_chat_settings(chat_id):
     str_chat = str(chat_id)
     if str_chat not in db['settings']:
         db['settings'][str_chat] = {
-            'max_days': 30,
             'delete_rest_msg': False,
             'timezone_offset': 3,
             'remind_minutes': 60
@@ -1568,11 +1576,6 @@ def parse_duration_to_seconds(duration_str, chat_id=None):
         elif unit in ['м', 'мин', 'минут']: sec = val * 60
         else: sec = 0
 
-        if chat_id:
-            sett = get_chat_settings(chat_id)
-            max_sec = sett['max_days'] * 86400
-            if sec > max_sec:
-                return max_sec
         return sec
 
     match_date = re.search(r'(\d{1,2})[\.\/](\d{1,2})(?:[\.\/](\d{2,4}))?', duration_str)
@@ -1629,6 +1632,8 @@ def rest_manager_worker():
     notified_reminders = set()
     while True:
         time.sleep(10)
+        if len(notified_reminders) > 500:
+            notified_reminders.clear()
         try:
             now_ts = time.time()
             if 'rests' not in db: continue
@@ -1749,8 +1754,20 @@ def memory_and_debt_worker():
                 for k in list(dict_ref.keys()):
                     game_obj = dict_ref[k]
                     if now - game_obj.get('start_time', now) > 900:
-                        # Если игра заброшена, ставка сгорает в пользу казино пула (защита от Free-Roll абуза)
+                        if dict_ref is active_rps_games:
+                            add_coins(game_obj['p1_id'], game_obj.get('p1_tag'), game_obj.get('bet', 0))
+                            if game_obj.get('p2_bet_paid'):
+                                add_coins(game_obj['p2_id'], game_obj.get('p2_tag'), game_obj.get('bet', 0))
                         del dict_ref[k]
+
+            # Очистка устаревших записей флуда (устранение утечки RAM)
+            for uid in list(user_flood_history.keys()):
+                user_flood_history[uid] = [t for t in user_flood_history[uid] if now - t <= 5.0]
+                if not user_flood_history[uid]:
+                    user_flood_history.pop(uid, None)
+            for uid in list(user_flood_muted.keys()):
+                if now >= user_flood_muted[uid]:
+                    user_flood_muted.pop(uid, None)
 
             for k in list(pending_marriages.keys()):
                 if now - pending_marriages[k].get('start_time', now) > 900:
@@ -2254,6 +2271,23 @@ def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, cra
             )
         except Exception:
             pass
+
+    # Если ракета преодолела все шаги и не взорвалась, фиксируем финал
+    game = active_crash.get(game_id)
+    if game and not game.get('cashed_out') and not game.get('exploded'):
+        game['finished'] = True
+        game['exploded'] = True
+        try:
+            bot.edit_message_text(
+                f"💥 <b>РАКЕТА ВЫШЛА В ОТКРЫТЫЙ КОСМОС (10.00x)!</b> 🙀\n\n"
+                f"👤 Пилот: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+                f"💸 Время вышло, ставка <b>{bet} 🪙</b> сгорела! 😿",
+                chat_id=chat_id,
+                message_id=message_id,
+                parse_mode='HTML'
+            )
+        except Exception: pass
+        active_crash.pop(game_id, None)
 
 @bot.message_handler(commands=['crash', 'краш', 'ракета'])
 def cmd_crash(message):
@@ -3256,6 +3290,36 @@ def durak_bot_turn(game):
                 game['defender_idx'] = 1
                 game['status_text'] = "✅ Бито! Ход переходит к вам!"
 
+def check_durak_game_over(game, game_id, chat_id, message_id=None):
+    players = game['players']
+    survivors = [pl for pl in players if len(pl['hand']) > 0 or len(game['deck']) > 0]
+    if len(survivors) <= 1:
+        game['finished'] = True
+        loser = survivors[0] if survivors else None
+        tot_pot = game['bet'] * len(players)
+        win_text = "🏁 <b>ИГРА ОКОНЧЕНА!</b>\n"
+        if loser:
+            win_text += f"🃏 В дураках остался: <b>{loser['name']}</b>! 🙀\n"
+        else:
+            win_text += "🤝 Боевая ничья! Все вышли из игры! 😸\n"
+
+        winners = [pl for pl in players if pl != loser and pl['id'] != 'bot']
+        if winners and tot_pot > 0:
+            split_win = tot_pot // len(winners)
+            for w in winners:
+                add_coins(w['id'], w['name'], split_win)
+            win_text += f"💰 Победители разделили банк: <b>+{split_win} 🪙</b> каждому!"
+
+        game['status_text'] = win_text
+        text, markup = render_durak_board(game_id)
+        if message_id:
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+            except Exception: pass
+        sync_durak_pm(game_id)
+        active_durak.pop(game_id, None)
+        return True
+    return False
+
 def sync_durak_pm(game_id):
     game = active_durak.get(game_id)
     if not game or not game.get('started') or game.get('finished'):
@@ -3412,35 +3476,29 @@ def cmd_durak(message):
         process_casino_bet(bet)
         mark_dirty()
 
-    game_id = f"durak_{user_id}_{int(time.time())}"
-    deck = create_durak_deck()
-    trump_card = deck[0]
-    trump_suit = trump_card['suit']
-
-    p_human = {'id': user_id, 'name': user_name, 'hand': []}
-    p_bot = {'id': 'bot', 'name': '🤖 Ня-Бот', 'hand': []}
-    players = [p_human, p_bot]
-    game = {
-        'mode_name': 'Соло против Бота',
-        'target_players': 2,
-        'bet': bet,
-        'players': players,
-        'deck': deck,
-        'trump': trump_suit,
-        'table': [],
-        'attacker_idx': 0,
-        'defender_idx': 1,
-        'started': True,
-        'finished': False,
-        'status_text': 'Игра началась! Вы ходите первым.',
-        'start_time': time.time(),
-        'chat_id': message.chat.id
-    }
-    durak_deal_cards(game)
-    active_durak[game_id] = game
-    text_board, markup = render_durak_board(game_id, viewer_id=user_id)
-    sent_m = bot.reply_to(message, text_board, reply_markup=markup, parse_mode='HTML')
-    game['msg_id'] = sent_m.message_id
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🤖 1 на 1 против Бота", callback_data=f"durak_mode_1_{bet}:{user_id}"),
+        InlineKeyboardButton("👥 Дуэль (2 игрока)", callback_data=f"durak_mode_2_{bet}:{user_id}")
+    )
+    markup.add(
+        InlineKeyboardButton("👥 3 игрока", callback_data=f"durak_mode_3_{bet}:{user_id}"),
+        InlineKeyboardButton("👥 4 игрока", callback_data=f"durak_mode_4_{bet}:{user_id}")
+    )
+    markup.add(
+        InlineKeyboardButton("👥 5 игроков", callback_data=f"durak_mode_5_{bet}:{user_id}"),
+        InlineKeyboardButton("👥 6 игроков", callback_data=f"durak_mode_6_{bet}:{user_id}")
+    )
+    bot.reply_to(
+        message,
+        f"🃏 <b>КАРТОЧНАЯ ИГРА «ДУРАК» (36 КАРТ)</b> 😺\n"
+        f"──────────────────────\n"
+        f"👤 Инициатор: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
+        f"💰 Ставка на игру: <b>{bet} 🪙</b>\n\n"
+        f"👇 <b>Выберите режим игры:</b>",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
     # ---------------------------------------------------------
 # МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
 # ---------------------------------------------------------
@@ -4140,14 +4198,12 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
 
     uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"⏳ Макс. дней реста: {sett['max_days']} дн.", callback_data=f"set_max_days{uid_tag}"))
     markup.add(InlineKeyboardButton(f"🗑 Авто-удаление смс в ресте: {del_msg_status}", callback_data=f"toggle_del_msg{uid_tag}"))
     markup.add(InlineKeyboardButton(f"🔔 Напоминание за: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
 
     text = (
         f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺\n"
         f"──────────────────────\n"
-        f"• Максимальный срок реста: <b>{sett['max_days']} дней</b>\n"
         f"• Авто-удаление сообщений отдыхающих: <b>{del_msg_status}</b>\n"
         f"• Напоминание об окончании реста: за <b>{sett.get('remind_minutes', 60)} мин.</b>\n"
         f"──────────────────────\n"
@@ -4406,7 +4462,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         f"{border}"
     )
 
-    text = apply_font(raw_text, font_key) if font_key == 'monospace' else raw_text
+    text = apply_font(raw_text, font_key)
 
     if inv:
         row = []
@@ -4785,8 +4841,8 @@ def cmd_rps(message):
         bot.reply_to(message, f"❌ У соперника недостаточно коинов для ставки ({target_econ['balance']} / {bet} 🪙)! 😿")
         return
 
+    # Списываем ставку только с инициатора вызова
     econ['balance'] -= bet
-    target_econ['balance'] -= bet
     mark_dirty()
 
     game_id = f"rps_{user_id}_{target_user_id}_{int(time.time())}"
@@ -4794,6 +4850,7 @@ def cmd_rps(message):
         'p1_id': user_id, 'p1_tag': user_name,
         'p2_id': target_user_id, 'p2_tag': target_user,
         'bet': bet, 'p1_choice': None, 'p2_choice': None,
+        'p2_bet_paid': False,
         'start_time': time.time(), 'finished': False
     }
 
@@ -6055,7 +6112,15 @@ def handle_messages(message):
             bot.reply_to(message, "❌ Формат: <code>передать @username 100</code> или ответом на сообщение: <code>передать 100</code>. 😾", parse_mode='HTML')
             return
 
-        if target_id == user_id:
+        try:
+            bot_me = bot.get_me()
+        except Exception:
+            bot_me = None
+        if bot_me and (target_id == bot_me.id or clean_tag(target_u).lower() == bot_me.username.lower()):
+            bot.reply_to(message, "❌ Боту коины не нужны! Переведите их друзьям. 😸")
+            return
+        clean_sender_u = (user_username or '').lower()
+        if target_id == user_id or (clean_sender_u and clean_tag(target_u).lower() == clean_sender_u):
             bot.reply_to(message, "❌ Нельзя переводить коины самому себе! 🙀")
             return
 
@@ -6178,7 +6243,7 @@ def callback_inline(call):
                 owner_id = int(parts[1])
 
         if owner_id and owner_id != user_id:
-            if action_data in ['set_max_days', 'toggle_del_msg', 'set_remind_time']:
+            if action_data in ['toggle_del_msg', 'set_remind_time']:
                 if not is_admin(chat_id, user_id):
                     bot.answer_callback_query(call.id, "❌ Настройки доступны только администраторам!", show_alert=True)
                     return
@@ -6187,7 +6252,7 @@ def callback_inline(call):
                 return
 
         # НАСТРОЙКИ ПРОФИЛЯ
-        elif action_data == 'open_profile_settings':
+        if action_data == 'open_profile_settings':
             render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
             bot.answer_callback_query(call.id)
             return
@@ -6510,30 +6575,8 @@ def callback_inline(call):
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
 
-            survivors = [pl for pl in players if len(pl['hand']) > 0 or len(game['deck']) > 0]
-            if len(survivors) <= 1:
-                game['finished'] = True
-                loser = survivors[0] if survivors else None
-                tot_pot = game['bet'] * len(players)
-                win_text = f"🏁 <b>ИГРА ОКОНЧЕНА!</b>\n"
-                if loser:
-                    win_text += f"🃏 В дураках остался: <b>{loser['name']}</b>! 🙀\n"
-                else:
-                    win_text += "🤝 Боевая ничья! Все вышли из игры! 😸\n"
-
-                winners = [pl for pl in players if pl != loser and pl['id'] != 'bot']
-                if winners and tot_pot > 0:
-                    split_win = tot_pot // len(winners)
-                    for w in winners:
-                        add_coins(w['id'], w['name'], split_win)
-                    win_text += f"💰 Победители разделили банк: <b>+{split_win} 🪙</b> каждому!"
-
-                game['status_text'] = win_text
-                text, markup = render_durak_board(game_id, viewer_id=user_id)
-                try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
-                except Exception: pass
-                sync_durak_pm(game_id)
-                active_durak.pop(game_id, None)
+            if check_durak_game_over(game, game_id, chat_id, call.message.message_id):
+                bot.answer_callback_query(call.id)
                 return
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
@@ -6567,6 +6610,9 @@ def callback_inline(call):
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
 
+            if check_durak_game_over(game, game_id, chat_id, call.message.message_id):
+                bot.answer_callback_query(call.id)
+                return
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
@@ -6588,11 +6634,39 @@ def callback_inline(call):
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
 
+            if check_durak_game_over(game, game_id, chat_id, call.message.message_id):
+                bot.answer_callback_query(call.id)
+                return
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
+
+        # ДУРАК: ОТМЕНА ЛОББИ
+        elif action_data.startswith('durak_cancel_'):
+            game_id = action_data.replace('durak_cancel_', '')
+            game = active_durak.get(game_id)
+            if not game:
+                bot.answer_callback_query(call.id, "❌ Стол уже не активен!", show_alert=True)
+                return
+            if game.get('started'):
+                bot.answer_callback_query(call.id, "❌ Игра уже началась, отменить нельзя!", show_alert=True)
+                return
+            creator_id = game['players'][0]['id'] if game.get('players') else None
+            if creator_id and creator_id != user_id and not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только создатель стола может отменить игру!", show_alert=True)
+                return
+            bet = game.get('bet', 0)
+            for p in game.get('players', []):
+                if p['id'] != 'bot' and bet > 0:
+                    add_coins(p['id'], p.get('name'), bet)
+            active_durak.pop(game_id, None)
+            try:
+                bot.edit_message_text("❌ Партия в Дурака отменена создателем. Все ставки возвращены участникам. 😸", chat_id=chat_id, message_id=call.message.message_id)
+            except Exception: pass
+            bot.answer_callback_query(call.id, "✅ Игра отменена!")
+            return
 
         # ИГРА КИРПИЧ
         elif action_data.startswith('brick_step_'):
@@ -7675,6 +7749,13 @@ def callback_inline(call):
                 if game['p2_choice']:
                     bot.answer_callback_query(call.id, "Вы уже сделали выбор! Ожидаем соперника. ⏳", show_alert=True)
                     return
+                p2_econ = get_user_econ(user_id, user_name)
+                if p2_econ['balance'] < game['bet']:
+                    bot.answer_callback_query(call.id, f"❌ Недостаточно коинов для ставки {game['bet']} 🪙!", show_alert=True)
+                    return
+                p2_econ['balance'] -= game['bet']
+                game['p2_bet_paid'] = True
+                mark_dirty()
                 game['p2_choice'] = choice
             else:
                 bot.answer_callback_query(call.id, "❌ Вы не являетесь участником этой дуэли! 😾", show_alert=True)
@@ -7785,16 +7866,6 @@ def callback_inline(call):
             except Exception: pass
 
         # НАСТРОЙКИ
-        elif action_data == 'set_max_days':
-            if not is_admin(chat_id, user_id): return
-            sett = get_chat_settings(chat_id)
-            opts = [14, 30, 60]
-            next_opt = opts[(opts.index(sett['max_days']) + 1) % len(opts)]
-            sett['max_days'] = next_opt
-            mark_dirty()
-            bot.answer_callback_query(call.id, f'✅ Лимит изменен на {next_opt} дней! 😸')
-            render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
-
         elif action_data == 'toggle_del_msg':
             if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
