@@ -42,7 +42,7 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = os.environ.get("BOT_TOKEN", "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0")
+TOKEN = os.environ.get("BOT_TOKEN", "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0")  # Рекомендуется задать BOT_TOKEN в ENV
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
 db_dirty = False
@@ -202,8 +202,41 @@ THEMES = {
     'sakura': {'name': '🌸 Сакура', 'price': 1200, 'border': '🌸══════ ✿ ══════🌸', 'header': '🌸 <b>КАРТОЧКА ИГРОКА: SAKURA EDITION</b> 🌸', 'icon': '🌸'},
     'neon': {'name': '🌌 Неон / Киберпанк', 'price': 2000, 'border': '⚡️══════ ◈ ══════⚡️', 'header': '🌌 <b>CYBERPUNK ID-CARD: NEON</b> ⚡️', 'icon': '🔮'},
     'gold': {'name': '👑 Королевское Золото', 'price': 3500, 'border': '⚜️══════ 👑 ══════⚜️', 'header': '👑 <b>КОРОЛЕВСКИЙ VIP ПРОФИЛЬ</b> ⚜️', 'icon': '✨'},
-    'gothic': {'name': '💀 Тёмная Готика', 'price': 2500, 'border': '☠️══════ 🪦 ══════☠️', 'header': '💀 <b>ГОТИЧЕСКИЙ ГРИМУАР ДУШИ</b> 🕯', 'icon': '🩸'}
+    'gothic': {'name': '💀 Тёмная Готика', 'price': 2500, 'border': '☠️══════ 🪦 ══════☠️', 'header': '💀 <b>ГОТИЧЕСКИЙ ГРИМУАР ДУШИ</b> 🕯', 'icon': '🩸'},
+    'cyberpunk': {'name': '🤖 Киберпанк 2077', 'price': 3000, 'border': '⚠️══════ ⚡️ ══════⚠️', 'header': '🤖 <b>CYBERPUNK NEURAL PROFILE</b> 🦾', 'icon': '🔋'},
+    'space': {'name': '🌌 Космос и Звезды', 'price': 3500, 'border': '🪐══════ 🌠 ══════🌌', 'header': '🌌 <b>ГАЛАКТИЧЕСКИЙ АТЛАС ЗВЕЗД</b> 🪐', 'icon': '✨'},
+    'blood_moon': {'name': '🩸 Кровавая Луна', 'price': 4000, 'border': '🌕══════ 🩸 ══════🌑', 'header': '🩸 <b>АЛТАРЬ КРОВАВОЙ ЛУНЫ</b> 🗡', 'icon': '🍷'},
+    'emerald': {'name': '🌿 Изумрудный Лес', 'price': 2200, 'border': '🍃══════ 🌲 ══════🍃', 'header': '🌿 <b>ХРАНИТЕЛЬ ДРЕВНЕГО ЛЕСА</b> 🍃', 'icon': '🌱'},
+    'synthwave': {'name': '🌇 Синтвейв 80s', 'price': 2800, 'border': '🌴══════ 🌆 ══════🌴', 'header': '🌇 <b>RETROWAVE SUNSET DRIVE</b> 🏎', 'icon': '📼'},
+    'frost': {'name': '❄️ Вечная Мерзлота', 'price': 2600, 'border': '❄️══════ 🧊 ══════❄️', 'header': '❄️ <b>ЛЕДЯНОЙ ЧЕРТОГ АРКТИКИ</b> 🧊', 'icon': '💎'}
 }
+
+# ---------------------------------------------------------
+# ШРИФТЫ ДЛЯ ПРОФИЛЯ
+# ---------------------------------------------------------
+FONTS = {
+    'default': {'name': 'Обычный (Telegram)', 'desc': 'Стандартный шрифт интерфейса'},
+    'monospace': {'name': '💻 Моноширинный', 'desc': 'Стиль терминала и кода'},
+    'bold_serif': {'name': '🎩 Сериф жирный', 'desc': 'Классический винтажный стиль'},
+    'script': {'name': '✒️ Рукописный курсив', 'desc': 'Элегантный каллиграфический стиль'},
+    'fraktur': {'name': '⚔️ Готический', 'desc': 'Древний готический шрифт'},
+    'bubbles': {'name': '🫧 Пузырьки', 'desc': 'Игривый стиль в кружочках'}
+}
+
+FONT_MAPS = {
+    'bold_serif': {'A':'𝐀','B':'𝐁','C':'𝐂','D':'𝐃','E':'𝐄','F':'𝐅','G':'𝐆','H':'𝐇','I':'𝐈','J':'𝐉','K':'𝐊','L':'𝐋','M':'𝐌','N':'𝐍','O':'𝐎','P':'𝐏','Q':'𝐐','R':'𝐑','S':'𝐒','T':'𝐓','U':'𝐔','V':'𝐕','W':'𝐖','X':'𝐗','Y':'𝐘','Z':'𝐙','a':'𝐚','b':'𝐛','c':'𝐜','d':'𝐝','e':'𝐞','f':'𝐟','g':'𝐠','h':'𝐡','i':'𝐢','j':'𝐣','k':'𝐤','l':'𝐥','m':'𝐦','n':'𝐧','o':'𝐨','p':'𝐩','q':'𝐪','r':'𝐫','s':'𝐬','t':'𝐭','u':'𝐮','v':'𝐯','w':'𝐰','x':'𝐱','y':'𝐲','z':'𝐳','0':'𝟎','1':'𝟏','2':'𝟐','3':'𝟑','4':'𝟒','5':'𝟓','6':'𝟔','7':'𝟕','8':'𝟖','9':'𝟗'},
+    'script': {'A':'𝒜','B':'𝐵','C':'𝒞','D':'𝒟','E':'𝐸','F':'𝐹','G':'𝒢','H':'𝐻','I':'𝐼','J':'𝒥','K':'𝒦','L':'𝐿','M':'𝑀','N':'𝒩','O':'𝒪','P':'𝒫','Q':'𝒬','R':'𝑅','S':'𝒮','T':'𝒯','U':'𝒰','V':'𝒱','W':'𝒲','X':'𝒳','Y':'𝒴','Z':'𝒵','a':'𝒶','b':'𝒷','c':'𝒸','d':'𝒹','e':'𝑒','f':'𝒻','g':'𝑔','h':'𝒽','i':'𝒾','j':'𝒿','k':'𝓀','l':'𝓁','m':'𝓂','n':'𝓃','o':'𝑜','p':'𝓅','q':'𝓆','r':'𝓇','s':'𝓈','t':'𝓉','u':'𝓊','v':'𝓋','w':'𝓌','x':'𝓍','y':'𝓎','z':'𝓏'},
+    'fraktur': {'A':'𝔄','B':'𝔅','C':'ℭ','D':'𝔇','E':'𝔈','F':'𝔉','G':'𝔊','H':'ℌ','I':'ℑ','J':'𝔍','K':'𝔎','L':'𝔏','M':'𝔐','N':'𝔑','O':'𝔒','P':'𝔓','Q':'𝔔','R':'ℜ','S':'𝔖','T':'𝔗','U':'𝔘','V':'𝔙','W':'𝔚','X':'𝔛','Y':'𝔜','Z':'ℨ','a':'𝔞','b':'𝟷','c':'𝔠','d':'𝔡','e':'𝔢','f':'𝔣','g':'𝔤','h':'𝔥','i':'𝔦','j':'𝔧','k':'𝔨','l':'𝔩','m':'𝔪','n':'','o':'𝔬','p':'𝔭','q':'𝔮','r':'𝔯','s':'𝔰','t':'𝔱','u':'𝔲','v':'𝔳','w':'𝔴','x':'𝔵','y':'𝔶','z':'𝔷'},
+    'bubbles': {'A':'Ⓐ','B':'Ⓑ','C':'Ⓒ','D':'Ⓓ','E':'Ⓔ','F':'Ⓕ','G':'Ⓖ','H':'Ⓗ','I':'Ⓘ','J':'Ⓙ','K':'Ⓚ','L':'Ⓛ','M':'Ⓜ','N':'Ⓝ','O':'Ⓞ','P':'Ⓟ','Q':'Ⓠ','R':'Ⓡ','S':'Ⓢ','T':'Ⓣ','U':'Ⓤ','V':'Ⓥ','W':'Ⓦ','X':'Ⓧ','Y':'Ⓨ','Z':'Ⓩ','a':'ⓐ','b':'ⓑ','c':'ⓒ','d':'ⓓ','e':'ⓔ','f':'ⓕ','g':'ⓖ','h':'ⓗ','i':'ⓘ','j':'ⓙ','k':'ⓚ','l':'ⓛ','m':'ⓜ','n':'ⓝ','o':'ⓞ','p':'ⓟ','q':'ⓠ','r':'ⓡ','s':'ⓢ','t':'ⓣ','u':'ⓤ','v':'ⓥ','w':'ⓦ','x':'ⓧ','y':'ⓨ','z':'ⓩ','0':'⓪','1':'①','2':'②','3':'③','4':'④','5':'⑤','6':'⑥','7':'⑦','8':'⑧','9':'⑨'}
+}
+
+def apply_font(text_str, font_key='default'):
+    if font_key == 'monospace':
+        return f"<code>{text_str}</code>"
+    f_map = FONT_MAPS.get(font_key)
+    if not f_map:
+        return text_str
+    return "".join(f_map.get(ch, ch) for ch in text_str)
 
 BUFF_ITEMS = {
     'energy_drink': {'name': '⚡️ Энергетик Red Cat', 'short': '⚡️ Энергетик', 'price': 400, 'desc': 'Мгновенный сброс всех кулдаунов работы, замеров, мусорки и охоты (кд 30 мин)'},
@@ -216,19 +249,19 @@ BUFF_ITEMS = {
 # РАСШИРЕННЫЕ БИЗНЕСЫ
 # ---------------------------------------------------------
 BUSINESSES = {
-    'bottles': {'name': '🥫 Приём стеклотары', 'short': 'Стеклотара', 'price': 200, 'base_income': 3, 'upgrade_cost': 120},
-    'lemonade': {'name': '🍋 Лоток с лимонадом', 'short': 'Лимонад', 'price': 450, 'base_income': 6, 'upgrade_cost': 280},
-    'shawarma': {'name': '🌯 Ларек с Шаурмой', 'short': 'Шаурма', 'price': 800, 'base_income': 10, 'upgrade_cost': 500},
-    'coffee': {'name': '☕️ Уютная Кофейня', 'short': 'Кофейня', 'price': 2400, 'base_income': 35, 'upgrade_cost': 1800},
-    'bakery': {'name': '🥐 Пекарня Булочек', 'short': 'Пекарня', 'price': 6000, 'base_income': 90, 'upgrade_cost': 4500},
-    'crypto_farm': {'name': '💻 Крипто-Ферма', 'short': 'Крипто-Ферма', 'price': 18000, 'base_income': 280, 'upgrade_cost': 13000},
-    'club': {'name': '🏰 Ночной Клуб', 'short': 'Ночной Клуб', 'price': 54000, 'base_income': 850, 'upgrade_cost': 38000},
-    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'short': 'Автосалон', 'price': 120000, 'base_income': 1800, 'upgrade_cost': 85000},
-    'space_station': {'name': '🛰 Космическая Станция', 'short': 'Космостанция', 'price': 450000, 'base_income': 6500, 'upgrade_cost': 300000},
-    'megacorp': {'name': '🏢 Мегакорпорация', 'short': 'Мегакорп', 'price': 1500000, 'base_income': 25000, 'upgrade_cost': 1000000},
-    'oil_rig': {'name': '🛢 Нефтяная вышка в Сибири', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 55000, 'upgrade_cost': 2200000},
-    'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 140000, 'upgrade_cost': 6500000},
-    'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 50000000, 'base_income': 650000, 'upgrade_cost': 30000000}
+    'bottles': {'name': '🥫 Приём стеклотары', 'short': 'Стеклотара', 'price': 200, 'base_income': 1, 'upgrade_cost': 120},
+    'lemonade': {'name': '🍋 Лоток с лимонадом', 'short': 'Лимонад', 'price': 450, 'base_income': 2, 'upgrade_cost': 280},
+    'shawarma': {'name': '🌯 Ларек с Шаурмой', 'short': 'Шаурма', 'price': 800, 'base_income': 3, 'upgrade_cost': 500},
+    'coffee': {'name': '☕️ Уютная Кофейня', 'short': 'Кофейня', 'price': 2400, 'base_income': 8, 'upgrade_cost': 1800},
+    'bakery': {'name': '🥐 Пекарня Булочек', 'short': 'Пекарня', 'price': 6000, 'base_income': 18, 'upgrade_cost': 4500},
+    'crypto_farm': {'name': '💻 Крипто-Ферма', 'short': 'Крипто-Ферма', 'price': 18000, 'base_income': 50, 'upgrade_cost': 13000},
+    'club': {'name': '🏰 Ночной Клуб', 'short': 'Ночной Клуб', 'price': 54000, 'base_income': 140, 'upgrade_cost': 38000},
+    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'short': 'Автосалон', 'price': 120000, 'base_income': 300, 'upgrade_cost': 85000},
+    'space_station': {'name': '🛰 Космическая Станция', 'short': 'Космостанция', 'price': 450000, 'base_income': 1050, 'upgrade_cost': 300000},
+    'megacorp': {'name': '🏢 Мегакорпорация', 'short': 'Мегакорп', 'price': 1500000, 'base_income': 3500, 'upgrade_cost': 1000000},
+    'oil_rig': {'name': '🛢 Нефтяная вышка в Сибири', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 8000, 'upgrade_cost': 2200000},
+    'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 22000, 'upgrade_cost': 6500000},
+    'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 50000000, 'base_income': 100000, 'upgrade_cost': 30000000}
 }
 
 CUSTOM_TITLE_CERT_PRICE = 15000
@@ -519,7 +552,6 @@ current_quiz = {'question': None, 'answer': None, 'reward': 0, 'chat_id': None}
 user_flood_history = {}
 user_flood_muted = {}
 last_chat_activity = {}
-
 # ---------------------------------------------------------
 # БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ
 # ---------------------------------------------------------
@@ -622,6 +654,7 @@ def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
         BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
+        BotCommand('profile_settings', '⚙️ Настройки тем, шрифтов и визуала профиля'),
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
         BotCommand('trash', '🗑 Порыться в мусорке в поисках лута'),
         BotCommand('durak', '🃏 Карточная игра Дурак (36 карт)'),
@@ -801,7 +834,7 @@ def update_bank_interest(econ):
     if periods > 0:
         new_dep = bank_dep
         for _ in range(min(periods, 120)):
-            new_dep = int(new_dep * 1.01)
+            new_dep = int(new_dep * 1.0025)  # Сбалансированная ставка +0.25% за 6 часов (1% в сутки)
 
         earned = new_dep - bank_dep
         econ['bank_deposit'] = new_dep
@@ -833,14 +866,14 @@ def merge_user_econ_data(dest, src):
     if tier_src > tier_dest:
         dest['vehicle'] = v_src
 
-    for eq in ['equipped_rod', 'equipped_bow', 'active_title', 'custom_title', 'badge', 'profile_theme', 'pfp_file_id']:
+    for eq in ['equipped_rod', 'equipped_bow', 'active_title', 'custom_title', 'badge', 'profile_theme', 'pfp_file_id', 'profile_font']:
         if not dest.get(eq) and src.get(eq):
             dest[eq] = src[eq]
 
     if src.get('has_custom_title_cert'):
         dest['has_custom_title_cert'] = True
 
-    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'achievements']:
+    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts', 'achievements']:
         combined = list(dict.fromkeys(dest.get(list_field, []) + src.get(list_field, [])))
         dest[list_field] = combined
 
@@ -944,6 +977,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('pet', None), ('bank_deposit', 0), ('last_bank_calc', time.time()),
         ('last_case_time', 0), ('last_rob_time', 0), ('last_trash_time', 0),
         ('profile_theme', 'default'), ('purchased_themes', ['default']),
+        ('profile_font', 'default'), ('purchased_fonts', ['default']),
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
         ('daily_casino_profit', 0), ('daily_transferred', 0), ('daily_stats_date', ''),
@@ -1244,8 +1278,7 @@ def is_admin(chat_id, user_id):
         return member.status in ['administrator', 'creator']
     except Exception:
         return False
-
-def resolve_user_from_string(chat_id, query_str):
+        def resolve_user_from_string(chat_id, query_str):
     if not query_str:
         return None, None
 
@@ -1345,8 +1378,8 @@ def parse_rest_command(message):
                 duration = d_match.group(0)
                 reason = body.replace(duration, '').strip() or 'Не указана'
             else:
-                duration = body or '3 дня'
-                reason = 'Не указана'
+                duration = '3 дня'
+                reason = body or 'Не указана'
         return target_name, target_id, duration, reason
 
     m_tg = re.search(r'tg://(?:openmessage\?user_id=|user\?id=)(\d+)', body)
@@ -1365,8 +1398,8 @@ def parse_rest_command(message):
                 duration = d_match.group(0)
                 reason = clean_body.replace(duration, '').strip() or 'Не указана'
             else:
-                duration = clean_body or '3 дня'
-                reason = 'Не указана'
+                duration = '3 дня'
+                reason = clean_body or 'Не указана'
         return target_name, target_id, duration, reason
 
     m_tag = re.search(r'@([a-zA-Z0-9_]{3,32})', body)
@@ -1386,8 +1419,8 @@ def parse_rest_command(message):
                 duration = d_match.group(0)
                 reason = clean_body.replace(duration, '').strip() or 'Не указана'
             else:
-                duration = clean_body or '3 дня'
-                reason = 'Не указана'
+                duration = '3 дня'
+                reason = clean_body or 'Не указана'
         return target_name, target_id, duration, reason
 
     if '|' in body:
@@ -1421,8 +1454,8 @@ def parse_rest_command(message):
                     duration = d1.group(0)
                     reason = parts[1].replace(duration, '').strip() or 'Не указана'
                 else:
-                    duration = parts[1]
-                    reason = 'Не указана'
+                    duration = '3 дня'
+                    reason = parts[1] or 'Не указана'
                 uid, uname = resolve_user_from_string(message.chat.id, target_raw)
                 return uname or target_raw, uid, duration, reason
 
@@ -1574,7 +1607,7 @@ def parse_duration_to_seconds(duration_str, chat_id=None):
                 return max(diff, 0)
             except ValueError:
                 pass
-    return None
+    return 259200  # Дефолт 3 дня при нераспознанном сроке
 
 def add_to_history(chat_str, user, duration_text, reason, user_id=None, action_type="Выдан рест"):
     if chat_str not in db['history']:
@@ -1694,9 +1727,24 @@ def safe_calculate_math(expr_str):
 # ---------------------------------------------------------
 def memory_and_debt_worker():
     while True:
-        time.sleep(300)
+        time.sleep(15)  # Проверка каждые 15 сек для точного таймера лобби
         now = time.time()
         try:
+            # Авто-удаление лобби Дурака через 10 минут (600 секунд) если игра не собралась
+            for d_k in list(active_durak.keys()):
+                d_game = active_durak[d_k]
+                if not d_game.get('started') and (now - d_game.get('start_time', now) > 600):
+                    chat_id_lobby = d_game.get('chat_id')
+                    msg_id_lobby = d_game.get('msg_id')
+                    bet_lobby = d_game.get('bet', 0)
+                    for pl in d_game.get('players', []):
+                        if pl['id'] != 'bot' and bet_lobby > 0:
+                            add_coins(pl['id'], pl.get('name'), bet_lobby)
+                    if chat_id_lobby and msg_id_lobby:
+                        try: bot.delete_message(chat_id_lobby, msg_id_lobby)
+                        except Exception: pass
+                    del active_durak[d_k]
+
             for dict_ref in [active_crash, active_mines, active_bj_games, active_rps_games, active_brick, active_c_mines, active_durak]:
                 for k in list(dict_ref.keys()):
                     game_obj = dict_ref[k]
@@ -1765,7 +1813,6 @@ def gold_rush_worker():
     while True:
         time.sleep(random.randint(14400, 28800))
         try:
-            # Длительность: 1.5 часа (5400 сек)
             gold_rush_event['active'] = True
             gold_rush_event['until'] = time.time() + 5400
             rush_msg = (
@@ -2157,9 +2204,8 @@ def cmd_brick(message):
         f"<i>Делайте шаги, чтобы увеличить множитель, но осторожно: кирпич может сорваться в любой момент!</i> 😸",
         reply_markup=markup,
         parse_mode='HTML'
-    )
-
-# ---------------------------------------------------------
+                             )
+    # ---------------------------------------------------------
 # ИГРА КРАШ (/crash)
 # ---------------------------------------------------------
 def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, crash_point):
@@ -2995,7 +3041,7 @@ def cmd_mines(message):
     )
 
 # ---------------------------------------------------------
-# БЕСПЛАТНЫЙ КЛАССИЧЕСКИЙ САПЁР
+# БЕСПЛАТНЫЙ КЛАССИЧЕСКИЙ САПЁР (ВКЛЮЧАЯ 96 КЛЕТОК И 1-КНОПКУ)
 # ---------------------------------------------------------
 NUM_EMOJIS = {
     0: '⬜', 1: '1⃣', 2: '2⃣', 3: '3⃣', 4: '4⃣', 5: '5⃣', 6: '6⃣', 7: '7⃣', 8: '8⃣'
@@ -3004,7 +3050,9 @@ NUM_EMOJIS = {
 CSAPER_DIFFICULTIES = {
     'easy': {'name': '🟢 Новичок (5х5)', 'cols': 5, 'rows': 5, 'mines': 4, 'reward': 100, 'exp': 30},
     'med': {'name': '🟡 Любитель (6х6)', 'cols': 6, 'rows': 6, 'mines': 7, 'reward': 250, 'exp': 60},
-    'hard': {'name': '🔴 Эксперт (7х7)', 'cols': 7, 'rows': 7, 'mines': 11, 'reward': 600, 'exp': 120}
+    'hard': {'name': '🔴 Эксперт (7х7)', 'cols': 7, 'rows': 7, 'mines': 11, 'reward': 600, 'exp': 120},
+    'ultra_96': {'name': '🟣 Мега-Поле (8х12, 96 кл.)', 'cols': 8, 'rows': 12, 'mines': 18, 'reward': 1800, 'exp': 350},
+    'one_btn_96': {'name': '⚡️ Экспресс 1-Кнопка (96 кл.)', 'cols': 8, 'rows': 12, 'mines': 18, 'reward': 2200, 'exp': 450, 'one_button': True}
 }
 
 def get_adjacent_indices(idx, cols, rows):
@@ -3048,7 +3096,31 @@ def render_classic_mines_board(game_id):
     total_cells = cols * rows
     u_id = game['user_id']
     mode = game.get('mode', 'dig')
-    
+
+    if game.get('one_button'):
+        markup = InlineKeyboardMarkup(row_width=1)
+        safe_total = total_cells - game['mines_count']
+        rev_count = len(game['revealed'])
+        if not game['finished']:
+            markup.add(InlineKeyboardButton(f"⛏ Сделать шаг разминирования ({rev_count}/{safe_total})", callback_data=f"cmo_{game_id}_step:{u_id}"))
+            if rev_count > 0:
+                cur_cashout = int(game['reward'] * (rev_count / safe_total))
+                markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cur_cashout} 🪙)", callback_data=f"cm_cashout_{game_id}:{u_id}"))
+
+        bar_len = min(10, int((rev_count / max(1, safe_total)) * 10))
+        bar = "🟩" * bar_len + "⬜️" * (10 - bar_len)
+        text = (
+            f"⚡️ <b>ЭКСПРЕСС-САПЁР В 1 КНОПКУ (96 КЛЕТОК)</b> 😺\n"
+            f"──────────────────────\n"
+            f"👤 Сапёр: {game['user_name']}\n"
+            f"💣 Мин на минном поле: <b>{game['mines_count']} шт.</b>\n"
+            f"📈 Прогресс очистки: <b>{rev_count}/{safe_total} кл.</b> [{bar}]\n"
+            f"🏆 Главный куш: <b>+{game['reward']} 🪙</b> (+{game['exp']} EXP)\n"
+            f"──────────────────────\n"
+            f"<i>Жмите одну кнопку, чтобы шаг за шагом обезвреживать 96 клеток!</i> 😸"
+        )
+        return text, markup
+
     markup = InlineKeyboardMarkup(row_width=cols)
     buttons = []
     
@@ -3110,7 +3182,7 @@ def cmd_classic_mines(message):
     )
 
 # ---------------------------------------------------------
-# КАРТОЧНАЯ ИГРА ДУРАК (36 КАРТ, 6 РЕЖИМОВ)
+# КАРТОЧНАЯ ИГРА ДУРАК (36 КАРТ, 6 РЕЖИМОВ, СИНХРОНИЗАЦИЯ В ЛС)
 # ---------------------------------------------------------
 DURAK_RANKS = ['6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 DURAK_SUITS = ['♠️', '♣️', '♦️', '♥️']
@@ -3146,14 +3218,12 @@ def durak_bot_turn(game):
         attack_card = game['table'][-1]['attack']
         defend_candidates = [c for c in bot_player['hand'] if can_beat_card(attack_card, c, trump)]
         if defend_candidates:
-            # Сортируем: сначала не козыри минимального достоинства, потом козыри минимальные
             defend_candidates.sort(key=lambda c: (1 if c['suit'] == trump else 0, RANK_VALUES[c['rank']]))
             chosen = defend_candidates[0]
             bot_player['hand'].remove(chosen)
             game['table'][-1]['defend'] = chosen
             game['status_text'] = f"🤖 Бот отбил карту {card_to_str(attack_card)} картой {card_to_str(chosen)}!"
         else:
-            # Бот берёт карты
             taken = []
             for pair in game['table']:
                 taken.append(pair['attack'])
@@ -3168,13 +3238,11 @@ def durak_bot_turn(game):
     else:
         # Бот атакует
         if not game['table']:
-            # Первый ход
             bot_player['hand'].sort(key=lambda c: (1 if c['suit'] == trump else 0, RANK_VALUES[c['rank']]))
             chosen = bot_player['hand'].pop(0)
             game['table'].append({'attack': chosen, 'defend': None})
             game['status_text'] = f"🤖 Бот пошёл с карты {card_to_str(chosen)}!"
         else:
-            # Подкидывание
             table_ranks = set()
             for pair in game['table']:
                 table_ranks.add(pair['attack']['rank'])
@@ -3187,12 +3255,77 @@ def durak_bot_turn(game):
                 game['table'].append({'attack': chosen, 'defend': None})
                 game['status_text'] = f"🤖 Бот подкинул карту {card_to_str(chosen)}!"
             else:
-                # Бито
                 game['table'] = []
                 durak_deal_cards(game)
                 game['attacker_idx'] = 0
                 game['defender_idx'] = 1
                 game['status_text'] = "✅ Бито! Ход переходит к вам!"
+
+def sync_durak_pm(game_id):
+    game = active_durak.get(game_id)
+    if not game or not game.get('started') or game.get('finished'):
+        return
+    trump = game['trump']
+    deck_count = len(game['deck'])
+    players = game['players']
+    table = game['table']
+
+    for p_idx, p in enumerate(players):
+        if p['id'] == 'bot':
+            continue
+        u_id = p['id']
+        is_attacker = (p_idx == game['attacker_idx'])
+        is_defender = (p_idx == game['defender_idx'])
+
+        role_str = "⚔️ ВЫ АТАКУЕТЕ!" if is_attacker else "🛡 ВЫ ЗАЩИЩАЕТЕСЬ!" if is_defender else "⏳ Ожидайте своего хода"
+        lines = [
+            f"🃏 <b>ДУРАК (ВАШИ КАРТЫ В ЛС)</b> 😺",
+            "──────────────────────",
+            f"👑 Козырь партии: <b>{trump}</b> | В колоде: <b>{deck_count} карт</b>",
+            f"🎯 <b>{role_str}</b>\n",
+            "<b>Стол партии:</b>"
+        ]
+        if not table:
+            lines.append("<i>[ Стол пуст ]</i>")
+        else:
+            for idx, pair in enumerate(table, 1):
+                att = card_to_str(pair['attack'])
+                dfn = card_to_str(pair['defend']) if pair.get('defend') else "❓ (ждёт защиты)"
+                lines.append(f"{idx}. {att}  ⚔️  {dfn}")
+
+        if game.get('status_text'):
+            lines.append(f"\n📢 <i>{game['status_text']}</i>")
+        lines.append("──────────────────────\n<b>Ваша рука (нажмите для хода):</b>")
+
+        markup = InlineKeyboardMarkup(row_width=3)
+        card_btns = []
+        for c_idx, c in enumerate(p['hand']):
+            card_btns.append(InlineKeyboardButton(card_to_str(c), callback_data=f"durak_card_{game_id}_{c_idx}:{u_id}"))
+        for i in range(0, len(card_btns), 3):
+            markup.add(*card_btns[i:i+3])
+
+        action_row = []
+        if is_defender and table and any(not pr.get('defend') for pr in table):
+            action_row.append(InlineKeyboardButton("📥 Взять карты", callback_data=f"durak_take_{game_id}:{u_id}"))
+        if is_attacker and table and all(pr.get('defend') for pr in table):
+            action_row.append(InlineKeyboardButton("✅ Бито", callback_data=f"durak_bito_{game_id}:{u_id}"))
+        if action_row:
+            markup.add(*action_row)
+
+        text_msg = "\n".join(lines)
+        if p.get('pm_msg_id'):
+            try:
+                bot.edit_message_text(text_msg, chat_id=u_id, message_id=p['pm_msg_id'], reply_markup=markup, parse_mode='HTML')
+            except Exception:
+                try:
+                    sent = bot.send_message(u_id, text_msg, reply_markup=markup, parse_mode='HTML')
+                    p['pm_msg_id'] = sent.message_id
+                except Exception: pass
+        else:
+            try:
+                sent = bot.send_message(u_id, text_msg, reply_markup=markup, parse_mode='HTML')
+                p['pm_msg_id'] = sent.message_id
+            except Exception: pass
 
 def render_durak_board(game_id, viewer_id=None):
     game = active_durak.get(game_id)
@@ -3221,7 +3354,7 @@ def render_durak_board(game_id, viewer_id=None):
             dfn = card_to_str(pair['defend']) if pair.get('defend') else "❓ (ждёт защиты)"
             lines.append(f"{idx}. {att}  ⚔️  {dfn}")
 
-    lines.append("\n<b>Игроки:</b>")
+    lines.append("\n<b>Игроки за столом:</b>")
     for idx, p in enumerate(players):
         role = ""
         if idx == game['attacker_idx']: role = " (⚔️ Атака)"
@@ -3238,37 +3371,28 @@ def render_durak_board(game_id, viewer_id=None):
         req_cnt = game['target_players']
         cur_cnt = len(players)
         lines.append(f"\n⏳ <i>Ожидание игроков: {cur_cnt}/{req_cnt}...</i>")
+        lines.append("⚠️ <b>Внимание:</b> Чтобы войти в игру, вы должны обязательно запустить бота в ЛС!")
+        lines.append("⏰ <i>Если лобби не соберется за 10 минут, оно автоматически удалится!</i>")
         markup.add(InlineKeyboardButton(f"🤝 Присоединиться ({cur_cnt}/{req_cnt})", callback_data=f"durak_join_{game_id}"))
         markup.add(InlineKeyboardButton("❌ Отменить игру", callback_data=f"durak_cancel_{game_id}"))
         return "\n".join(lines), markup
 
-    viewer_player = None
-    if viewer_id:
-        for p in players:
-            if p['id'] == viewer_id:
-                viewer_player = p
-                break
-
-    if viewer_player and not game['finished']:
-        p_idx = players.index(viewer_player)
-        is_attacker = (p_idx == game['attacker_idx'])
-        is_defender = (p_idx == game['defender_idx'])
-
+    if game.get('target_players') == 2 and any(pl['id'] == 'bot' for pl in players):
+        viewer_player = players[0]
         card_btns = []
         for c_idx, c in enumerate(viewer_player['hand']):
-            card_btns.append(InlineKeyboardButton(card_to_str(c), callback_data=f"durak_card_{game_id}_{c_idx}:{viewer_id}"))
-        
+            card_btns.append(InlineKeyboardButton(card_to_str(c), callback_data=f"durak_card_{game_id}_{c_idx}:{viewer_player['id']}"))
         for i in range(0, len(card_btns), 3):
             markup.add(*card_btns[i:i+3])
-
         action_row = []
-        if is_defender and table and any(not p.get('defend') for p in table):
-            action_row.append(InlineKeyboardButton("📥 Взять карты", callback_data=f"durak_take_{game_id}:{viewer_id}"))
-        if is_attacker and table and all(p.get('defend') for p in table):
-            action_row.append(InlineKeyboardButton("✅ Бито", callback_data=f"durak_bito_{game_id}:{viewer_id}"))
-
+        if game['defender_idx'] == 0 and table and any(not pr.get('defend') for pr in table):
+            action_row.append(InlineKeyboardButton("📥 Взять карты", callback_data=f"durak_take_{game_id}:{viewer_player['id']}"))
+        if game['attacker_idx'] == 0 and table and all(pr.get('defend') for pr in table):
+            action_row.append(InlineKeyboardButton("✅ Бито", callback_data=f"durak_bito_{game_id}:{viewer_player['id']}"))
         if action_row:
             markup.add(*action_row)
+    else:
+        lines.append("📱 <b>Карты розданы в ЛС!</b> Перейдите в диалог с ботом, чтобы делать ходы. 😺")
 
     return "\n".join(lines), markup
 
@@ -3310,9 +3434,8 @@ def cmd_durak(message):
         f"Выберите режим игры на кнопках ниже: 😸",
         reply_markup=markup,
         parse_mode='HTML'
-    )
-
-# ---------------------------------------------------------
+            )
+    # ---------------------------------------------------------
 # МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
 # ---------------------------------------------------------
 @bot.message_handler(commands=['dick', 'писюн', 'замер'])
@@ -3670,7 +3793,7 @@ def cmd_gear(message):
     bot.reply_to(message, "\n".join(lines), reply_markup=markup, parse_mode='HTML')
 
 # ---------------------------------------------------------
-# БИЗНЕСЫ 2.0
+# БИЗНЕСЫ 2.0 (СБАЛАНСИРОВАННЫЙ ДОХОД)
 # ---------------------------------------------------------
 def render_business_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -3763,7 +3886,7 @@ def cmd_miner(message):
         f"──────────────────────\n"
         f"👤 Владелец: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
         f"⚡️ Хешрейт: <b>{lvl * 145} MH/s</b>\n"
-        f"💵 Доходность: <b>~{int(280 * (1 + (lvl-1)*0.45))} 🪙 в час</b>\n"
+        f"💵 Доходность: <b>~{int(50 * (1 + (lvl-1)*0.45))} 🪙 в час</b>\n"
         f"📈 Текущий курс NYA: <b>{nya_price:.2f} 🪙</b>\n"
         f"──────────────────────\n"
         f"💡 Доход накапливается в общем пуле бизнесов! Нажмите кнопку ниже для сбора. 😸"
@@ -3860,7 +3983,7 @@ def render_bank_view(chat_id, user_id, user_name, message_id=None):
         f"👤 Владелец: {make_link(chat_id, user_name, user_id, ping=False)}\n\n"
         f"💳 На депозите: <b>{deposit} Ня-коинов 🪙</b>\n"
         f"💵 В кармане: <b>{pocket} 🪙</b>\n\n"
-        f"📈 <b>Ставка:</b> <b>+1% каждые 6 часов</b> (сложный процент!)\n"
+        f"📈 <b>Ставка:</b> <b>+0.25% каждые 6 часов (1% в сутки)</b>\n"
         f"🛡 <b>Защита:</b> Депозит защищен от любых карманных краж на 100%!\n"
         f"──────────────────────\n"
         f"💡 <i>Используйте кнопки или команды:</i> 😸\n"
@@ -3944,7 +4067,7 @@ def render_lottery_view(chat_id, user_id, user_name, message_id=None):
 
     markup = InlineKeyboardMarkup()
     markup.add(
-                InlineKeyboardButton("🎟 Купить 1 билет (100 🪙)", callback_data=f"buy_ticket_1:{user_id}"),
+        InlineKeyboardButton("🎟 Купить 1 билет (100 🪙)", callback_data=f"buy_ticket_1:{user_id}"),
         InlineKeyboardButton("🎟 Купить 5 билетов (500 🪙)", callback_data=f"buy_ticket_5:{user_id}")
     )
 
@@ -4084,7 +4207,7 @@ def cmd_del_pfp(message):
     bot.reply_to(message, "🗑 <b>Аватарка профиля успешно удалена!</b> 😿", parse_mode='HTML')
 
 # ---------------------------------------------------------
-# ПРОФИЛЬ И КАРМА
+# ПРОФИЛЬ, НАСТРОЙКИ ТЕМ И ШРИФТОВ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['custom_title', 'set_title'])
 def cmd_custom_title(message):
@@ -4109,10 +4232,57 @@ def cmd_custom_title(message):
     mark_dirty()
     bot.reply_to(message, f"🎉 Ваш кастомный титул успешно установлен: <b>[{html.escape(new_title)}]</b>! 😻", parse_mode='HTML')
 
+def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    cur_theme = econ.get('profile_theme', 'default')
+    cur_font = econ.get('profile_font', 'default')
+    theme_name = THEMES.get(cur_theme, {}).get('name', 'Классическая')
+    font_name = FONTS.get(cur_font, {}).get('name', 'Обычный')
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🎨 Сменить Тему", callback_data=f"ps_themes:{user_id}"),
+        InlineKeyboardButton("🔤 Сменить Шрифт", callback_data=f"ps_fonts:{user_id}")
+    )
+    markup.add(
+        InlineKeyboardButton("🏷 Значки", callback_data=f"ps_badges:{user_id}"),
+        InlineKeyboardButton("👑 Титулы", callback_data=f"ps_titles:{user_id}")
+    )
+    markup.add(
+        InlineKeyboardButton("📸 Сменить Аватарку", callback_data=f"ps_pfp:{user_id}"),
+        InlineKeyboardButton("🔙 В Профиль", callback_data=f"ps_back_profile:{user_id}")
+    )
+
+    text = (
+        f"⚙️ <b>НАСТРОЙКИ ВНЕШНЕГО ВИДА ПРОФИЛЯ</b> 😺\n"
+        f"──────────────────────\n"
+        f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+        f"🎨 Активная тема: <b>{theme_name}</b>\n"
+        f"🔤 Активный шрифт: <b>{font_name}</b>\n"
+        f"──────────────────────\n"
+        f"<i>Используйте кнопки ниже для индивидуальной кастомизации вашей карточки игрока!</i> 😻"
+    )
+
+    if message_id:
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+        return
+    try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception: pass
+
+@bot.message_handler(commands=['profile_settings', 'set_profile', 'настройки_профиля'])
+def cmd_profile_settings(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_profile_settings_view(message.chat.id, user_id, user_name)
+
 def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
     econ = get_user_econ(user_id, user_tag, username=username)
     theme_key = econ.get('profile_theme', 'default')
     theme_info = THEMES.get(theme_key, THEMES['default'])
+    font_key = econ.get('profile_font', 'default')
 
     border = theme_info['border']
     header = theme_info['header']
@@ -4201,7 +4371,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     streak_days = econ.get('bonus_streak', 0)
     streak_str = f"🔥 Стрик бонусов: <b>{streak_days} дн.</b> (Множитель: x{min(2.0, 1.0 + (streak_days * 0.15)):.1f})\n"
 
-    text = (
+    raw_text = (
         f"{header}\n"
         f"{border}\n"
         f"{t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
@@ -4230,6 +4400,8 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         f"{border}"
     )
 
+    text = apply_font(raw_text, font_key) if font_key == 'monospace' else raw_text
+
     if inv:
         row = []
         for emoji in inv:
@@ -4241,6 +4413,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         if row: markup.add(*row)
         if current_badge != "Отсутствует":
             markup.add(InlineKeyboardButton("❌ Снять значок", callback_data=f"remove_badge:{user_id}"))
+        markup.add(InlineKeyboardButton("⚙️ Настройки тем и шрифтов", callback_data=f"open_profile_settings:{user_id}"))
 
     if message_id_to_edit:
         try:
@@ -4268,7 +4441,6 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         except Exception: pass
-
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -4500,9 +4672,10 @@ def cmd_divorce(message):
     vault = m.get('vault', 0)
     split_coins = vault // 2
     econ['balance'] += split_coins
-    p_econ['balance'] += (vault - split_coins)
+    if p_id != 0:
+        p_econ['balance'] += (vault - split_coins)
+        p_econ['marriage'] = None
     econ['marriage'] = None
-    p_econ['marriage'] = None
     mark_dirty()
 
     bot.reply_to(message, f"💔 <b>Брак расторгнут.</b> 😿\nСемейный сейф ({vault} 🪙) разделен поровну между бывшими супругами (+{split_coins} 🪙 каждому).", parse_mode='HTML')
@@ -5256,9 +5429,10 @@ def handle_messages(message):
             te = get_user_econ(t_id, t_name)
             if te.get('marriage'):
                 p_id = te['marriage']['partner_id']
-                pe = get_user_econ(p_id)
+                if p_id != 0:
+                    pe = get_user_econ(p_id)
+                    pe['marriage'] = None
                 te['marriage'] = None
-                pe['marriage'] = None
                 mark_dirty()
                 bot.reply_to(message, f"✅ Игрок {t_name} принудительно разведен.")
             else:
@@ -5647,6 +5821,7 @@ def handle_messages(message):
     elif text_lower.startswith('история'): cmd_history(message); return
     elif text_lower.startswith(('промо', 'промокод')): cmd_promo(message); return
     elif text_lower.startswith(('дурак', '/durak')): cmd_durak(message); return
+    elif text_lower in ['настройки профиля', 'настройка профиля']: cmd_profile_settings(message); return
 
     # ТОПЫ ТЕКСТОМ
     elif text_lower in ['топ', 'топы', 'лидеры', 'топ богачей', 'топ баланс', 'топ денег']: render_top_menu(chat_id, user_id=user_id, category='rich'); return
@@ -5715,7 +5890,7 @@ def handle_messages(message):
             bot.reply_to(message, f"⏳ Бонус доступен каждый час! Ждать: <b>{left}</b>. 😿", parse_mode='HTML')
         return
 
-    # КОСТИ (С ИСПРАВЛЕННЫМ СПИСАНИЕМ СТАВКИ)
+    # КОСТИ (БЕЗ АБУЗА БЕСПЛАТНОГО EXP)
     elif text_lower.startswith(('кости', '/dice', 'кубик')):
         match = re.search(r'(?:кости|/dice|кубик)\s*(\d+)?', text, re.IGNORECASE)
         bet = int(match.group(1)) if match and match.group(1) else 0
@@ -5748,12 +5923,12 @@ def handle_messages(message):
                 result += f'\n✅ Победа! Выплата: <b>+{win} 🪙</b> (1.95x) 😻'
             else:
                 result += f'\n💸 Вы проиграли <b>{bet} 🪙</b>. 😿'
-        add_account_exp(user_id, user_name, 5, username=user_username)
-        mark_dirty()
-        check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
-        completed = track_daily_task(user_id, user_name, 'dice', 1, chat_id, username=user_username)
+            add_account_exp(user_id, user_name, 5, username=user_username)
+            mark_dirty()
+            check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
+            completed = track_daily_task(user_id, user_name, 'dice', 1, chat_id, username=user_username)
+            for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
         bot.reply_to(message, result + f"\n💰 Баланс: <b>{econ['balance']} 🪙</b> 😸", parse_mode='HTML')
-        for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
         return
 
     # СЛОТЫ
@@ -6005,6 +6180,68 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "❌ Это меню открыто другим пользователем!", show_alert=True)
                 return
 
+        # НАСТРОЙКИ ПРОФИЛЯ
+        elif action_data == 'open_profile_settings':
+            render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data == 'ps_back_profile':
+            send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data == 'ps_fonts':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            cur_f = econ.get('profile_font', 'default')
+            markup = InlineKeyboardMarkup(row_width=1)
+            for f_k, f_v in FONTS.items():
+                active_mark = " (Выбран)" if f_k == cur_f else ""
+                markup.add(InlineKeyboardButton(f"{f_v['name']}{active_mark}", callback_data=f"set_font_{f_k}:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            try:
+                bot.edit_message_text(
+                    "🔤 <b>ВЫБОР ШРИФТА ДЛЯ ПРОФИЛЯ</b> 😺\n──────────────────────\nВыберите желаемый стиль текста для вашей карточки игрока: 😻",
+                    chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML'
+                )
+            except Exception: pass
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data.startswith('set_font_'):
+            f_k = action_data.replace('set_font_', '')
+            if f_k in FONTS:
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                econ['profile_font'] = f_k
+                mark_dirty()
+                bot.answer_callback_query(call.id, f"✅ Установлен шрифт: {FONTS[f_k]['name']}! 😻", show_alert=True)
+                render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
+            return
+
+        elif action_data == 'ps_themes':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            cur_t = econ.get('profile_theme', 'default')
+            purchased = econ.get('purchased_themes', ['default'])
+            markup = InlineKeyboardMarkup(row_width=1)
+            for t_k in purchased:
+                if t_k in THEMES:
+                    active_mark = " (Выбрана)" if t_k == cur_t else ""
+                    markup.add(InlineKeyboardButton(f"{THEMES[t_k]['name']}{active_mark}", callback_data=f"set_theme_{t_k}:{user_id}"))
+            markup.add(InlineKeyboardButton("🏪 Купить новые темы в Магазине", callback_data=f"shop_cat_themes:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            try:
+                bot.edit_message_text(
+                    "🎨 <b>ВЫБОР ТЕМЫ ОФОРМЛЕНИЯ ПРОФИЛЯ</b> 😺\n──────────────────────\nВыберите тему из купленных или приобретите новые в магазине: 😻",
+                    chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML'
+                )
+            except Exception: pass
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data in ['ps_badges', 'ps_titles', 'ps_pfp']:
+            bot.answer_callback_query(call.id, "💡 Управление значками, титулами и аватарками доступно также в основном магазине /shop и командами /set_pfp и /custom_title! 😸", show_alert=True)
+            return
+
         # МАГАЗИН: ГЛАВНОЕ МЕНЮ
         if action_data == 'shop_main':
             send_shop_menu(chat_id, user_id, user_name, message_id=call.message.message_id)
@@ -6046,7 +6283,6 @@ def callback_inline(call):
                 return
             bp['garden_fertilizer'] -= 1
             seed_info = GARDEN_SEEDS[garden['seed']]
-            # Срезаем 50% от полного времени роста
             cut_time = seed_info['grow_time'] * 0.5
             garden['planted_at'] -= cut_time
             mark_dirty()
@@ -6061,7 +6297,6 @@ def callback_inline(call):
             if not garden: return
             seed_info = GARDEN_SEEDS[garden['seed']]
             
-            # Актуализируем высыхание
             now = time.time()
             last_dry_calc = garden.get('last_dry_calc', garden.get('planted_at', now))
             dry_interval = 3600 * 2
@@ -6104,11 +6339,10 @@ def callback_inline(call):
 
             game_id = f"durak_{user_id}_{int(time.time())}"
             deck = create_durak_deck()
-            trump_card = deck[0]  # козырь лежит снизу
+            trump_card = deck[0]
             trump_suit = trump_card['suit']
 
             if mode_num == 1:
-                # Игра соло против бота
                 p_human = {'id': user_id, 'name': user_name, 'hand': []}
                 p_bot = {'id': 'bot', 'name': '🤖 Ня-Бот', 'hand': []}
                 players = [p_human, p_bot]
@@ -6125,7 +6359,9 @@ def callback_inline(call):
                     'started': True,
                     'finished': False,
                     'status_text': 'Игра началась! Вы ходите первым.',
-                    'start_time': time.time()
+                    'start_time': time.time(),
+                    'chat_id': chat_id,
+                    'msg_id': call.message.message_id
                 }
                 durak_deal_cards(game)
                 active_durak[game_id] = game
@@ -6133,7 +6369,6 @@ def callback_inline(call):
                 try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception: pass
             else:
-                # Мультиплеерный режим (2, 3, 4, 5, 6 игроков)
                 players = [{'id': user_id, 'name': user_name, 'hand': []}]
                 game = {
                     'mode_name': f'Мультиплеер ({mode_num} игроков)',
@@ -6148,14 +6383,16 @@ def callback_inline(call):
                     'started': False,
                     'finished': False,
                     'status_text': f'Ожидание игроков... (1/{mode_num})',
-                    'start_time': time.time()
+                    'start_time': time.time(),
+                    'chat_id': chat_id,
+                    'msg_id': call.message.message_id
                 }
                 active_durak[game_id] = game
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
                 try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception: pass
 
-        # ДУРАК: ПРИСОЕДИНЕНИЕ
+        # ДУРАК: ПРИСОЕДИНЕНИЕ (С ПРОВЕРКОЙ ЛС)
         elif action_data.startswith('durak_join_'):
             game_id = action_data.replace('durak_join_', '')
             game = active_durak.get(game_id)
@@ -6165,6 +6402,17 @@ def callback_inline(call):
 
             if any(p['id'] == user_id for p in game['players']):
                 bot.answer_callback_query(call.id, "Вы уже присоединились к этому столу!", show_alert=True)
+                return
+
+            try:
+                test_msg = bot.send_message(user_id, "🤝 <b>Вы успешно подключились к столу игры «Дурак»!</b>\nВаши карты будут отправлены сюда, как только наберется вся команда! 🃏 😻", parse_mode='HTML')
+                user_pm_msg_id = test_msg.message_id
+            except Exception:
+                b_name = ""
+                try: b_name = bot.get_me().username
+                except Exception: pass
+                tag_str = f"@{b_name}" if b_name else "бота"
+                bot.answer_callback_query(call.id, f"❌ Вы должны сначала открыть диалог с ботом ({tag_str}) в ЛС и нажать START (Запустить), чтобы бот мог выдать вам карты!", show_alert=True)
                 return
 
             bet = game['bet']
@@ -6177,19 +6425,20 @@ def callback_inline(call):
                 econ['balance'] -= bet
                 mark_dirty()
 
-            game['players'].append({'id': user_id, 'name': user_name, 'hand': []})
+            game['players'].append({'id': user_id, 'name': user_name, 'hand': [], 'pm_msg_id': user_pm_msg_id})
             cur_cnt = len(game['players'])
             req_cnt = game['target_players']
 
             if cur_cnt >= req_cnt:
                 game['started'] = True
                 durak_deal_cards(game)
-                game['status_text'] = f"Все игроки в сборе! Ходит {game['players'][0]['name']}!"
+                game['status_text'] = f"Все игроки в сборе! Ходит {game['players'][0]['name']}! Карты розданы в ЛС."
+                sync_durak_pm(game_id)
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
-            bot.answer_callback_query(call.id, "✅ Вы успешно сели за игровой стол! 😸")
+            bot.answer_callback_query(call.id, "✅ Вы успешно сели за игровой стол! Карты придут в ЛС! 😸")
 
         # ДУРАК: ХОД КАРТОЙ
         elif action_data.startswith('durak_card_'):
@@ -6219,7 +6468,6 @@ def callback_inline(call):
             is_defender = (p_idx == game['defender_idx'])
 
             if not is_attacker and not is_defender:
-                # Подкидывать могут только атакующие игроки
                 table_ranks = {pair['attack']['rank'] for pair in game['table']} | {pair['defend']['rank'] for pair in game['table'] if pair.get('defend')}
                 if card['rank'] not in table_ranks or len(game['table']) >= 6:
                     bot.answer_callback_query(call.id, "❌ Этой картой нельзя подкинуть!", show_alert=True)
@@ -6229,7 +6477,6 @@ def callback_inline(call):
                 game['status_text'] = f"{p['name']} подкинул(а) {card_to_str(card)}!"
             elif is_attacker:
                 if not game['table']:
-                    # Первый заход
                     p['hand'].pop(card_idx)
                     game['table'].append({'attack': card, 'defend': None})
                     game['status_text'] = f"{p['name']} пошёл(ла) с {card_to_str(card)}!"
@@ -6242,7 +6489,6 @@ def callback_inline(call):
                     game['table'].append({'attack': card, 'defend': None})
                     game['status_text'] = f"{p['name']} подкинул(а) {card_to_str(card)}!"
             elif is_defender:
-                # Находим первую неотбитую карту
                 unbeaten_idx = next((i for i, pair in enumerate(game['table']) if pair.get('defend') is None), None)
                 if unbeaten_idx is None:
                     bot.answer_callback_query(call.id, "Все карты на столе уже отбиты!")
@@ -6255,11 +6501,9 @@ def callback_inline(call):
                 game['table'][unbeaten_idx]['defend'] = card
                 game['status_text'] = f"{p['name']} отбил(а) {card_to_str(target_attack)} картой {card_to_str(card)}!"
 
-            # Ход бота если режим соло
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
 
-            # Проверка условий победы/окончания карт
             survivors = [pl for pl in players if len(pl['hand']) > 0 or len(game['deck']) > 0]
             if len(survivors) <= 1:
                 game['finished'] = True
@@ -6282,12 +6526,14 @@ def callback_inline(call):
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
                 try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
                 except Exception: pass
+                sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
                 return
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
+            sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
         # ДУРАК: ВЗЯТЬ КАРТЫ
@@ -6308,7 +6554,6 @@ def callback_inline(call):
             game['table'] = []
             durak_deal_cards(game)
 
-            # Ход переходит следующему
             game['attacker_idx'] = (game['defender_idx'] + 1) % len(game['players'])
             game['defender_idx'] = (game['attacker_idx'] + 1) % len(game['players'])
             game['status_text'] = f"{user_name} забрал(а) карты со стола!"
@@ -6319,6 +6564,7 @@ def callback_inline(call):
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
+            sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
         # ДУРАК: БИТО
@@ -6339,6 +6585,7 @@ def callback_inline(call):
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
+            sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
         # ИГРА КИРПИЧ
@@ -6869,6 +7116,7 @@ def callback_inline(call):
                     'reward': d_info['reward'],
                     'exp': d_info['exp'],
                     'diff_name': d_info['name'],
+                    'one_button': d_info.get('one_button', False),
                     'bombs': set(),
                     'numbers': {},
                     'revealed': set(),
@@ -6894,10 +7142,37 @@ def callback_inline(call):
             try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
 
+        elif action_data.startswith('cm_cashout_'):
+            game_id = action_data.replace('cm_cashout_', '')
+            game = active_c_mines.get(game_id)
+            if not game or game.get('finished'): return
+            if user_id != game['user_id']: return
+
+            total_cells = game['cols'] * game['rows']
+            safe_total = total_cells - game['mines_count']
+            rev_count = len(game['revealed'])
+            win_val = int(game['reward'] * (rev_count / safe_total))
+            game['finished'] = True
+            add_coins(user_id, user_name, win_val, username=user_username)
+            add_account_exp(user_id, user_name, 20, username=user_username)
+            mark_dirty()
+
+            try:
+                bot.edit_message_text(
+                    f"💰 <b>ДОСРОЧНАЯ ЭВАКУАЦИЯ!</b> 😻\n\n"
+                    f"Сапёр: {make_link(chat_id, user_name, user_id, ping=False)}\n"
+                    f"Разминировано секторов: <b>{rev_count}/{safe_total}</b>\n"
+                    f"Выигрыш зачислен: <b>+{win_val} Ня-коинов 🪙</b> (+20 EXP)! 😸",
+                    chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
+                )
+            except Exception: pass
+            del active_c_mines[game_id]
+            return
+
         elif action_data.startswith('cmo_'):
             m_parts = action_data.split('_')
             game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
-            cell_idx = int(m_parts[4])
+            cell_arg = m_parts[4]
             game = active_c_mines.get(game_id)
 
             if not game or game.get('finished'):
@@ -6910,6 +7185,13 @@ def callback_inline(call):
             cols = game.get('cols', 5)
             rows = game.get('rows', 5)
             total_cells = cols * rows
+
+            if cell_arg == 'step':
+                available_unrev = [i for i in range(total_cells) if i not in game['revealed']]
+                if not available_unrev: return
+                cell_idx = random.choice(available_unrev)
+            else:
+                cell_idx = int(cell_arg)
 
             if game.get('mode') == 'flag':
                 if cell_idx in game['revealed']: return
