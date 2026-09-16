@@ -1278,7 +1278,8 @@ def is_admin(chat_id, user_id):
         return member.status in ['administrator', 'creator']
     except Exception:
         return False
-        def resolve_user_from_string(chat_id, query_str):
+
+def resolve_user_from_string(chat_id, query_str):
     if not query_str:
         return None, None
 
