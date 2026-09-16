@@ -234,7 +234,8 @@ def apply_font(text_str, font_key='default'):
     if not text_str or font_key == 'default':
         return text_str
     if font_key == 'monospace':
-        return f"<pre>{text_str}</pre>"
+        f_map = FONT_MAPS.get('monospace')
+        if not f_map: return text_str
     f_map = FONT_MAPS.get(font_key)
     if not f_map:
         return text_str
@@ -3241,9 +3242,38 @@ def durak_bot_turn(game):
     bot_player = game['players'][1]
     human_player = game['players'][0]
     trump = game['trump']
+    
+    if game.get('taking'):
+        while len(game['table']) < 6 and len(bot_player['hand']) > 0:
+            table_ranks = set()
+            for pair in game['table']:
+                table_ranks.add(pair['attack']['rank'])
+                if pair.get('defend'): table_ranks.add(pair['defend']['rank'])
+            toss_candidates = [c for c in bot_player['hand'] if c['rank'] in table_ranks and c['suit'] != trump]
+            if toss_candidates:
+                chosen = toss_candidates[0]
+                bot_player['hand'].remove(chosen)
+                game['table'].append({'attack': chosen, 'defend': None})
+                game['status_text'] = f"🤖 Бот подкинул {card_to_str(chosen)}!"
+            else:
+                break
+        
+        game.setdefault('pass_takes', set()).add('bot')
+        if len(game['pass_takes']) == len(game['players']) - 1 or len(game['table']) >= 6:
+            taken = []
+            for pair in game['table']:
+                taken.append(pair['attack'])
+                if pair.get('defend'): taken.append(pair['defend'])
+            human_player['hand'].extend(taken)
+            game['table'] = []
+            game['taking'] = False
+            game['attacker_idx'] = 0
+            game['defender_idx'] = 1
+            durak_deal_cards(game)
+            game['status_text'] = "🤖 Вы забрали карты."
+        return
 
     if game['defender_idx'] == 1:
-        # Бот защищается
         attack_card = game['table'][-1]['attack']
         defend_candidates = [c for c in bot_player['hand'] if can_beat_card(attack_card, c, trump)]
         if defend_candidates:
@@ -3251,44 +3281,34 @@ def durak_bot_turn(game):
             chosen = defend_candidates[0]
             bot_player['hand'].remove(chosen)
             game['table'][-1]['defend'] = chosen
-            game['status_text'] = f"🤖 Бот отбил карту {card_to_str(attack_card)} картой {card_to_str(chosen)}!"
+            game['status_text'] = f"🤖 Бот отбил {card_to_str(attack_card)} картой {card_to_str(chosen)}!"
         else:
-            taken = []
-            for pair in game['table']:
-                taken.append(pair['attack'])
-                if pair.get('defend'):
-                    taken.append(pair['defend'])
-            bot_player['hand'].extend(taken)
-            game['table'] = []
-            durak_deal_cards(game)
-            game['attacker_idx'] = 0
-            game['defender_idx'] = 1
-            game['status_text'] = f"🤖 Бот не смог отбиться и забрал все карты со стола!"
+            game['taking'] = True
+            game['status_text'] = "🤖 Бот берет карты. У вас есть шанс подкинуть!"
+            game['pass_takes'] = set()
     else:
-        # Бот атакует
         if not game['table']:
             bot_player['hand'].sort(key=lambda c: (1 if c['suit'] == trump else 0, RANK_VALUES[c['rank']]))
             chosen = bot_player['hand'].pop(0)
             game['table'].append({'attack': chosen, 'defend': None})
-            game['status_text'] = f"🤖 Бот пошёл с карты {card_to_str(chosen)}!"
+            game['status_text'] = f"🤖 Бот пошёл с {card_to_str(chosen)}!"
         else:
             table_ranks = set()
             for pair in game['table']:
                 table_ranks.add(pair['attack']['rank'])
-                if pair.get('defend'):
-                    table_ranks.add(pair['defend']['rank'])
+                if pair.get('defend'): table_ranks.add(pair['defend']['rank'])
             toss_candidates = [c for c in bot_player['hand'] if c['rank'] in table_ranks and c['suit'] != trump]
             if toss_candidates and len(game['table']) < 6:
                 chosen = toss_candidates[0]
                 bot_player['hand'].remove(chosen)
                 game['table'].append({'attack': chosen, 'defend': None})
-                game['status_text'] = f"🤖 Бот подкинул карту {card_to_str(chosen)}!"
+                game['status_text'] = f"🤖 Бот подкинул {card_to_str(chosen)}!"
             else:
                 game['table'] = []
                 durak_deal_cards(game)
                 game['attacker_idx'] = 0
                 game['defender_idx'] = 1
-                game['status_text'] = "✅ Бито! Ход переходит к вам!"
+                game['status_text'] = "✅ Бито! Ваш ход!"
 
 def check_durak_game_over(game, game_id, chat_id, message_id=None):
     players = game['players']
@@ -3364,9 +3384,11 @@ def sync_durak_pm(game_id):
             markup.add(*card_btns[i:i+3])
 
         action_row = []
-        if is_defender and table and any(not pr.get('defend') for pr in table):
+        if is_defender and table and any(not pr.get('defend') for pr in table) and not game.get('taking'):
             action_row.append(InlineKeyboardButton("📥 Взять карты", callback_data=f"durak_take_{game_id}:{u_id}"))
-        if is_attacker and table and all(pr.get('defend') for pr in table):
+        if not is_defender and table and game.get('taking'):
+            action_row.append(InlineKeyboardButton("✅ Всё, бери", callback_data=f"durak_pass_{game_id}:{u_id}"))
+        elif is_attacker and table and all(pr.get('defend') for pr in table) and not game.get('taking'):
             action_row.append(InlineKeyboardButton("✅ Бито", callback_data=f"durak_bito_{game_id}:{u_id}"))
         if action_row:
             markup.add(*action_row)
@@ -3444,9 +3466,11 @@ def render_durak_board(game_id, viewer_id=None):
         for i in range(0, len(card_btns), 3):
             markup.add(*card_btns[i:i+3])
         action_row = []
-        if game['defender_idx'] == 0 and table and any(not pr.get('defend') for pr in table):
+        if game['defender_idx'] == 0 and table and any(not pr.get('defend') for pr in table) and not game.get('taking'):
             action_row.append(InlineKeyboardButton("📥 Взять карты", callback_data=f"durak_take_{game_id}:{viewer_player['id']}"))
-        if game['attacker_idx'] == 0 and table and all(pr.get('defend') for pr in table):
+        if game['attacker_idx'] == 0 and table and game.get('taking'):
+            action_row.append(InlineKeyboardButton("✅ Всё, бери", callback_data=f"durak_pass_{game_id}:{viewer_player['id']}"))
+        elif game['attacker_idx'] == 0 and table and all(pr.get('defend') for pr in table) and not game.get('taking'):
             action_row.append(InlineKeyboardButton("✅ Бито", callback_data=f"durak_bito_{game_id}:{viewer_player['id']}"))
         if action_row:
             markup.add(*action_row)
@@ -6595,31 +6619,48 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "Только защищающийся может взять карты!", show_alert=True)
                 return
 
-            taken = []
-            for pair in game['table']:
-                taken.append(pair['attack'])
-                if pair.get('defend'): taken.append(pair['defend'])
-            game['players'][p_idx]['hand'].extend(taken)
-            game['table'] = []
-            durak_deal_cards(game)
-
-            game['attacker_idx'] = (game['defender_idx'] + 1) % len(game['players'])
-            game['defender_idx'] = (game['attacker_idx'] + 1) % len(game['players'])
-            game['status_text'] = f"{user_name} забрал(а) карты со стола!"
-
+            game['taking'] = True
+            game['status_text'] = f"{user_name} берёт карты! У других есть шанс подкинуть."
+            game['pass_takes'] = set()
+            
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
-
-            if check_durak_game_over(game, game_id, chat_id, call.message.message_id):
-                bot.answer_callback_query(call.id)
-                return
+                
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
             sync_durak_pm(game_id)
-            bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id, "Вы решили взять карты! Ждём подкидываний.")
+        elif action_data.startswith('durak_pass_'):
+            game_id = action_data.replace('durak_pass_', '')
+            game = active_durak.get(game_id)
+            if not game or not game.get('taking'): return
+            p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
+            if p_idx is None or p_idx == game['defender_idx']: return
+            
+            game['pass_takes'].add(user_id)
+            if len(game['pass_takes']) == len(game['players']) - 1 or len(game['table']) >= 6:
+                d_idx = game['defender_idx']
+                taken = []
+                for pair in game['table']:
+                    taken.append(pair['attack'])
+                    if pair.get('defend'): taken.append(pair['defend'])
+                game['players'][d_idx]['hand'].extend(taken)
+                game['table'] = []
+                game['taking'] = False
+                game['attacker_idx'] = (game['defender_idx'] + 1) % len(game['players'])
+                game['defender_idx'] = (game['attacker_idx'] + 1) % len(game['players'])
+                durak_deal_cards(game)
+                game['status_text'] = f"{game['players'][d_idx]['name']} забрал(а) карты со стола!"
+                if check_durak_game_over(game, game_id, chat_id, call.message.message_id):
+                    bot.answer_callback_query(call.id)
+                    return
+            text, markup = render_durak_board(game_id, viewer_id=user_id)
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception: pass
+            sync_durak_pm(game_id)
+            bot.answer_callback_query(call.id, "Вы спасовали!")
 
-        # ДУРАК: БИТО
         elif action_data.startswith('durak_bito_'):
             game_id = action_data.replace('durak_bito_', '')
             game = active_durak.get(game_id)
@@ -7112,6 +7153,9 @@ def callback_inline(call):
                 del active_mines[game_id]
                 return
             else:
+                if cell_idx in game['revealed']:
+                    bot.answer_callback_query(call.id)
+                    return
                 game['revealed'].add(cell_idx)
                 safe_opened = len(game['revealed'])
                 game['current_multiplier'] = calculate_mines_multiplier(total_cells, mines_count, safe_opened)
