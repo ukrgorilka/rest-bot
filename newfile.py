@@ -42,9 +42,9 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = os.environ.get("BOT_TOKEN", "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0")
-if not os.environ.get("BOT_TOKEN"):
-    print("[ВНИМАНИЕ] Рекомендуется задать BOT_TOKEN в переменных окружения (ENV)!")
+TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+if not TOKEN:
+    print("[ВНИМАНИЕ] BOT_TOKEN не задан в переменных окружения (ENV)! Бот ожидает BOT_TOKEN в Render.")
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
 db_dirty = False
@@ -82,11 +82,11 @@ LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-100436951756
 VD_CHAT_ID = normalize_tg_id(os.environ.get('VD_CHAT_ID', '-1003703264754'))
 DATA_FILE = 'rests_data.json'
 
-# Принудительный выход из запрещенного чата при запуске
-try:
-    bot.leave_chat(-1003703264754)
-except Exception:
-    pass
+def leave_banned_chats():
+    try:
+        bot.leave_chat(-1003703264754)
+    except Exception:
+        pass
 
 def is_chat_banned(chat_id):
     if not chat_id:
@@ -272,19 +272,19 @@ BUFF_ITEMS = {
 # РАСШИРЕННЫЕ БИЗНЕСЫ
 # ---------------------------------------------------------
 BUSINESSES = {
-    'bottles': {'name': '🥫 Приём стеклотары', 'short': 'Стеклотара', 'price': 200, 'base_income': 1, 'upgrade_cost': 120},
-    'lemonade': {'name': '🍋 Лоток с лимонадом', 'short': 'Лимонад', 'price': 450, 'base_income': 2, 'upgrade_cost': 280},
-    'shawarma': {'name': '🌯 Ларек с Шаурмой', 'short': 'Шаурма', 'price': 800, 'base_income': 3, 'upgrade_cost': 500},
-    'coffee': {'name': '☕️ Уютная Кофейня', 'short': 'Кофейня', 'price': 2400, 'base_income': 8, 'upgrade_cost': 1800},
-    'bakery': {'name': '🥐 Пекарня Булочек', 'short': 'Пекарня', 'price': 6000, 'base_income': 18, 'upgrade_cost': 4500},
-    'crypto_farm': {'name': '💻 Крипто-Ферма', 'short': 'Крипто-Ферма', 'price': 18000, 'base_income': 50, 'upgrade_cost': 13000},
-    'club': {'name': '🏰 Ночной Клуб', 'short': 'Ночной Клуб', 'price': 54000, 'base_income': 140, 'upgrade_cost': 38000},
-    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'short': 'Автосалон', 'price': 120000, 'base_income': 300, 'upgrade_cost': 85000},
-    'space_station': {'name': '🛰 Космическая Станция', 'short': 'Космостанция', 'price': 450000, 'base_income': 1050, 'upgrade_cost': 300000},
-    'megacorp': {'name': '🏢 Мегакорпорация', 'short': 'Мегакорп', 'price': 1500000, 'base_income': 3500, 'upgrade_cost': 1000000},
-    'oil_rig': {'name': '🛢 Нефтяная вышка в Сибири', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 8000, 'upgrade_cost': 2200000},
-    'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 22000, 'upgrade_cost': 6500000},
-    'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 50000000, 'base_income': 100000, 'upgrade_cost': 30000000}
+    'bottles': {'name': '🥫 Приём стеклотары', 'short': 'Стеклотара', 'price': 200, 'base_income': 3, 'upgrade_cost': 120},
+    'lemonade': {'name': '🍋 Лоток с лимонадом', 'short': 'Лимонад', 'price': 450, 'base_income': 6, 'upgrade_cost': 280},
+    'shawarma': {'name': '🌯 Ларек с Шаурмой', 'short': 'Шаурма', 'price': 800, 'base_income': 9, 'upgrade_cost': 500},
+    'coffee': {'name': '☕️ Уютная Кофейня', 'short': 'Кофейня', 'price': 2400, 'base_income': 24, 'upgrade_cost': 1800},
+    'bakery': {'name': '🥐 Пекарня Булочек', 'short': 'Пекарня', 'price': 6000, 'base_income': 54, 'upgrade_cost': 4500},
+    'crypto_farm': {'name': '💻 Крипто-Ферма', 'short': 'Крипто-Ферма', 'price': 18000, 'base_income': 150, 'upgrade_cost': 13000},
+    'club': {'name': '🏰 Ночной Клуб', 'short': 'Ночной Клуб', 'price': 54000, 'base_income': 420, 'upgrade_cost': 38000},
+    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'short': 'Автосалон', 'price': 120000, 'base_income': 900, 'upgrade_cost': 85000},
+    'space_station': {'name': '🛰 Космическая Станция', 'short': 'Космостанция', 'price': 450000, 'base_income': 3150, 'upgrade_cost': 300000},
+    'megacorp': {'name': '🏢 Мегакорпорация', 'short': 'Мегакорп', 'price': 1500000, 'base_income': 10500, 'upgrade_cost': 1000000},
+    'oil_rig': {'name': '🛢 Нефтяная вышка в Сибири', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 24000, 'upgrade_cost': 2200000},
+    'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 66000, 'upgrade_cost': 6500000},
+    'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 50000000, 'base_income': 300000, 'upgrade_cost': 30000000}
 }
 
 CUSTOM_TITLE_CERT_PRICE = 15000
@@ -941,7 +941,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     clean_d = clean_tag(user_tag) if user_tag else None
 
     if not user_id and clean_u:
-        for k, v in db['economy'].items():
+        for k, v in list(db['economy'].items()):
             if v.get('username') and v['username'].lower() == clean_u and v.get('user_id'):
                 user_id = v['user_id']
                 break
@@ -1127,10 +1127,10 @@ def log_event(event_type, message_text):
     if not LOG_CHANNEL_ID:
         return
     try:
-        clean_text = message_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        clean_text = re.sub(r'&lt;b&gt;(.*?)&lt;/b&gt;', r'<b>\1</b>', clean_text)
-        clean_text = re.sub(r'&lt;code&gt;(.*?)&lt;/code&gt;', r'<code>\1</code>', clean_text)
-        clean_text = re.sub(r'&lt;a href="(.*?)"&gt;(.*?)&lt;/a&gt;', r'<a href="\1">\2</a>', clean_text)
+        clean_text = str(message_text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        clean_text = re.sub(r'&lt;b&gt;(.*?)&lt;/b&gt;', r'<b>\1</b>', clean_text, flags=re.DOTALL)
+        clean_text = re.sub(r'&lt;code&gt;(.*?)&lt;/code&gt;', r'<code>\1</code>', clean_text, flags=re.DOTALL)
+        clean_text = re.sub(r'&lt;a href="(.*?)"&gt;(.*?)&lt;/a&gt;', r'<a href="\1">\2</a>', clean_text, flags=re.DOTALL)
 
         full_msg = f"📌 <b>[{html.escape(event_type)}]</b>\n⏱ <i>{now_msk().strftime('%Y-%m-%d %H:%M:%S')}</i>\n\n{clean_text}"
         bot.send_message(LOG_CHANNEL_ID, full_msg, parse_mode='HTML')
@@ -1328,32 +1328,32 @@ def resolve_user_from_string(chat_id, query_str):
     str_chat = str(chat_id)
 
     if 'economy' in db:
-        for k, v in db['economy'].items():
+        for k, v in list(db['economy'].items()):
             u_name = v.get('username')
             if u_name and u_name.lower() == clean_q and v.get('user_id'):
                 return v['user_id'], v.get('display_name', query.replace('@', '').strip())
 
     if 'economy' in db:
-        for k, v in db['economy'].items():
+        for k, v in list(db['economy'].items()):
             uid = v.get('user_id')
             if uid and str(uid) == clean_q:
                 return uid, v.get('display_name', f"ID:{uid}")
 
     if 'economy' in db:
-        for k, v in db['economy'].items():
+        for k, v in list(db['economy'].items()):
             disp = v.get('display_name', '').lower()
             if disp == clean_q or clean_tag(disp).lower() == clean_q:
                 return v.get('user_id'), v.get('display_name')
 
     if str_chat in db.get('rests', {}):
-        for r_key, r_info in db['rests'][str_chat].items():
+        for r_key, r_info in list(db['rests'][str_chat].items()):
             rec_uid = r_info.get('user_id')
             rec_name = r_info.get('user_name', r_key)
             if str(rec_uid) == clean_q or rec_name.lower() == clean_q or r_key.lower() == clean_q:
                 return rec_uid, rec_name
 
     if str_chat in db.get('history', {}):
-        for hist_user, items in db['history'][str_chat].items():
+        for hist_user, items in list(db['history'][str_chat].items()):
             if hist_user.lower() == clean_q:
                 for item in reversed(items):
                     if item.get('user_id'):
@@ -1369,7 +1369,7 @@ def check_user_rest(chat_rests, user_id=None, user_name=None):
     u_id_str = str(user_id) if user_id else None
     u_name_clean = user_name.strip().lower() if user_name else None
 
-    for r_key, r_info in chat_rests.items():
+    for r_key, r_info in list(chat_rests.items()):
         rec_uid = str(r_info.get('user_id', '')) if r_info.get('user_id') else None
         rec_name = r_info.get('user_name', r_key).strip().lower()
 
@@ -1795,6 +1795,15 @@ def memory_and_debt_worker():
                 if now - int(k.split('_')[1]) > 1800:
                     del active_drops[k]
 
+            # Очистка устаревших записей антифлуда (защита от утечки памяти)
+            for uid in list(user_flood_muted.keys()):
+                if now > user_flood_muted[uid]:
+                    user_flood_muted.pop(uid, None)
+            for uid in list(user_flood_history.keys()):
+                user_flood_history[uid] = [t for t in user_flood_history[uid] if now - t <= 5.0]
+                if not user_flood_history[uid]:
+                    user_flood_history.pop(uid, None)
+
             # Коллекторы по кредитам (исправлено списание депозита)
             for key, econ in list(db.get('economy', {}).items()):
                 loan = econ.get('loan')
@@ -1822,7 +1831,7 @@ def vd_facts_worker():
     while True:
         time.sleep(random.randint(7200, 14400))
         try:
-            if VD_CHAT_ID:
+            if VD_CHAT_ID and not is_chat_banned(VD_CHAT_ID):
                 title, desc = random.choice(VD_FACTS)
                 msg_text = (
                     "🩸 <b>ИНТЕРЕСНЫЙ ФАКТ | VIOLENCE DISTRICT</b> 🔪\n"
@@ -1854,14 +1863,18 @@ def gold_rush_worker():
             )
             active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
             for str_chat_id in active_chats:
-                try: bot.send_message(int(str_chat_id), rush_msg, parse_mode='HTML')
+                try:
+                    bot.send_message(int(str_chat_id), rush_msg, parse_mode='HTML')
+                    time.sleep(0.05)
                 except Exception: pass
             
             time.sleep(5400)
             gold_rush_event['active'] = False
             end_msg = "⏱ <b>Золотая лихорадка завершилась!</b> Спасибо всем за активную добычу! 🏕 😸"
             for str_chat_id in active_chats:
-                try: bot.send_message(int(str_chat_id), end_msg, parse_mode='HTML')
+                try:
+                    bot.send_message(int(str_chat_id), end_msg, parse_mode='HTML')
+                    time.sleep(0.05)
                 except Exception: pass
         except Exception:
             pass
@@ -1913,7 +1926,9 @@ def market_news_worker():
             news_text = template.format(name=asset['name']) + f"\n\n📊 Новый курс <b>{ticker}</b>: <b>{new_p:.2f} 🪙</b> (Было: {old_p:.2f} 🪙) 😸"
             active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
             for str_chat_id in active_chats:
-                try: bot.send_message(int(str_chat_id), news_text, parse_mode='HTML')
+                try:
+                    bot.send_message(int(str_chat_id), news_text, parse_mode='HTML')
+                    time.sleep(0.05)
                 except Exception: pass
         except Exception:
             pass
@@ -1975,6 +1990,7 @@ def chat_silence_worker():
         except Exception: pass
 
 def start_background_threads():
+    leave_banned_chats()
     threading.Thread(target=vd_facts_worker, daemon=True).start()
     threading.Thread(target=gold_rush_worker, daemon=True).start()
     threading.Thread(target=random_chat_drops_worker, daemon=True).start()
@@ -3087,8 +3103,7 @@ CSAPER_DIFFICULTIES = {
     'easy': {'name': '🟢 Новичок (5х5)', 'cols': 5, 'rows': 5, 'mines': 4, 'reward': 100, 'exp': 30},
     'med': {'name': '🟡 Любитель (6х6)', 'cols': 6, 'rows': 6, 'mines': 7, 'reward': 250, 'exp': 60},
     'hard': {'name': '🔴 Эксперт (7х7)', 'cols': 7, 'rows': 7, 'mines': 11, 'reward': 600, 'exp': 120},
-    'ultra_96': {'name': '🟣 Мега-Поле (8х12, 96 кл.)', 'cols': 8, 'rows': 12, 'mines': 18, 'reward': 1800, 'exp': 350},
-    'one_btn_96': {'name': '⚡️ Экспресс 1-Кнопка (96 кл.)', 'cols': 8, 'rows': 12, 'mines': 18, 'reward': 2200, 'exp': 450, 'one_button': True}
+    'ultra_96': {'name': '🟣 Мега-Поле (8х12, 96 кл.)', 'cols': 8, 'rows': 12, 'mines': 18, 'reward': 1800, 'exp': 350}
 }
 
 def get_adjacent_indices(idx, cols, rows):
@@ -3132,30 +3147,6 @@ def render_classic_mines_board(game_id):
     total_cells = cols * rows
     u_id = game['user_id']
     mode = game.get('mode', 'dig')
-
-    if game.get('one_button'):
-        markup = InlineKeyboardMarkup(row_width=1)
-        safe_total = total_cells - game['mines_count']
-        rev_count = len(game['revealed'])
-        if not game['finished']:
-            markup.add(InlineKeyboardButton(f"⛏ Сделать шаг разминирования ({rev_count}/{safe_total})", callback_data=f"cmo_{game_id}_step:{u_id}"))
-            if rev_count > 0:
-                cur_cashout = int(game['reward'] * (rev_count / safe_total))
-                markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cur_cashout} 🪙)", callback_data=f"cm_cashout_{game_id}:{u_id}"))
-
-        bar_len = min(10, int((rev_count / max(1, safe_total)) * 10))
-        bar = "🟩" * bar_len + "⬜️" * (10 - bar_len)
-        text = (
-            f"⚡️ <b>ЭКСПРЕСС-САПЁР В 1 КНОПКУ (96 КЛЕТОК)</b> 😺\n"
-            f"──────────────────────\n"
-            f"👤 Сапёр: {game['user_name']}\n"
-            f"💣 Мин на минном поле: <b>{game['mines_count']} шт.</b>\n"
-            f"📈 Прогресс очистки: <b>{rev_count}/{safe_total} кл.</b> [{bar}]\n"
-            f"🏆 Главный куш: <b>+{game['reward']} 🪙</b> (+{game['exp']} EXP)\n"
-            f"──────────────────────\n"
-            f"<i>Жмите одну кнопку, чтобы шаг за шагом обезвреживать 96 клеток!</i> 😸"
-        )
-        return text, markup
 
     markup = InlineKeyboardMarkup(row_width=cols)
     buttons = []
@@ -3450,7 +3441,7 @@ def cmd_durak(message):
 
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🤖 Соло (Против Бота)", callback_data=f"durak_mode_1_{bet}:{user_id}"),
+        InlineKeyboardButton("🤖 Соло (Против Бота)", callback_data=f"durak_mode_1_0:{user_id}"),
         InlineKeyboardButton("👥 2 Игрока", callback_data=f"durak_mode_2_{bet}:{user_id}")
     )
     markup.add(
@@ -3927,7 +3918,7 @@ def cmd_miner(message):
         f"──────────────────────\n"
         f"👤 Владелец: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
         f"⚡️ Хешрейт: <b>{lvl * 145} MH/s</b>\n"
-        f"💵 Доходность: <b>~{int(50 * (1 + (lvl-1)*0.45))} 🪙 в час</b>\n"
+        f"💵 Доходность: <b>~{int(BUSINESSES['crypto_farm']['base_income'] * (1 + (lvl-1)*0.45))} 🪙 в час</b>\n"
         f"📈 Текущий курс NYA: <b>{nya_price:.2f} 🪙</b>\n"
         f"──────────────────────\n"
         f"💡 Доход накапливается в общем пуле бизнесов! Нажмите кнопку ниже для сбора. 😸"
@@ -4946,7 +4937,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
         add_account_exp(user_id, user_tag, 10, username=username)
         mark_dirty()
 
-        msg = f"✅ <b>УСПЕШНАЯ ПОКУПКА!</b> 😻\n──────────────────────\nКуплено: <b>{amount:.2f} {ticker}</b> ({asset['name']})\nСписано: <b>-{total_cost:.2f} 🪙</b>\nОстаток баланса: <b>{econ['balance']} 🪙</b>"
+        msg = f"✅ <b>УСПЕШНАЯ ПОКУПКА!</b> 😻\n──────────────────────\nКуплено: <b>{amount:.2f} {ticker}</b> ({asset['name']})\nСписано: <b>-{charge_cost} 🪙</b>\nОстаток баланса: <b>{econ['balance']} 🪙</b>"
         if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
 
@@ -4961,7 +4952,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
         portfolio[ticker] -= amount
         if portfolio[ticker] <= 0.0001: del portfolio[ticker]
 
-        earned = int(total_cost)
+        earned = max(1, int(round(total_cost)))
         econ['balance'] += earned
         check_achievements(user_id, user_tag, 'crypto_trades', 1, chat_id, username=username)
         add_account_exp(user_id, user_tag, 10, username=username)
@@ -6431,6 +6422,7 @@ def callback_inline(call):
             trump_suit = trump_card['suit']
 
             if mode_num == 1:
+                bet = 0  # Против бота игра без ставок (множитель 2х отключен)
                 p_human = {'id': user_id, 'name': user_name, 'hand': []}
                 p_bot = {'id': 'bot', 'name': '🤖 Ня-Бот', 'hand': []}
                 players = [p_human, p_bot]
@@ -6599,7 +6591,11 @@ def callback_inline(call):
             if len(survivors) <= 1:
                 game['finished'] = True
                 loser = survivors[0] if survivors else None
-                tot_pot = game['bet'] * len(players)
+                is_vs_bot = any(pl['id'] == 'bot' for pl in players)
+                if is_vs_bot:
+                    tot_pot = game['bet']  # Без умножителя 2х за победу над ботом
+                else:
+                    tot_pot = game['bet'] * len(players)
                 win_text = f"🏁 <b>ИГРА ОКОНЧЕНА!</b>\n"
                 if loser:
                     win_text += f"🃏 В дураках остался: <b>{loser['name']}</b>! 🙀\n"
@@ -6611,7 +6607,10 @@ def callback_inline(call):
                     split_win = tot_pot // len(winners)
                     for w in winners:
                         add_coins(w['id'], w['name'], split_win)
-                    win_text += f"💰 Победители разделили банк: <b>+{split_win} 🪙</b> каждому!"
+                    if is_vs_bot:
+                        win_text += f"💰 Возврат ставки: <b>+{split_win} 🪙</b> (умножитель 2х против бота отключен)!"
+                    else:
+                        win_text += f"💰 Победители разделили банк: <b>+{split_win} 🪙</b> каждому!"
 
                 game['status_text'] = win_text
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
@@ -7207,7 +7206,6 @@ def callback_inline(call):
                     'reward': d_info['reward'],
                     'exp': d_info['exp'],
                     'diff_name': d_info['name'],
-                    'one_button': d_info.get('one_button', False),
                     'bombs': set(),
                     'numbers': {},
                     'revealed': set(),
@@ -7233,33 +7231,6 @@ def callback_inline(call):
             try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception: pass
 
-        elif action_data.startswith('cm_cashout_'):
-            game_id = action_data.replace('cm_cashout_', '')
-            game = active_c_mines.get(game_id)
-            if not game or game.get('finished'): return
-            if user_id != game['user_id']: return
-
-            total_cells = game['cols'] * game['rows']
-            safe_total = total_cells - game['mines_count']
-            rev_count = len(game['revealed'])
-            win_val = int(game['reward'] * (rev_count / safe_total))
-            game['finished'] = True
-            add_coins(user_id, user_name, win_val, username=user_username)
-            add_account_exp(user_id, user_name, 20, username=user_username)
-            mark_dirty()
-
-            try:
-                bot.edit_message_text(
-                    f"💰 <b>ДОСРОЧНАЯ ЭВАКУАЦИЯ!</b> 😻\n\n"
-                    f"Сапёр: {make_link(chat_id, user_name, user_id, ping=False)}\n"
-                    f"Разминировано секторов: <b>{rev_count}/{safe_total}</b>\n"
-                    f"Выигрыш зачислен: <b>+{win_val} Ня-коинов 🪙</b> (+20 EXP)! 😸",
-                    chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
-                )
-            except Exception: pass
-            del active_c_mines[game_id]
-            return
-
         elif action_data.startswith('cmo_'):
             m_parts = action_data.split('_')
             game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
@@ -7277,12 +7248,7 @@ def callback_inline(call):
             rows = game.get('rows', 5)
             total_cells = cols * rows
 
-            if cell_arg == 'step':
-                available_unrev = [i for i in range(total_cells) if i not in game['revealed']]
-                if not available_unrev: return
-                cell_idx = random.choice(available_unrev)
-            else:
-                cell_idx = int(cell_arg)
+            cell_idx = int(cell_arg)
 
             if game.get('mode') == 'flag':
                 if cell_idx in game['revealed']: return
