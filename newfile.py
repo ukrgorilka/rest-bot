@@ -42,7 +42,9 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = os.environ.get("BOT_TOKEN", "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0")  # Рекомендуется задать BOT_TOKEN в ENV
+TOKEN = os.environ.get("BOT_TOKEN", "8613185271:AAEpzwbiA8ajrN7fg_5MTBF8BJjYpxh5Xk0")
+if not os.environ.get("BOT_TOKEN"):
+    print("[ВНИМАНИЕ] Рекомендуется задать BOT_TOKEN в переменных окружения (ENV)!")
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
 db_dirty = False
@@ -632,9 +634,8 @@ def save_data(send_backup=False):
     with db_lock:
         try:
             temp_file = f"{DATA_FILE}.tmp"
-            db_copy = copy.deepcopy(db)
             with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(db_copy, f, ensure_ascii=False, indent=4)
+                json.dump(db, f, ensure_ascii=False, indent=4)
             os.replace(temp_file, DATA_FILE)
             db_dirty = False
 
@@ -1278,7 +1279,7 @@ def make_link(chat_id, user_name, user_id=None, ping=True):
         badge_str = f" [{user_econ['badge']}]"
 
     if user_econ.get('custom_title'):
-        title_str = f" [{user_econ['custom_title']}]"
+        title_str = f" [{html.escape(str(user_econ['custom_title']))}]"
     else:
         active_title = user_econ.get('active_title')
         if active_title in TITLES:
@@ -1794,22 +1795,25 @@ def memory_and_debt_worker():
                 if now - int(k.split('_')[1]) > 1800:
                     del active_drops[k]
 
-            # Коллекторы по кредитам
+            # Коллекторы по кредитам (исправлено списание депозита)
             for key, econ in list(db.get('economy', {}).items()):
                 loan = econ.get('loan')
                 if loan and loan.get('amount', 0) > 0 and now > loan.get('due', 0) and not loan.get('defaulted'):
                     amount = loan['amount']
-                    if econ['balance'] >= amount:
-                        econ['balance'] -= amount
+                    pocket = econ.get('balance', 0)
+                    bank_dep = econ.get('bank_deposit', 0)
+                    total_funds = pocket + bank_dep
+                    if total_funds >= amount:
+                        from_pocket = min(pocket, amount)
+                        econ['balance'] -= from_pocket
+                        econ['bank_deposit'] = max(0, bank_dep - (amount - from_pocket))
                         econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
                     else:
-                        paid = econ['balance'] + econ.get('bank_deposit', 0)
+                        econ['loan']['amount'] = max(0, amount - total_funds)
                         econ['balance'] = 0
                         econ['bank_deposit'] = 0
-                        rem_loan = max(0, amount - paid)
-                        econ['loan']['amount'] = rem_loan
                         econ['loan']['defaulted'] = True
-                        econ['karma'] -= 20
+                        econ['karma'] = max(-100, econ.get('karma', 0) - 20)
                     mark_dirty()
         except Exception as e:
             print(f"[MEMORY WORKER ERROR] {e}")
@@ -2618,7 +2622,8 @@ def process_sport_dice_game(message, game_type, bet):
     chat_id = message.chat.id
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    user_username = message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=user_username)
 
     if bet <= 0:
         bot.reply_to(message, "❌ Ставка должна быть больше 0! 😾")
@@ -2633,91 +2638,98 @@ def process_sport_dice_game(message, game_type, bet):
 
     emoji_map = {'football': '⚽', 'basketball': '🏀', 'darts': '🎯', 'bowling': '🎳'}
     dice_emoji = emoji_map.get(game_type, '🎲')
-    msg = bot.send_dice(chat_id, emoji=dice_emoji)
-    val = msg.dice.value
+    dice_msg = bot.send_dice(chat_id, emoji=dice_emoji)
+    val = dice_msg.dice.value
 
-    time.sleep(3.5)
-    has_clover = (econ.get('luck_clover_until', 0) > time.time())
-    clover_str = " (🍀 Бонус клевера)" if has_clover else ""
-    result_text = ""
-    
-    pool = db.get('casino_pool', 1000000)
-    force_loss = False
-    if pool < bet * 3: force_loss = True
+    def resolve_dice_async():
+        time.sleep(3.5)
+        try:
+            has_clover = (econ.get('luck_clover_until', 0) > time.time())
+            clover_str = " (🍀 Бонус клевера)" if has_clover else ""
+            result_text = ""
+            
+            pool = db.get('casino_pool', 1000000)
+            actual_val = val
+            if pool < bet * 3:
+                actual_val = 1
 
-    if force_loss: val = 1
+            if game_type == 'football':
+                if actual_val in [3, 4, 5]:
+                    mult = 1.35 if not has_clover else 1.45
+                    win_amount = int(bet * mult)
+                    win_amount = process_casino_win(win_amount)
+                    econ['balance'] += win_amount
+                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                    result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
+                elif actual_val == 2:
+                    result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b> 🙀\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
+                else:
+                    result_text = f"💨 <b>МИМО ВОРОТ!</b> 😿\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
 
-    if game_type == 'football':
-        if val in [3, 4, 5]:
-            mult = 1.35 if not has_clover else 1.45
-            win_amount = int(bet * mult)
-            win_amount = process_casino_win(win_amount)
-            econ['balance'] += win_amount
-            econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-            econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
-        elif val == 2:
-            result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b> 🙀\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
-        else:
-            result_text = f"💨 <b>МИМО ВОРОТ!</b> 😿\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
+            elif game_type == 'basketball':
+                if actual_val in [4, 5]:
+                    mult = 1.65 if not has_clover else 1.75
+                    win_amount = int(bet * mult)
+                    win_amount = process_casino_win(win_amount)
+                    econ['balance'] += win_amount
+                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                    result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                elif actual_val == 3:
+                    result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b> 🙀\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
+                else:
+                    result_text = f"💨 <b>МИМО ЩИТА!</b> 😿\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
 
-    elif game_type == 'basketball':
-        if val in [4, 5]:
-            mult = 1.65 if not has_clover else 1.75
-            win_amount = int(bet * mult)
-            win_amount = process_casino_win(win_amount)
-            econ['balance'] += win_amount
-            econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-            econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
-        elif val == 3:
-            result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b> 🙀\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
-        else:
-            result_text = f"💨 <b>МИМО ЩИТА!</b> 😿\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
+            elif game_type == 'darts':
+                if actual_val == 6:
+                    mult = 2.5 if not has_clover else 2.8
+                    win_amount = int(bet * mult)
+                    win_amount = process_casino_win(win_amount)
+                    econ['balance'] += win_amount
+                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                    result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 Куш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                elif actual_val == 5:
+                    mult = 1.25
+                    win_amount = int(bet * mult)
+                    win_amount = process_casino_win(win_amount)
+                    econ['balance'] += win_amount
+                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                    result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
+                else:
+                    result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
-    elif game_type == 'darts':
-        if val == 6:
-            mult = 2.5 if not has_clover else 2.8
-            win_amount = int(bet * mult)
-            win_amount = process_casino_win(win_amount)
-            econ['balance'] += win_amount
-            econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-            econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 Куш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
-        elif val == 5:
-            mult = 1.25
-            win_amount = int(bet * mult)
-            win_amount = process_casino_win(win_amount)
-            econ['balance'] += win_amount
-            econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-            econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
-        else:
-            result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
+            elif game_type == 'bowling':
+                if actual_val == 6:
+                    mult = 2.2 if not has_clover else 2.4
+                    win_amount = int(bet * mult)
+                    win_amount = process_casino_win(win_amount)
+                    econ['balance'] += win_amount
+                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                    result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Точный бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                elif actual_val in [4, 5]:
+                    win_amount = int(bet * 0.85)
+                    win_amount = process_casino_win(win_amount)
+                    econ['balance'] += win_amount
+                    result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Часть кеглей устояла. 😸\n✅ Кэшбек: <b>+{win_amount} 🪙</b> (x0.85)."
+                else:
+                    result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
-    elif game_type == 'bowling':
-        if val == 6:
-            mult = 2.2 if not has_clover else 2.4
-            win_amount = int(bet * mult)
-            win_amount = process_casino_win(win_amount)
-            econ['balance'] += win_amount
-            econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-            econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-            result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Точный бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
-        elif val in [4, 5]:
-            win_amount = int(bet * 0.85)
-            win_amount = process_casino_win(win_amount)
-            econ['balance'] += win_amount
-            result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Часть кеглей устояла. 😸\n✅ Кэшбек: <b>+{win_amount} 🪙</b> (x0.85)."
-        else:
-            result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
+            add_account_exp(user_id, user_name, 5, username=user_username)
+            check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
+            mark_dirty()
 
-    add_account_exp(user_id, user_name, 5, username=message.from_user.username)
-    check_achievements(user_id, user_name, 'games', 1, chat_id, username=message.from_user.username)
-    mark_dirty()
+            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            bot.reply_to(message, f"👤 Игрок: {u_link}\n{result_text}\n💰 Баланс: <b>{econ['balance']} Ня-коинов 🪙</b> 😸", parse_mode='HTML')
+        except Exception as e:
+            print(f"[SPORT DICE ERROR] {e}")
 
-    u_link = make_link(chat_id, user_name, user_id, ping=True)
-    bot.reply_to(message, f"👤 Игрок: {u_link}\n{result_text}\n💰 Баланс: <b>{econ['balance']} Ня-коинов 🪙</b> 😸", parse_mode='HTML')
+    th = threading.Thread(target=resolve_dice_async)
+    th.daemon = True
+    th.start()
 
 @bot.message_handler(commands=['football', 'футбол', 'пенальти'])
 def cmd_football(message):
@@ -3481,9 +3493,14 @@ def cmd_dick(message):
         bot.reply_to(message, f"⏳ Замер писюна доступен раз в 20 минут! 😿\nПодождите: <b>{left}</b>.", parse_mode='HTML')
         return
 
-    change = random.choice([-3, -2, -1, 1, 2, 3, 4, 5, 6])
+    # Сбалансированное распределение изменений с околонулевым матожиданием
+    change_pool = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+    if random.random() < 0.05:
+        change = random.choice([-8, 8])
+    else:
+        change = random.choice(change_pool)
     cur_size = econ.get('dick_size', 15)
-    new_size = max(1, min(250, cur_size + change))
+    new_size = max(1, min(150, cur_size + change))
 
     econ['dick_size'] = new_size
     econ['last_dick_time'] = now
@@ -4250,11 +4267,15 @@ def cmd_custom_title(message):
         bot.reply_to(message, "❌ Укажите желаемый титул! 😾\nПример: <code>/custom_title 👑 Главный Кот</code>", parse_mode='HTML')
         return
 
-    new_title = parts[1].strip()[:32]
-    econ['custom_title'] = new_title
+    raw_title = parts[1].strip()[:32]
+    clean_title = re.sub(r'<[^>]*>', '', raw_title).strip()
+    if not clean_title:
+        bot.reply_to(message, "❌ Недопустимый титул (содержит только теги)!", parse_mode='HTML')
+        return
+    econ['custom_title'] = clean_title
     econ['active_title'] = None
     mark_dirty()
-    bot.reply_to(message, f"🎉 Ваш кастомный титул успешно установлен: <b>[{html.escape(new_title)}]</b>! 😻", parse_mode='HTML')
+    bot.reply_to(message, f"🎉 Ваш кастомный титул успешно установлен: <b>[{html.escape(clean_title)}]</b>! 😻", parse_mode='HTML')
 
 def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -4894,10 +4915,12 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
         return
 
+    import math
     try:
         amount = float(amount_str)
-        if amount <= 0: raise ValueError
-    except ValueError:
+        if math.isnan(amount) or math.isinf(amount) or amount <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
         msg = "❌ Укажите корректное положительное число монет! 😾"
         if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
         else: bot.send_message(chat_id, msg, parse_mode='HTML')
@@ -4910,13 +4933,14 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
     total_cost = round(price * amount, 2)
 
     if action == 'buy':
-        if econ['balance'] < total_cost:
-            msg = f"❌ Недостаточно коинов! Нужно <b>{total_cost:.2f} 🪙</b> (У вас: {econ['balance']} 🪙). 😿"
+        charge_cost = max(1, math.ceil(total_cost))
+        if econ['balance'] < charge_cost:
+            msg = f"❌ Недостаточно коинов! Нужно <b>{charge_cost} 🪙</b> (У вас: {econ['balance']} 🪙). 😿"
             if reply_msg: bot.reply_to(reply_msg, msg, parse_mode='HTML')
             else: bot.send_message(chat_id, msg, parse_mode='HTML')
             return
 
-        econ['balance'] -= int(total_cost)
+        econ['balance'] -= charge_cost
         portfolio[ticker] = portfolio.get(ticker, 0.0) + amount
         check_achievements(user_id, user_tag, 'crypto_trades', 1, chat_id, username=username)
         add_account_exp(user_id, user_tag, 10, username=username)
@@ -5334,10 +5358,10 @@ def handle_messages(message):
         if now_ts < user_flood_muted[user_id]: return
         else: del user_flood_muted[user_id]
 
-    user_hist = user_flood_history.setdefault(user_id, [])
+    user_hist = [t for t in user_flood_history.get(user_id, []) if now_ts - t <= 3.0]
     user_hist.append(now_ts)
-    user_flood_history[user_id] = [t for t in user_hist if now_ts - t <= 3.0]
-    if len(user_flood_history[user_id]) >= 6:
+    user_flood_history[user_id] = user_hist
+    if len(user_hist) >= 6:
         user_flood_muted[user_id] = now_ts + 20
         u_link = make_link(chat_id, user_name, user_id, ping=True)
         bot.send_message(chat_id, f"🧊 {u_link}, <b>остудись!</b> Слишком частые команды (заморозка на 20 сек). 😾", parse_mode='HTML')
@@ -5658,9 +5682,10 @@ def handle_messages(message):
             bot.send_message(chat_id, f"🚨 <b>ПРОВАЛ ОГРАБЛЕНИЯ!</b> 😿\n\n{u_link} попался с поличным и выплатил {t_link} компенсацию: <b>-{fine} 🪙</b>! (Карма -3)", parse_mode='HTML')
         return
 
-    # БАНК ТЕКСТОМ
+    # БАНК ТЕКСТОМ (С СОХРАНЕНИЕМ НАКОПЛЕННЫХ ПРОЦЕНТОВ)
     if text_lower.startswith(('банк положить', 'депозит')):
         econ = get_user_econ(user_id, user_name, username=user_username)
+        update_bank_interest(econ)
         m_amt = re.search(r'(\d+)', text)
         if m_amt:
             amt = int(m_amt.group(1))
@@ -5669,13 +5694,13 @@ def handle_messages(message):
                 return
             econ['balance'] -= amt
             econ['bank_deposit'] = econ.get('bank_deposit', 0) + amt
-            econ['last_bank_calc'] = time.time()
             check_achievements(user_id, user_name, 'bank_deposit', amt, chat_id, username=user_username)
             mark_dirty()
             bot.reply_to(message, f"🏦 Вы внесли <b>{amt} 🪙</b> на депозит в Ня-Банк! 😻\nНа депозите: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять всё'):
         econ = get_user_econ(user_id, user_name, username=user_username)
+        update_bank_interest(econ)
         dep = econ.get('bank_deposit', 0)
         if dep <= 0:
             bot.reply_to(message, "❌ Ваш банковский депозит пуст! 😿")
@@ -5688,6 +5713,7 @@ def handle_messages(message):
         return
     elif text_lower.startswith('банк снять'):
         econ = get_user_econ(user_id, user_name, username=user_username)
+        update_bank_interest(econ)
         m_amt = re.search(r'(\d+)', text)
         if m_amt:
             amt = int(m_amt.group(1))
@@ -5697,7 +5723,8 @@ def handle_messages(message):
                 return
             econ['bank_deposit'] -= amt
             econ['balance'] += amt
-            econ['last_bank_calc'] = time.time()
+            if econ['bank_deposit'] == 0:
+                econ['last_bank_calc'] = time.time()
             mark_dirty()
             bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
         return
@@ -6174,10 +6201,10 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "❌ Работа бота в этом чате запрещена!", show_alert=True)
             return
 
-        user_hist = user_flood_history.setdefault(user_id, [])
+        user_hist = [t for t in user_flood_history.get(user_id, []) if now_ts - t <= 2.0]
         user_hist.append(now_ts)
-        user_flood_history[user_id] = [t for t in user_hist if now_ts - t <= 2.0]
-        if len(user_flood_history[user_id]) >= 5:
+        user_flood_history[user_id] = user_hist
+        if len(user_hist) >= 5:
             bot.answer_callback_query(call.id, "⚠️ Слишком быстро нажимаете кнопки!", show_alert=True)
             return
 
@@ -6528,10 +6555,13 @@ def callback_inline(call):
             is_attacker = (p_idx == game['attacker_idx'])
             is_defender = (p_idx == game['defender_idx'])
 
+            def_hand_len = len(game['players'][game['defender_idx']]['hand'])
+            unbeaten_cards = sum(1 for pair in game['table'] if pair.get('defend') is None)
+
             if not is_attacker and not is_defender:
                 table_ranks = {pair['attack']['rank'] for pair in game['table']} | {pair['defend']['rank'] for pair in game['table'] if pair.get('defend')}
-                if card['rank'] not in table_ranks or len(game['table']) >= 6:
-                    bot.answer_callback_query(call.id, "❌ Этой картой нельзя подкинуть!", show_alert=True)
+                if card['rank'] not in table_ranks or len(game['table']) >= 6 or unbeaten_cards >= def_hand_len:
+                    bot.answer_callback_query(call.id, "❌ Нельзя подкинуть (лимит карт у защитника или неподходящий ранг)!", show_alert=True)
                     return
                 p['hand'].pop(card_idx)
                 game['table'].append({'attack': card, 'defend': None})
@@ -6543,8 +6573,8 @@ def callback_inline(call):
                     game['status_text'] = f"{p['name']} пошёл(ла) с {card_to_str(card)}!"
                 else:
                     table_ranks = {pair['attack']['rank'] for pair in game['table']} | {pair['defend']['rank'] for pair in game['table'] if pair.get('defend')}
-                    if card['rank'] not in table_ranks or len(game['table']) >= 6:
-                        bot.answer_callback_query(call.id, "❌ Можно подкидывать только карты того же достоинства!", show_alert=True)
+                    if card['rank'] not in table_ranks or len(game['table']) >= 6 or unbeaten_cards >= def_hand_len:
+                        bot.answer_callback_query(call.id, "❌ Нельзя подкинуть (лимит карт у защитника или неподходящий ранг)!", show_alert=True)
                         return
                     p['hand'].pop(card_idx)
                     game['table'].append({'attack': card, 'defend': None})
