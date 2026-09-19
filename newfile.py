@@ -10,7 +10,7 @@ import re
 import threading
 import time
 import telebot
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice
 from flask import Flask
 
 # ---------------------------------------------------------
@@ -222,8 +222,51 @@ THEMES = {
     'blood_moon': {'name': '🩸 Кровавая Луна', 'price': 4000, 'border': '🌕══════ 🩸 ══════🌑', 'header': '🩸 <b>АЛТАРЬ КРОВАВОЙ ЛУНЫ</b> 🗡', 'icon': '🍷'},
     'emerald': {'name': '🌿 Изумрудный Лес', 'price': 2200, 'border': '🍃══════ 🌲 ══════🍃', 'header': '🌿 <b>ХРАНИТЕЛЬ ДРЕВНЕГО ЛЕСА</b> 🍃', 'icon': '🌱'},
     'synthwave': {'name': '🌇 Синтвейв 80s', 'price': 2800, 'border': '🌴══════ 🌆 ══════🌴', 'header': '🌇 <b>RETROWAVE SUNSET DRIVE</b> 🏎', 'icon': '📼'},
-    'frost': {'name': '❄️ Вечная Мерзлота', 'price': 2600, 'border': '❄️══════ 🧊 ══════❄️', 'header': '❄️ <b>ЛЕДЯНОЙ ЧЕРТОГ АРКТИКИ</b> 🧊', 'icon': '💎'}
+    'frost': {'name': '❄️ Вечная Мерзлота', 'price': 2600, 'border': '❄️══════ 🧊 ══════❄️', 'header': '❄️ <b>ЛЕДЯНОЙ ЧЕРТОГ АРКТИКИ</b> 🧊', 'icon': '💎'},
+    'stars_gold': {'name': '🌟 Императорское Золото VIP', 'price': 0, 'border': '⭐️══════ ⚜️ ══════⭐️', 'header': '🌟 <b>ИМПЕРАТОРСКИЙ STARS ПРОФИЛЬ</b> 👑', 'icon': '⭐️'},
+    'stars_anime': {'name': '🎀 Аниме Люкс VIP', 'price': 0, 'border': '✨══════ 🎀 ══════✨', 'header': '🎀 <b>ANIME LUXURY SUPREME ID</b> 💖', 'icon': '💫'},
+    'stars_galaxy': {'name': '🌌 Бездна Сингулярности VIP', 'price': 0, 'border': '🪐══════ 🌀 ══════🌌', 'header': '🌌 <b>БЕЗДНА КОСМИЧЕСКОЙ СИНГУЛЯРНОСТИ</b> 🛸', 'icon': '🪐'}
 }
+# ---------------------------------------------------------
+# ЭКОНОМИКА TELEGRAM STARS (ЗВЁЗДЫ) & VIP PASS
+# ---------------------------------------------------------
+STARS_COIN_PACKS = {
+    'coins_1_star': {'name': '💰 35,000 Ня-коинов', 'coins': 35000, 'stars': 1, 'desc': 'Стартовый мешочек коинов (выгодный курс)'},
+    'coins_3_stars': {'name': '💵 100,000 Ня-коинов', 'coins': 100000, 'stars': 3, 'desc': 'Народный пак: 100к коинов всего за 3 ⭐️!'},
+    'coins_5_stars': {'name': '💳 200,000 Ня-коинов', 'coins': 200000, 'stars': 5, 'desc': 'Крупный капитал для предприятий и бизнеса'},
+    'coins_10_stars': {'name': '🏦 500,000 Ня-коинов', 'coins': 500000, 'stars': 10, 'desc': 'Капитал магната для покорения биржи и топов'},
+    'coins_20_stars': {'name': '💎 1,200,000 Ня-коинов', 'coins': 1200000, 'stars': 20, 'desc': 'Миллионный фонд для абсолютного богатства'}
+}
+
+STARS_VIP_PASS = {
+    'pass_7_days': {'name': '⭐️ VIP Nya Pass (7 дней)', 'days': 7, 'stars': 1, 'desc': '-30% ко всем кулдаунам, 2x /bonus, 100% защита от ограблений'},
+    'pass_30_days': {'name': '⭐️ VIP Nya Pass (30 дней)', 'days': 30, 'stars': 3, 'desc': 'Месяц полного VIP комфорта и удвоенных наград'},
+    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 10, 'desc': 'Пожизненный VIP статус и все привилегии навсегда!'}
+}
+
+VIP_BADGES = {
+    'vip_badge_crown': {'name': 'Корона VIP', 'emoji': '👑', 'stars': 1, 'desc': 'Символ элиты чата'},
+    'vip_badge_star': {'name': 'Звезда Покровителя', 'emoji': '⭐️', 'stars': 1, 'desc': 'Знак поддержки бота'},
+    'vip_badge_gem': {'name': 'Сияющий Алмаз', 'emoji': '💎', 'stars': 1, 'desc': 'Драгоценный статус'},
+    'vip_badge_angel': {'name': 'Крылья Ангела', 'emoji': '🪽', 'stars': 2, 'desc': 'Светлый хранитель'},
+    'vip_badge_galaxy': {'name': 'Космос', 'emoji': '🌌', 'stars': 2, 'desc': 'Межгалактический покровитель'},
+    'vip_badge_dragon': {'name': 'Дракон Империи', 'emoji': '🐲', 'stars': 2, 'desc': 'Мощь древнего дракона'}
+}
+
+STARS_COSMETICS = {
+    'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 2, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
+    'pet_griffin': {'name': '👑 Питомец: Королевский Грифон', 'stars': 3, 'type': 'pet', 'pet_id': 'vip_griffin', 'desc': 'Эксклюзивный питомец (+150% к удаче)'},
+    'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 1, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
+    'theme_anime': {'name': '🎀 Тема: Аниме Люкс VIP', 'stars': 1, 'type': 'theme', 'theme_id': 'stars_anime', 'desc': 'Премиальный аниме стиль профиля'},
+    'theme_galaxy': {'name': '🌌 Тема: Бездна Сингулярности VIP', 'stars': 2, 'type': 'theme', 'theme_id': 'stars_galaxy', 'desc': 'Космическая стилистика сингулярности'},
+    'badge_crown': {'name': '👑 Значок: Корона VIP', 'stars': 1, 'type': 'badge', 'emoji': '👑', 'desc': 'VIP значок рядом с ником'},
+    'badge_star': {'name': '⭐️ Значок: Звезда Покровителя', 'stars': 1, 'type': 'badge', 'emoji': '⭐️', 'desc': 'Значок спонсора бота'},
+    'badge_gem': {'name': '💎 Значок: Сияющий Алмаз', 'stars': 1, 'type': 'badge', 'emoji': '💎', 'desc': 'Драгоценный значок'},
+    'badge_angel': {'name': '🪽 Значок: Крылья Ангела', 'stars': 2, 'type': 'badge', 'emoji': '🪽', 'desc': 'Ангельские крылья в чате'},
+    'badge_galaxy': {'name': '🌌 Значок: Космос', 'stars': 2, 'type': 'badge', 'emoji': '🌌', 'desc': 'Галактический значок'},
+    'badge_dragon': {'name': '🐲 Значок: Дракон Империи', 'stars': 2, 'type': 'badge', 'emoji': '🐲', 'desc': 'Значок дракона'}
+}
+
 
 # ---------------------------------------------------------
 # ШРИФТЫ ДЛЯ ПРОФИЛЯ
@@ -385,7 +428,8 @@ PETS_DATA = {
     'panda': {'name': '🐼 Панда Ленивец', 'short': '🐼 Панда', 'price': 8000, 'luck_bonus': 50, 'desc': '+35% к бонусу /bonus'},
     'dragon': {'name': '🐉 Маленький Дракон', 'short': '🐉 Дракончик', 'price': 12000, 'luck_bonus': 85, 'desc': '+85% к удаче во всем'},
     'capybara': {'name': '🦦 Капибара Чила', 'short': '🦦 Капибара', 'price': 15000, 'luck_bonus': 90, 'desc': '+90% к удаче, максимальный чилл'},
-    'unicorn': {'name': '🦄 Радужный Единорог', 'short': '🦄 Единорог', 'price': 25000, 'luck_bonus': 110, 'desc': '+110% ко всем доходам'}
+    'unicorn': {'name': '🦄 Радужный Единорог', 'short': '🦄 Единорог', 'price': 25000, 'luck_bonus': 110, 'desc': '+110% ко всем доходам'},
+    'vip_griffin': {'name': '👑 Королевский Грифон', 'short': '👑 Грифон', 'price': 0, 'luck_bonus': 150, 'desc': '+150% ко всей удаче, благословение небес (VIP Питомец за 3 ⭐️)'}
 }
 
 ACHIEVEMENTS = {
@@ -676,6 +720,7 @@ def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
         BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
+        BotCommand('stars', '⭐️ Звёздный магазин и VIP Pass (Telegram Stars)'),
         BotCommand('profile_settings', '⚙️ Настройки тем, шрифтов и визуала профиля'),
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
         BotCommand('trash', '🗑 Порыться в мусорке в поисках лута'),
@@ -804,6 +849,9 @@ def get_user_cd_reduction(econ):
         if t_info.get('buff') == 'cd_reduction':
             reduction += (t_info.get('val', 0) / 100.0)
 
+    if econ.get('vip_forever') or (econ.get('vip_until', 0) > time.time()):
+        reduction += 0.30
+
     return min(0.75, max(0.0, reduction))
 
 def cooldown_text(last_time, cooldown, user_econ=None):
@@ -870,7 +918,7 @@ def merge_user_econ_data(dest, src):
     if not src or not isinstance(src, dict):
         return dest
 
-    for num_field in ['balance', 'bank_deposit', 'account_exp', 'work_exp', 'smeh', 'cooked_meals', 'bonus_streak']:
+    for num_field in ['balance', 'bank_deposit', 'account_exp', 'work_exp', 'smeh', 'cooked_meals', 'bonus_streak', 'stars_donated']:
         dest[num_field] = dest.get(num_field, 0) + src.get(num_field, 0)
 
     for ts_field in [
@@ -879,9 +927,12 @@ def merge_user_econ_data(dest, src):
         'last_chromosomes_time', 'last_dick_time', 'last_wheel_time', 
         'last_pet_walk', 'last_case_time', 'last_rob_time', 'last_stream_time',
         'luck_clover_until', 'invis_until', 'last_streak_time', 'last_energy_drink_time',
-        'last_trash_time'
+        'last_trash_time', 'vip_until'
     ]:
         dest[ts_field] = max(dest.get(ts_field, 0), src.get(ts_field, 0))
+
+    if src.get('vip_forever'):
+        dest['vip_forever'] = True
 
     v_dest = dest.get('vehicle')
     v_src = src.get('vehicle')
@@ -1009,7 +1060,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
-        ('last_energy_drink_time', 0)
+        ('last_energy_drink_time', 0), ('vip_until', 0), ('vip_forever', False), ('stars_donated', 0)
     ]:
         if field not in u_data:
             u_data[field] = default
@@ -4398,7 +4449,17 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     elif karma > -30: karma_title = "⚖️ Нейтрал"
     elif karma > -80: karma_title = "😈 Злодей"
     else: karma_title = "👹 Абсолютный Демон"
-    
+
+    vip_line = ""
+    if econ.get('vip_forever'):
+        vip_line = f"{t_icon} ⭐️ <b>VIP NYA PASS:</b> 👑 НАВСЕГДА\n"
+    elif econ.get('vip_until', 0) > time.time():
+        vip_date = datetime.fromtimestamp(econ['vip_until'], tz=MSK_TZ).strftime('%d.%m.%Y %H:%M')
+        vip_line = f"{t_icon} ⭐️ <b>VIP NYA PASS:</b> до {vip_date}\n"
+
+    stars_donated = econ.get('stars_donated', 0)
+    stars_line = f"{t_icon} 🌟 Поддержка бота: <b>{stars_donated} ⭐️</b>\n" if stars_donated > 0 else ""
+
     loan_str = ""
     loan = econ.get('loan')
     if loan and loan.get('amount', 0) > 0:
@@ -4413,6 +4474,8 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         f"{t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
         f"{t_icon} ⭐ Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
         f"{t_icon} ⚖️ Карма: <b>{karma}</b> ({karma_title})\n"
+        f"{vip_line}"
+        f"{stars_line}"
         f"{t_icon} {streak_str}"
         f"{t_icon} 💵 В кармане: <b>{econ['balance']} Ня-коинов 💸</b>\n"
         f"{t_icon} 🏦 На депозите: <b>{econ.get('bank_deposit', 0)} 🪙</b>{loan_str}\n"
@@ -4477,8 +4540,99 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         except Exception: pass
+
+# ---------------------------------------------------------
+# ФУНКЦИИ МАГАЗИНА TELEGRAM STARS
+# ---------------------------------------------------------
+def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    now_ts = time.time()
+    
+    vip_status = "❌ Не активен"
+    if econ.get('vip_forever'):
+        vip_status = "👑 Активен НАВСЕГДА"
+    elif econ.get('vip_until', 0) > now_ts:
+        vip_date = datetime.fromtimestamp(econ['vip_until'], tz=MSK_TZ).strftime('%d.%m.%Y %H:%M')
+        vip_status = f"✅ До {vip_date}"
+        
+    donated = econ.get('stars_donated', 0)
+
+    markup = InlineKeyboardMarkup(row_width=1)
+
+    if category == 'main':
+        lines = [
+            "⭐️ <b>МАГАЗИН TELEGRAM STARS (ДОНАТ)</b> 😺",
+            "──────────────────────",
+            f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}",
+            f"⭐️ Ваш статус VIP: <b>{vip_status}</b>",
+            f"🌟 Всего поддержано: <b>{donated} ⭐️</b>\n",
+            "<i>Все товары продаются по низким ценам для поддержки развития бота! Оплата происходит официально внутри Telegram за Звёзды (Telegram Stars).</i> 😻\n",
+            "<b>Выберите категорию:</b>"
+        ]
+        markup.add(
+            InlineKeyboardButton("💰 Пакеты Ня-коинов (3 ⭐️ = 100к)", callback_data=f"stars_cat_coins:{user_id}"),
+            InlineKeyboardButton("👑 VIP Nya Pass (Подписка)", callback_data=f"stars_cat_pass:{user_id}"),
+            InlineKeyboardButton("✨ Эксклюзивный визуал и статус", callback_data=f"stars_cat_cosm:{user_id}"),
+            InlineKeyboardButton("🔙 Обычный магазин коинов", callback_data=f"shop_main:{user_id}")
+        )
+    elif category == 'coins':
+        lines = [
+            "💰 <b>ПАКЕТЫ НЯ-КОИНОВ ЗА ЗВЁЗДЫ</b> 😺",
+            "──────────────────────",
+            "<i>Мгновенное пополнение игрового баланса по супер-курсу:</i>\n"
+        ]
+        for p_k, p_v in STARS_COIN_PACKS.items():
+            lines.append(f"• <b>{p_v['name']}</b> — <b>{p_v['stars']} ⭐️</b>\n  <i>{p_v['desc']}</i>\n")
+            markup.add(InlineKeyboardButton(f"Купить {p_v['name']} ({p_v['stars']} ⭐️)", callback_data=f"star_buy_coins_{p_k}:{user_id}"))
+        lines.append("──────────────────────")
+        markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
+
+    elif category == 'pass':
+        lines = [
+            "👑 <b>VIP NYA PASS (ПРИВИЛЕГИИ)</b> 😺",
+            "──────────────────────",
+            "<b>Что даёт VIP Nya Pass:</b>\n"
+            "• ⚡️ <b>-30% ко всем таймерам</b> (работа, рыбалка, охота, замеры)\n"
+            "• 🎁 <b>УДВОЕНИЕ часового бонуса /bonus (2x)!</b>\n"
+            "• 🛡 <b>100% иммунитет</b> к карманным кражам (вас нельзя ограбить!)\n"
+            "• ⭐️ Эксклюзивная отметка VIP в карточке профиля (/profile)\n"
+            "• 😻 Особое уважение и статус в чате!\n"
+        ]
+        for pass_k, pass_v in STARS_VIP_PASS.items():
+            lines.append(f"• <b>{pass_v['name']}</b> — <b>{pass_v['stars']} ⭐️</b>")
+            markup.add(InlineKeyboardButton(f"Купить {pass_v['name']} ({pass_v['stars']} ⭐️)", callback_data=f"star_buy_pass_{pass_k}:{user_id}"))
+        lines.append("──────────────────────")
+        markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
+
+    elif category == 'cosm':
+        lines = [
+            "✨ <b>ЭКСКЛЮЗИВНЫЙ ВИЗУАЛ И СТАТУС</b> 😺",
+            "──────────────────────",
+            "<i>Уникальная косметика и привилегии, доступные только за Звёзды:</i>\n"
+        ]
+        for c_k, c_v in STARS_COSMETICS.items():
+            lines.append(f"• <b>{c_v['name']}</b> — <b>{c_v['stars']} ⭐️</b>\n  <i>{c_v['desc']}</i>")
+            markup.add(InlineKeyboardButton(f"Купить: {c_v['name']} ({c_v['stars']} ⭐️)", callback_data=f"star_buy_cosm_{c_k}:{user_id}"))
+        lines.append("──────────────────────")
+        markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
+
+    text = "\n".join(lines)
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    try:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception:
+        pass
+
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton('⭐️ ЗВЁЗДНЫЙ МАГАЗИН (Telegram Stars) ⭐️', callback_data=f'shop_cat_stars_main:{user_id}')
+    )
     markup.add(
         InlineKeyboardButton('✨ Значки профиля', callback_data=f'shop_cat_badges_0:{user_id}'),
         InlineKeyboardButton('👑 Титулы с баффом', callback_data=f'shop_cat_titles_0:{user_id}')
@@ -5084,6 +5238,15 @@ def cmd_balance(message):
     streak_info = f"\n🔥 <b>Ежедневный стрик:</b> {econ.get('bonus_streak', 0)} дн."
     bot.reply_to(message, f"💵 <b>Ваш кошелек:</b> <b>{econ['balance']} Ня-коинов 💸</b>\n🏦 <b>В банке:</b> <b>{econ.get('bank_deposit', 0)} 🪙</b>{streak_info} 😺", parse_mode='HTML')
 
+
+@bot.message_handler(commands=['stars', 'donate', 'vip', 'pass', 'донат', 'звезды', 'пасс'])
+def cmd_stars(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_stars_shop(message.chat.id, user_id, user_name, category='main')
+
 @bot.message_handler(commands=['shop', 'магазин'])
 def cmd_shop(message):
     if not can_process_user_message(message):
@@ -5628,6 +5791,11 @@ def handle_messages(message):
             return
 
         t_econ = get_user_econ(target_user_id, target_user)
+        if t_econ.get('vip_forever') or (t_econ.get('vip_until', 0) > now):
+            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            t_link = make_link(chat_id, target_user, target_user_id, ping=True)
+            bot.send_message(chat_id, f"🛡 У {t_link} действует <b>VIP NYA PASS</b>! Иммунитет к ограблениям защитил карманы от кражи {u_link}. 😸", parse_mode='HTML')
+            return
         t_pocket = t_econ.get('balance', 0)
         if t_pocket < 50:
             bot.reply_to(message, "❌ У жертвы меньше 50 коинов на руках! Деньги в банке защищены на 100%. 😿", parse_mode='HTML')
@@ -5849,6 +6017,7 @@ def handle_messages(message):
     elif text_lower in ['развод']: cmd_divorce(message); return
     elif text_lower in ['баланс', 'коины', 'ня-коины', 'деньги']: cmd_balance(message); return
     elif text_lower in ['инвентарь', 'профиль', 'мои значки']: cmd_profile(message); return
+    elif text_lower in ['звезды', 'донат', 'stars', 'vip', 'пасс', 'nya pass']: cmd_stars(message); return
     elif text_lower in ['магазин', 'шоп']: cmd_shop(message); return
     elif text_lower in ['биржа', 'крипта', 'рынок']: cmd_market(message); return
     elif text_lower in ['портфель', 'мои акции']: cmd_portfolio(message); return
@@ -5917,6 +6086,9 @@ def handle_messages(message):
                 base_reward = int(base_reward * 1.35)
 
             final_reward = int(base_reward * streak_mult)
+            is_vip = econ.get('vip_forever') or (econ.get('vip_until', 0) > now_ts)
+            if is_vip:
+                final_reward = int(final_reward * 2.0)
 
             econ['balance'] += final_reward
             econ['last_hourly'] = now_ts
@@ -5925,7 +6097,8 @@ def handle_messages(message):
             check_achievements(user_id, user_name, 'bonuses', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'bonus', 1, chat_id, username=user_username)
 
-            streak_note = f"\n🔥 <b>Стрик: {streak} дн.</b> (Множитель x{streak_mult:.2f})!"
+            vip_bonus_text = "\n⭐️ <b>VIP NYA PASS: Бонус удвоен (x2.0)!</b>" if is_vip else ""
+            streak_note = f"\n🔥 <b>Стрик: {streak} дн.</b> (Множитель x{streak_mult:.2f})!{vip_bonus_text}"
             bot.reply_to(message, f"🎲 Вы собрали часовой бонус: <b>+{final_reward} Ня-коинов 🪙</b>!{streak_note}\nБаланс: <b>{econ['balance']} 💸</b> 😸", parse_mode='HTML')
             for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
         else:
@@ -6285,6 +6458,87 @@ def callback_inline(call):
             return
 
         # МАГАЗИН: ГЛАВНОЕ МЕНЮ
+                # КАТЕГОРИИ МАГАЗИНА STARS
+        elif action_data == 'shop_cat_stars_main' or action_data == 'stars_cat_main':
+            render_stars_shop(chat_id, user_id, user_name, category='main', message_id=call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data == 'stars_cat_coins':
+            render_stars_shop(chat_id, user_id, user_name, category='coins', message_id=call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data == 'stars_cat_pass':
+            render_stars_shop(chat_id, user_id, user_name, category='pass', message_id=call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data == 'stars_cat_cosm':
+            render_stars_shop(chat_id, user_id, user_name, category='cosm', message_id=call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
+
+        # ИНИЦИАЦИЯ ОПЛАТЫ STARS: ПАКЕТЫ КОИНОВ
+        elif action_data.startswith('star_buy_coins_'):
+            pack_key = action_data.replace('star_buy_coins_', '')
+            if pack_key in STARS_COIN_PACKS:
+                pack = STARS_COIN_PACKS[pack_key]
+                try:
+                    bot.send_invoice(
+                        chat_id=chat_id,
+                        title=pack['name'],
+                        description=pack['desc'],
+                        invoice_payload=f"coinpack_{pack_key}:{user_id}:{int(time.time())}",
+                        provider_token="",
+                        currency="XTR",
+                        prices=[LabeledPrice(label=pack['name'], amount=pack['stars'])]
+                    )
+                    bot.answer_callback_query(call.id, f"⭐️ Счёт на {pack['stars']} ⭐️ выставлен!")
+                except Exception as e:
+                    bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            return
+
+        # ИНИЦИАЦИЯ ОПЛАТЫ STARS: VIP PASS
+        elif action_data.startswith('star_buy_pass_'):
+            pass_key = action_data.replace('star_buy_pass_', '')
+            if pass_key in STARS_VIP_PASS:
+                item = STARS_VIP_PASS[pass_key]
+                try:
+                    bot.send_invoice(
+                        chat_id=chat_id,
+                        title=item['name'],
+                        description=item['desc'],
+                        invoice_payload=f"vippass_{pass_key}:{user_id}:{int(time.time())}",
+                        provider_token="",
+                        currency="XTR",
+                        prices=[LabeledPrice(label=item['name'], amount=item['stars'])]
+                    )
+                    bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
+                except Exception as e:
+                    bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            return
+
+        # ИНИЦИАЦИЯ ОПЛАТЫ STARS: КОСМЕТИКА И СТАТУС
+        elif action_data.startswith('star_buy_cosm_'):
+            cosm_key = action_data.replace('star_buy_cosm_', '')
+            if cosm_key in STARS_COSMETICS:
+                item = STARS_COSMETICS[cosm_key]
+                try:
+                    bot.send_invoice(
+                        chat_id=chat_id,
+                        title=item['name'],
+                        description=item['desc'],
+                        invoice_payload=f"cosm_{cosm_key}:{user_id}:{int(time.time())}",
+                        provider_token="",
+                        currency="XTR",
+                        prices=[LabeledPrice(label=item['name'], amount=item['stars'])]
+                    )
+                    bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
+                except Exception as e:
+                    bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            return
+
         if action_data == 'shop_main':
             send_shop_menu(chat_id, user_id, user_name, message_id=call.message.message_id)
             bot.answer_callback_query(call.id)
@@ -8071,6 +8325,182 @@ def callback_inline(call):
         print(f"[CALLBACK ERROR] Исключение в callback: {e}")
         try: bot.answer_callback_query(call.id, "⚠️ Произошла ошибка!", show_alert=False)
         except Exception: pass
+
+
+# ---------------------------------------------------------
+# ОБРАБОТЧИКИ ОПЛАТЫ TELEGRAM STARS (PRE-CHECKOUT & SUCCESS)
+# ---------------------------------------------------------
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def process_stars_pre_checkout(pre_checkout_query):
+    try:
+        bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    except Exception as e:
+        print(f"[PRE-CHECKOUT ERROR] {e}")
+
+@bot.message_handler(content_types=['successful_payment'])
+def process_stars_successful_payment(message):
+    try:
+        sp = message.successful_payment
+        payload = sp.invoice_payload
+        stars_amount = sp.total_amount
+        chat_id = message.chat.id
+        
+        parts = payload.split(':')
+        prod_type_key = parts[0]
+        buyer_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.from_user.id
+        
+        u = message.from_user
+        user_name = (f"{u.first_name or ''} {u.last_name or ''}").strip() or u.username or "Пользователь"
+        econ = get_user_econ(buyer_id, user_name, username=u.username)
+        
+        econ['stars_donated'] = econ.get('stars_donated', 0) + stars_amount
+        user_link = make_link(chat_id, user_name, buyer_id, ping=True)
+        
+        # 1. Покупка пакета коинов
+        if prod_type_key.startswith('coinpack_'):
+            pack_id = prod_type_key.replace('coinpack_', '')
+            if pack_id in STARS_COIN_PACKS:
+                pack = STARS_COIN_PACKS[pack_id]
+                coins_to_add = pack['coins']
+                econ['balance'] += coins_to_add
+                add_account_exp(buyer_id, user_name, int(stars_amount * 50), username=u.username)
+                mark_dirty()
+                
+                log_event('STARS ПОКУПКА', f'Игрок {user_link} приобрёл {pack["name"]} за {stars_amount} ⭐️!')
+                success_msg = (
+                    f"🎉 <b>ОПЛАТА УСПЕШНО ПРОШЛА!</b> 😻\n"
+                    f"──────────────────────\n"
+                    f"👤 Покупатель: {user_link}\n"
+                    f"⭐️ Списано: <b>{stars_amount} Звёзд</b>\n"
+                    f"💰 Начислено: <b>+{coins_to_add:,} Ня-коинов 🪙</b>!\n"
+                    f"💵 Новый баланс: <b>{econ['balance']:,} 🪙</b>\n"
+                    f"──────────────────────\n"
+                    f"<i>Огромное спасибо за поддержку сервера и бота!</i> 😸"
+                )
+                bot.reply_to(message, success_msg, parse_mode='HTML')
+                return
+
+        # 2. Покупка VIP Nya Pass
+        elif prod_type_key.startswith('vippass_'):
+            pass_id = prod_type_key.replace('vippass_', '')
+            if pass_id in STARS_VIP_PASS:
+                item = STARS_VIP_PASS[pass_id]
+                days = item['days']
+                now_ts = time.time()
+                
+                if days == -1:
+                    econ['vip_forever'] = True
+                    dur_str = "НАВСЕГДА 👑"
+                else:
+                    cur_vip = max(now_ts, econ.get('vip_until', 0))
+                    econ['vip_until'] = cur_vip + (days * 86400)
+                    exp_date = datetime.fromtimestamp(econ['vip_until'], tz=MSK_TZ).strftime('%d.%m.%Y %H:%M')
+                    dur_str = f"на {days} дней (до {exp_date})"
+                    
+                add_account_exp(buyer_id, user_name, int(stars_amount * 100), username=u.username)
+                mark_dirty()
+                
+                log_event('STARS VIP PASS', f'Игрок {user_link} активировал VIP Nya Pass ({dur_str}) за {stars_amount} ⭐️!')
+                success_msg = (
+                    f"👑 <b>VIP NYA PASS АКТИВИРОВАН!</b> 😻\n"
+                    f"──────────────────────\n"
+                    f"👤 Владелец: {user_link}\n"
+                    f"⏳ Срок действия: <b>{dur_str}</b>\n"
+                    f"⭐️ Ваши привилегии:\n"
+                    f"• ⚡️ -30% ко всем кулдаунам бота\n"
+                    f"• 🎁 Удвоение часового бонуса /bonus (x2.0)\n"
+                    f"• 🛡 100% защита от карманных краж и ограблений\n"
+                    f"• 🌟 VIP отметка в профиле\n"
+                    f"──────────────────────\n"
+                    f"<i>Приятной игры с максимальным комфортом!</i> 😸"
+                )
+                bot.reply_to(message, success_msg, parse_mode='HTML')
+                return
+
+        # 3. Покупка эксклюзивной косметики
+        elif prod_type_key.startswith('cosm_'):
+            cosm_id = prod_type_key.replace('cosm_', '')
+            if cosm_id in STARS_COSMETICS:
+                cosm = STARS_COSMETICS[cosm_id]
+                c_type = cosm['type']
+                
+                if c_type == 'title_cert':
+                    econ['has_custom_title_cert'] = True
+                    mark_dirty()
+                    log_event('STARS ТИТУЛ', f'Игрок {user_link} купил сертификат кастомного титула за {stars_amount} ⭐️!')
+                    bot.reply_to(
+                        message,
+                        f"🌟 <b>СЕРТИФИКАТ ТИТУЛА ПОЛУЧЕН!</b> 😻\n"
+                        f"──────────────────────\n"
+                        f"{user_link}, теперь вы можете установить любой личный титул командой:\n"
+                        f"<code>/custom_title Ваш Титул</code> 😸",
+                        parse_mode='HTML'
+                    )
+                    return
+                elif c_type == 'theme':
+                    theme_id = cosm['theme_id']
+                    purchased = econ.setdefault('purchased_themes', ['default'])
+                    if theme_id not in purchased:
+                        purchased.append(theme_id)
+                    econ['profile_theme'] = theme_id
+                    mark_dirty()
+                    log_event('STARS ТЕМА', f'Игрок {user_link} разблокировал тему {cosm["name"]} за {stars_amount} ⭐️!')
+                    bot.reply_to(
+                        message,
+                        f"🎨 <b>VIP ТЕМА УСПЕШНО АКТИВИРОВАНА!</b> 😻\n"
+                        f"──────────────────────\n"
+                        f"Вам установлена тема: <b>{cosm['name']}</b>!\n"
+                        f"Проверьте свой новый визуал командой: <code>/profile</code> 😸",
+                        parse_mode='HTML'
+                    )
+                    return
+                elif c_type == 'badge':
+                    badge_emoji = cosm['emoji']
+                    inv = econ.setdefault('inventory', [])
+                    if badge_emoji not in inv:
+                        inv.append(badge_emoji)
+                    econ['badge'] = badge_emoji
+                    mark_dirty()
+                    log_event('STARS ЗНАЧОК', f'Игрок {user_link} разблокировал значок {badge_emoji} за {stars_amount} ⭐️!')
+                    bot.reply_to(
+                        message,
+                        f"✨ <b>VIP ЗНАЧОК НАДЕТ!</b> 😻\n"
+                        f"──────────────────────\n"
+                        f"Значок <b>{badge_emoji} ({cosm['name']})</b> теперь красуется в вашем профиле и в чате! 😸",
+                        parse_mode='HTML'
+                    )
+                    return
+                elif c_type == 'pet':
+                    pet_id = cosm['pet_id']
+                    p_info = PETS_DATA[pet_id]
+                    econ['pet'] = {
+                        'id': pet_id,
+                        'name': p_info['name'],
+                        'luck_bonus': p_info['luck_bonus'],
+                        'hunger': 100,
+                        'cleanliness': 100,
+                        'pet_exp': 0,
+                        'last_update': time.time()
+                    }
+                    mark_dirty()
+                    log_event('STARS ПИТОМЕЦ', f'Игрок {user_link} приручил {p_info["name"]} за {stars_amount} ⭐️!')
+                    bot.reply_to(
+                        message,
+                        f"👑 <b>КОРОЛЕВСКИЙ ГРИФОН ТЕПЕРЬ ВАШ!</b> 😻\n"
+                        f"──────────────────────\n"
+                        f"Вы приручили мифического зверя <b>{p_info['name']}</b>!\n"
+                        f"Бонус удачи: <b>+{p_info['luck_bonus']}%</b> ко всем играм, рыбалке и охоте! 😸",
+                        parse_mode='HTML'
+                    )
+                    return
+
+        # Дефолтная благодарность если что-то иное
+        econ['balance'] += stars_amount * 35000
+        mark_dirty()
+        bot.reply_to(message, f"🎉 Спасибо за поддержку в размере <b>{stars_amount} ⭐️</b>! Начислено <b>+{stars_amount * 35000:,} Ня-коинов 🪙</b>! 😻", parse_mode='HTML')
+
+    except Exception as e:
+        print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
 
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
