@@ -48,6 +48,7 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 db_lock = threading.Lock()
 db_dirty = False
+db_version = 0
 
 ADMIN_ID = 6081930693
 ADMIN_USERNAME = 'ukrgorilka'
@@ -666,6 +667,8 @@ PHARMACY_ITEMS = {
 # ---------------------------------------------------------
 HALLOWEEN_BP_LEVELS = 30
 HALLOWEEN_BP_EXP_PER_LVL = 100
+HALLOWEEN_BP_MAX_LEVEL = 30
+HALLOWEEN_BP_MAX_EXP = HALLOWEEN_BP_EXP_PER_LVL * HALLOWEEN_BP_MAX_LEVEL
 
 # ---------------------------------------------------------
 # ИГРОВЫЕ СТРУКТУРЫ
@@ -759,28 +762,35 @@ def load_data():
     return data
 
 def mark_dirty():
-    global db_dirty
+    global db_dirty, db_version
     db_dirty = True
+    db_version += 1
 
 def save_data(send_backup=False):
     global db_dirty
+    # Снимаем непротиворечивый snapshot под lock, а запись на диск выполняем уже без lock.
+    # Если за время записи база изменилась, db_dirty не сбрасывается.
     with db_lock:
-        try:
-            temp_file = f"{DATA_FILE}.tmp"
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(db, f, ensure_ascii=False, indent=4)
-            os.replace(temp_file, DATA_FILE)
-            db_dirty = False
+        snapshot = copy.deepcopy(db)
+        snapshot_version = db_version
+    try:
+        temp_file = f"{DATA_FILE}.tmp"
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(snapshot, f, ensure_ascii=False, indent=4)
+        os.replace(temp_file, DATA_FILE)
+        with db_lock:
+            if db_version == snapshot_version:
+                db_dirty = False
 
-            if send_backup and DB_CHANNEL_ID:
-                with open(DATA_FILE, 'rb') as f:
-                    msg = bot.send_document(DB_CHANNEL_ID, f, caption="💾 Экстренный бекап базы данных")
-                    try:
-                        bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"Ошибка при сохранении базы данных: {e}")
+        if send_backup and DB_CHANNEL_ID:
+            with open(DATA_FILE, 'rb') as f:
+                msg = bot.send_document(DB_CHANNEL_ID, f, caption="💾 Экстренный бекап базы данных")
+                try:
+                    bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
+                except Exception as e:
+                    print(f"[BACKUP PIN ERROR] {e}")
+    except Exception as e:
+        print(f"Ошибка при сохранении базы данных: {e}")
 
 def auto_save_worker():
     global db_dirty
@@ -891,7 +901,7 @@ def get_chat_settings(chat_id):
             'timezone_offset': 3,
             'remind_minutes': 60
         }
-        save_data()
+        mark_dirty()
     return db['settings'][str_chat]
 
 def get_market_data():
@@ -1011,10 +1021,9 @@ def update_bank_interest(econ):
 
     periods = int(hours_passed // 6)
     if periods > 0:
-        new_dep = bank_dep
-        for _ in range(min(periods, 120)):
-            new_dep = int(new_dep * 1.0025)  # Сбалансированная ставка +0.25% за 6 часов (1% в сутки)
-
+        # Считаем сразу за весь прошедший период, чтобы не терять проценты
+        # после 120 периодов офлайна.
+        new_dep = int(bank_dep * (1.0025 ** periods))  # +0.25% за 6 часов
         earned = new_dep - bank_dep
         econ['bank_deposit'] = new_dep
         econ['last_bank_calc'] = last_calc + (periods * 6 * 3600)
@@ -1325,7 +1334,11 @@ def is_in_jail(user_id):
     return False, 0
 
 def get_user_bp_level(bp_exp):
-    lvl = min(30, max(1, (bp_exp // HALLOWEEN_BP_EXP_PER_LVL) + 1))
+    # После 30 уровня прогресс больше не зацикливается.
+    bp_exp = max(0, int(bp_exp or 0))
+    if bp_exp >= HALLOWEEN_BP_MAX_EXP:
+        return HALLOWEEN_BP_MAX_LEVEL, HALLOWEEN_BP_EXP_PER_LVL, HALLOWEEN_BP_EXP_PER_LVL, "🎃" * 8
+    lvl = min(HALLOWEEN_BP_MAX_LEVEL, (bp_exp // HALLOWEEN_BP_EXP_PER_LVL) + 1)
     in_lvl_exp = bp_exp % HALLOWEEN_BP_EXP_PER_LVL
     pct = min(1.0, in_lvl_exp / float(HALLOWEEN_BP_EXP_PER_LVL))
     bar_len = int(pct * 8)
@@ -1378,7 +1391,7 @@ def can_process_user_message(message):
 
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
-    is_super_admin = (user_id == ADMIN_ID or user_username == ADMIN_USERNAME.lower())
+    is_super_admin = (user_id == ADMIN_ID)
 
     # Запоминаем чаты, где пользователь реально встречался. Это позволяет
     # строить чатовые топы без смешивания участников разных чатов.
@@ -2048,7 +2061,7 @@ def memory_and_debt_worker():
                             add_coins(pl['id'], pl.get('name'), bet_lobby)
                     if chat_id_lobby and msg_id_lobby:
                         try: bot.delete_message(chat_id_lobby, msg_id_lobby)
-                        except Exception: pass
+                        except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_durak[d_k]
 
             for dict_ref in [active_crash, active_mines, active_bj_games, active_rps_games, active_brick, active_c_mines, active_durak]:
@@ -2147,7 +2160,7 @@ def gold_rush_worker():
                 try:
                     bot.send_message(int(str_chat_id), rush_msg, parse_mode='HTML')
                     time.sleep(0.05)
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
             
             time.sleep(5400)
             gold_rush_event['active'] = False
@@ -2156,7 +2169,7 @@ def gold_rush_worker():
                 try:
                     bot.send_message(int(str_chat_id), end_msg, parse_mode='HTML')
                     time.sleep(0.05)
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
         except Exception:
             pass
 
@@ -2210,7 +2223,7 @@ def market_news_worker():
                 try:
                     bot.send_message(int(str_chat_id), news_text, parse_mode='HTML')
                     time.sleep(0.05)
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
         except Exception:
             pass
 
@@ -2265,7 +2278,7 @@ def chat_silence_worker():
                 if now - last_act >= 18000:
                     last_chat_activity[cid] = now
                     bot.send_message(cid, random.choice(silence_prompts), parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 def start_background_threads():
     leave_banned_chats()
@@ -2688,7 +2701,7 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         f"<i>Зрители подключаются... (👁 {viewers})</i> 😸"
     )
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
     
     time.sleep(3)
     
@@ -2707,7 +2720,7 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         
     text += f"\n\n⚡️ <b>Событие:</b> {event}\n<i>(👁 {viewers} зрителей)</i>"
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
         
     time.sleep(3)
     
@@ -2727,7 +2740,7 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         f"⚖️ Влияние на Карму: <b>{k_sign}{karma_diff}</b> 😸"
     )
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['stream', 'стрим'])
 def cmd_stream(message):
@@ -2828,10 +2841,10 @@ def render_garden_view(chat_id, user_id, user_name, message_id=None):
         
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['garden', 'сад'])
 def cmd_garden(message):
@@ -3188,7 +3201,7 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['backpack', 'рюкзак', 'инвентарь_баффов'])
@@ -3628,12 +3641,12 @@ def sync_durak_pm(game_id):
                 try:
                     sent = bot.send_message(u_id, text_msg, reply_markup=markup, parse_mode='HTML')
                     p['pm_msg_id'] = sent.message_id
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
         else:
             try:
                 sent = bot.send_message(u_id, text_msg, reply_markup=markup, parse_mode='HTML')
                 p['pm_msg_id'] = sent.message_id
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 def render_durak_board(game_id, viewer_id=None):
     game = active_durak.get(game_id)
@@ -3878,7 +3891,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     if cur_veh and cur_veh in VEHICLES and VEHICLES[cur_veh].get('msg_id'):
         try:
@@ -3891,7 +3904,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
                 parse_mode='HTML'
             )
             return
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
     try:
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
     except Exception:
@@ -3957,10 +3970,10 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
         text = "🐾 <b>У вас пока нет питомца!</b> 😿\n\nКупите верного друга в зоомагазине, чтобы получать бонусы к удаче, охоте и часовому доходу! 😻"
         if message_id:
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             return
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
 
     update_pet_stats(pet)
@@ -3993,10 +4006,10 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
 
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['pet', 'питомец', 'пет'])
 def cmd_pet(message):
@@ -4016,7 +4029,7 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
     if not pet:
         text = "❌ У вас нет питомца! Купите его в <code>/shop</code>. 😿"
         try: bot.send_message(chat_id, text, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
 
     now = time.time()
@@ -4027,7 +4040,7 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
     if left:
         msg = f"⏳ Питомец устал! 😿 На следующую прогулку можно через: <b>{left}</b>."
         try: bot.send_message(chat_id, msg, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
 
     econ['last_pet_walk'] = now
@@ -4146,10 +4159,10 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
     text = "\n".join(lines)
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
 def cmd_business(message):
@@ -4308,10 +4321,10 @@ def render_bank_view(chat_id, user_id, user_name, message_id=None):
 
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['bank', 'банк', 'депозит'])
 def cmd_bank(message):
@@ -4407,10 +4420,10 @@ def render_lottery_view(chat_id, user_id, user_name, message_id=None):
     )
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['lottery', 'лотерея'])
 def cmd_lottery(message):
@@ -4473,10 +4486,10 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
 
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['settings', 'настройки'])
 def cmd_settings(message):
@@ -4592,10 +4605,10 @@ def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
 
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['profile_settings', 'set_profile', 'настройки_профиля'])
 def cmd_profile_settings(message):
@@ -4762,7 +4775,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
             try:
                 bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
                 return
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     pfp_id = econ.get('pfp_file_id')
     if pfp_id:
@@ -4772,14 +4785,14 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
             else:
                 bot.send_photo(chat_id, pfp_id, caption=text, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 # ---------------------------------------------------------
 # ЗАЩИТА ПОКУПОК TELEGRAM STARS
@@ -4941,10 +4954,10 @@ def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     )
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 # ---------------------------------------------------------
 # БРАКИ, СЕМЬЯ И ПОДАРКИ
@@ -5740,10 +5753,10 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     text = "\n".join(lines)
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception: pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 
 def render_activity_leaderboard(chat_id, period='day'):
@@ -5881,7 +5894,7 @@ def render_house_view(chat_id, user_id, user_name, message_id=None):
         text = "❌ <b>Семейный дом доступен только тем, кто состоит в браке!</b> 😿\nСделайте предложение через <code>брак @username</code>!"
         if message_id:
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             return
         bot.send_message(chat_id, text, parse_mode='HTML')
         return
@@ -5937,7 +5950,7 @@ def render_house_view(chat_id, user_id, user_name, message_id=None):
     text = "\n".join(lines)
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
@@ -6294,7 +6307,7 @@ def finalize_meme_contests(current_date=None):
                 winners.append({'date': date, 'chat_id': chat_id, 'author_id': winner['author_id'], 'score': score, 'reward': 1500})
                 try:
                     bot.send_message(chat_id, f"🏆 <b>МЕМ ДНЯ!</b> Автор {make_link(chat_id, winner.get('author_name', 'Пользователь'), winner['author_id'], ping=True)} получает <b>+1 500 🪙</b>! 😻", parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
     if len(memes) > 500:
         del memes[:-500]
     if len(winners) > 200:
@@ -6424,7 +6437,7 @@ def render_halloween_bp_view(chat_id, user_id, user_name, message_id=None):
         "<i>Опыт даётся за смс в чате, работу, рыбалку, охоту, мусорку и игры!</i>\n",
         "<b>Главные награды Хеллоуина:</b>",
         "• <b>Ур. 15 (Free):</b> 🎃 Эксклюзивный значок Тыквы",
-        "• <b>Ур. 30 (Free):</b> 👑 Титул «🎃 Повелитель Тыкв» (+15% к удаче, +20% EXP)",
+        "• <b>Ур. 30 (Free):</b> 👑 Титул «🎃 Повелитель Тыкв» (+15% к удаче)",
         "• <b>Ур. 20 (Premium):</b> 🐱 Питомец: 🎃 Тыквоголовый Кот (+120% к удаче!)",
         "• <b>Ур. 30 (Premium):</b> 🎨 Тема профиля: «🎃 Тёмный Хеллоуин: Тыквенная Ночь»! 🦇",
         "──────────────────────"
@@ -6439,7 +6452,7 @@ def render_halloween_bp_view(chat_id, user_id, user_name, message_id=None):
     text = "\n".join(lines)
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
@@ -6482,7 +6495,7 @@ def render_pharmacy_view(chat_id, user_id, user_name, message_id=None):
 
     if message_id:
         try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
         return
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
@@ -6552,8 +6565,7 @@ def cmd_gift_stars(message):
 # ---------------------------------------------------------
 def _is_owner_admin(message):
     return bool(message and message.from_user and (
-        message.from_user.id == ADMIN_ID or
-        (message.from_user.username or '').lower() == ADMIN_USERNAME.lower()
+        message.from_user.id == ADMIN_ID
     ))
 
 def _grant_all_donations(econ):
@@ -6718,7 +6730,7 @@ def handle_messages(message):
     now_ts = time.time()
     quiz = current_quiz.get(chat_id)
 
-    is_super_admin = (user_id == ADMIN_ID or user_username == ADMIN_USERNAME.lower())
+    is_super_admin = (user_id == ADMIN_ID)
 
     bot_is_active = db.get('bot_active', True)
     if not bot_is_active:
@@ -6773,7 +6785,7 @@ def handle_messages(message):
         d_got = try_infect_user(user_id, user_name, chance=1.0)
         if d_got:
             try: bot.send_message(chat_id, f"🤒 Ой-ой! {make_link(chat_id, user_name, user_id, ping=False)} подхватил(а) хворь: <b>{d_got}</b>! Загляните в <code>/pharmacy</code>! 🙀", parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 
     # ПОВТОРЯЛКА
@@ -6789,7 +6801,7 @@ def handle_messages(message):
             rx_list = ['🔥', '🗿', '❤️', '👍', '⚡️', '🎉', '👀', '👏']
             chosen_rx = random.choice(rx_list)
             bot.set_message_reaction(chat_id, message.message_id, [ReactionTypeEmoji(chosen_rx)])
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     # КАЛЬКУЛЯТОР
     m_calc_cmd = re.match(r'^(?:/calc|посчитай|вычисли|реши|сколько\s+будет)\s+([\d\s\+\-\*\/\%\(\)\.\:×÷]+)$', text, re.IGNORECASE)
@@ -7014,7 +7026,7 @@ def handle_messages(message):
     if completed_tasks:
         for task_name, reward in completed_tasks:
             try: bot.send_message(chat_id, f'🎉 {make_link(chat_id, user_name, user_id, ping=True)} выполнил(а) задание: <b>{task_name}</b>! +{reward} 🪙 😻', parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     # ОГРАБЛЕНИЕ
     if text_lower.startswith('ограбить'):
@@ -7229,7 +7241,7 @@ def handle_messages(message):
                 warn = bot.send_message(chat_id, f'⚠️ {user_link}, вы находитесь в ресте! Ваше сообщение удалено. 😾', parse_mode='HTML')
                 threading.Timer(5, lambda: bot.delete_message(chat_id, warn.message_id)).start()
                 return
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     if text_lower in ['+смехуятинка', 'смехуятинка']:
         if message.reply_to_message:
@@ -7271,7 +7283,8 @@ def handle_messages(message):
     elif text_lower in ['развод']: cmd_divorce(message); return
     elif text_lower in ['баланс', 'коины', 'ня-коины', 'деньги']: cmd_balance(message); return
     elif text_lower in ['инвентарь', 'профиль', 'мои значки']: cmd_profile(message); return
-    elif text_lower in ['звезды', 'донат', 'stars', 'vip', 'пасс', 'nya pass']: cmd_stars(message); return
+    elif text_lower in ['пасс', 'пас', 'пропуск', 'хеллоуин', 'bp', '/pass']: cmd_halloween_pass(message); return
+    elif text_lower in ['звезды', 'донат', 'stars', 'vip', 'nya pass']: cmd_stars(message); return
     elif text_lower in ['магазин', 'шоп']: cmd_shop(message); return
     elif text_lower in ['биржа', 'крипта', 'рынок']: cmd_market(message); return
     elif text_lower in ['портфель', 'мои акции']: cmd_portfolio(message); return
@@ -7284,6 +7297,7 @@ def handle_messages(message):
     elif text_lower in ['настройки']: cmd_settings(message); return
     elif text_lower in ['сад', 'оранжерея']: cmd_garden(message); return
     elif text_lower.startswith('история'): cmd_history(message); return
+    elif text_lower in ['мемы']: cmd_memes(message); return
     elif text_lower.startswith(('промо', 'промокод')): cmd_promo(message); return
     elif text_lower.startswith(('дурак', '/durak')): cmd_durak(message); return
     elif text_lower in ['настройки профиля', 'настройка профиля']: cmd_profile_settings(message); return
@@ -7296,8 +7310,7 @@ def handle_messages(message):
     elif text_lower.startswith(('залог', '/bail')): cmd_bail(message); return
     elif text_lower.startswith(('бой питомцев', 'битвы питомцев', 'бой', '/pet_fight')): cmd_pet_fight(message); return
     elif text_lower.startswith(('мем', '/meme')): cmd_meme(message); return
-    elif text_lower.startswith(('история', 'фанфик', '/story', '/fanfic')): cmd_story(message); return
-    elif text_lower in ['пасс', 'пас', 'пропуск', 'хеллоуин', 'bp', '/pass']: cmd_halloween_pass(message); return
+    elif text_lower.startswith(('фанфик', '/story', '/fanfic')): cmd_story(message); return
     elif text_lower in ['аптека', 'больница', '/pharmacy']: cmd_pharmacy(message); return
     elif text_lower.startswith(('подарить звезды', 'подарок звезды', '/gift_stars')): cmd_gift_stars(message); return
 
@@ -7681,7 +7694,7 @@ def callback_inline(call):
                 InlineKeyboardButton(f"💩 {len(meme['dislikes'])}", callback_data=f"meme_d_{meme_id}")
             )
             try: bot.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id, "Ваш голос учтён! 😸")
             return
 
@@ -7834,40 +7847,6 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
             return
 
-        # ИНИЦИАЦИЯ ОПЛАТЫ STARS: ПОДАРОК ДРУГУ
-        elif action_data.startswith('star_gift_'):
-            # format: star_gift_TYPE_KEY_TARGETID
-            parts_g = action_data.split('_')
-            target_id = owner_id if owner_id else int(parts_g[-1])
-            prod_full_key = "_".join(parts_g[2:-1])
-            stars_price = 2
-            prod_title = "Подарок за Звёзды"
-
-            if prod_full_key in STARS_COIN_PACKS:
-                stars_price = STARS_COIN_PACKS[prod_full_key]['stars']
-                prod_title = f"Подарок: {STARS_COIN_PACKS[prod_full_key]['name']}"
-            elif prod_full_key in STARS_VIP_PASS:
-                stars_price = STARS_VIP_PASS[prod_full_key]['stars']
-                prod_title = f"Подарок: {STARS_VIP_PASS[prod_full_key]['name']}"
-            elif prod_full_key in STARS_COSMETICS:
-                stars_price = STARS_COSMETICS[prod_full_key]['stars']
-                prod_title = f"Подарок: {STARS_COSMETICS[prod_full_key]['name']}"
-
-            try:
-                bot.send_invoice(
-                    chat_id=chat_id,
-                    title=prod_title,
-                    description=f"Подарок для пользователя ID:{target_id}",
-                    invoice_payload=f"gift_{prod_full_key}:{target_id}:{user_id}:{int(time.time())}",
-                    provider_token="",
-                    currency="XTR",
-                    prices=[LabeledPrice(label=prod_title, amount=stars_price)]
-                )
-                bot.answer_callback_query(call.id, f"⭐️ Счёт для подарка на {stars_price} ⭐️ выставлен!")
-            except Exception as e:
-                bot.answer_callback_query(call.id, f"❌ Ошибка: {e}", show_alert=True)
-            return
-
         # НАСТРОЙКИ ПРОФИЛЯ
         elif action_data == 'open_profile_settings':
             render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
@@ -7892,7 +7871,7 @@ def callback_inline(call):
                     "🔤 <b>ВЫБОР ШРИФТА ДЛЯ ПРОФИЛЯ</b> 😺\n──────────────────────\nВыберите желаемый стиль текста для вашей карточки игрока: 😻",
                     chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id)
             return
 
@@ -7922,7 +7901,7 @@ def callback_inline(call):
                     "🎨 <b>ВЫБОР ТЕМЫ ОФОРМЛЕНИЯ ПРОФИЛЯ</b> 😺\n──────────────────────\nВыберите тему из купленных или приобретите новые в магазине: 😻",
                     chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id)
             return
 
@@ -7956,40 +7935,34 @@ def callback_inline(call):
         # callback: star_gift_<kind>_<item_key>_<target_id>:<buyer_id>
         elif action_data.startswith('star_gift_'):
             gift_data = action_data[len('star_gift_'):]
-            gift_parts = gift_data.split('_')
-            if len(gift_parts) < 3:
+            try:
+                left, buyer_part = gift_data.rsplit(':', 1)
+                buyer_id = int(buyer_part)
+                gift_parts = left.split('_')
+                if len(gift_parts) < 3:
+                    raise ValueError('short payload')
+                gift_kind = gift_parts[0]
+                target_id = int(gift_parts[-1])
+                item_key = '_'.join(gift_parts[1:-1])
+            except (TypeError, ValueError):
                 bot.answer_callback_query(call.id, "❌ Некорректный подарок!", show_alert=True)
                 return
 
-            gift_kind = gift_parts[0]
-            target_id = None
-            buyer_id = user_id
-            try:
-                # В action_data target_id — последний числовой компонент.
-                target_id = int(gift_parts[-1])
-            except (TypeError, ValueError):
-                bot.answer_callback_query(call.id, "❌ Не удалось определить получателя!", show_alert=True)
-                return
-
-            if owner_id and owner_id != user_id:
+            # Кнопку может подтвердить только тот, кто её открыл/создал.
+            if buyer_id != user_id or (owner_id and owner_id != user_id):
                 bot.answer_callback_query(call.id, "❌ Этот подарок может оформить только его отправитель!", show_alert=True)
                 return
-            if target_id == user_id:
+            if target_id == buyer_id:
                 bot.answer_callback_query(call.id, "❌ Нельзя подарить товар самому себе. Используйте /stars!", show_alert=True)
                 return
 
-            # Формируем ключ товара из callback.
             if gift_kind == 'coins':
-                item_key = '_'.join(gift_parts[1:-1])
                 item = STARS_COIN_PACKS.get(item_key)
             elif gift_kind == 'pass':
-                item_key = '_'.join(gift_parts[1:-1])
                 item = STARS_VIP_PASS.get(item_key)
             elif gift_kind == 'cosm':
-                item_key = '_'.join(gift_parts[1:-1])
                 item = STARS_COSMETICS.get(item_key)
             else:
-                item_key = ''
                 item = None
 
             if not item:
@@ -8004,7 +7977,7 @@ def callback_inline(call):
             else:
                 owned_error = None
             if owned_error:
-                bot.answer_callback_query(call.id, f"❌ Получатель уже владеет этим товаром.", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Получатель уже владеет этим товаром.", show_alert=True)
                 return
 
             try:
@@ -8020,7 +7993,7 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
             except Exception as e:
                 print(f"[STARS GIFT INVOICE ERROR] {e}")
-                bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Не удалось выставить счёт.", show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: ПАКЕТЫ КОИНОВ
@@ -8153,7 +8126,7 @@ def callback_inline(call):
 
             try:
                 bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id)
             return
 
@@ -8260,7 +8233,7 @@ def callback_inline(call):
                 active_durak[game_id] = game
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
                 try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
             else:
                 players = [{'id': user_id, 'name': user_name, 'hand': []}]
                 game = {
@@ -8283,7 +8256,7 @@ def callback_inline(call):
                 active_durak[game_id] = game
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
                 try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         # ДУРАК: ПРИСОЕДИНЕНИЕ (С ПРОВЕРКОЙ ЛС)
         elif action_data.startswith('durak_join_'):
@@ -8303,7 +8276,7 @@ def callback_inline(call):
             except Exception:
                 b_name = ""
                 try: b_name = bot.get_me().username
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 tag_str = f"@{b_name}" if b_name else "бота"
                 bot.answer_callback_query(call.id, f"❌ Вы должны сначала открыть диалог с ботом ({tag_str}) в ЛС и нажать START (Запустить), чтобы бот мог выдать вам карты!", show_alert=True)
                 return
@@ -8330,7 +8303,7 @@ def callback_inline(call):
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id, "✅ Вы успешно сели за игровой стол! Карты придут в ЛС! 😸")
 
         # ДУРАК: ХОД КАРТОЙ
@@ -8428,14 +8401,14 @@ def callback_inline(call):
                 game['status_text'] = win_text
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
                 try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
                 return
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
@@ -8466,7 +8439,7 @@ def callback_inline(call):
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
@@ -8487,7 +8460,7 @@ def callback_inline(call):
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
@@ -8623,7 +8596,7 @@ def callback_inline(call):
                     f"💵 Баланс: <b>{econ['balance']} 🪙</b>",
                     chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             active_crash.pop(game_id, None)
 
         # РАСХОДНИКИ
@@ -8697,7 +8670,7 @@ def callback_inline(call):
             lines.append("──────────────────────")
             markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_studio_'):
             equip_key = action_data.replace('buy_studio_', '')
@@ -8734,7 +8707,7 @@ def callback_inline(call):
                 markup.add(*btns[i:i+2])
             markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_seed_'):
             s_id = action_data.replace('buy_seed_', '')
@@ -8778,7 +8751,7 @@ def callback_inline(call):
                     f"Карма повышена: <b>+2 😇</b>",
                     chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data == 'uproot_plant':
             econ = get_user_econ(user_id, user_name)
@@ -8801,7 +8774,7 @@ def callback_inline(call):
                 markup.add(*btns[i:i+2])
             markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_buff_'):
             b_id = action_data.replace('buy_buff_', '')
@@ -8831,7 +8804,7 @@ def callback_inline(call):
                 markup.add(*btns[i:i+2])
             markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_theme_'):
             t_key = action_data.replace('buy_theme_', '')
@@ -8890,7 +8863,7 @@ def callback_inline(call):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('mbm_'):
             m_parts = action_data.split('_')
@@ -8905,7 +8878,7 @@ def callback_inline(call):
             game['bombs'] = set(random.sample(range(total_cells), mines_count))
             text_board, markup = render_mines_board(game_id)
             try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('mop_'):
             m_parts = action_data.split('_')
@@ -8931,7 +8904,7 @@ def callback_inline(call):
                     f"💸 Ставка <b>{game['bet']} Ня-коинов 🪙</b> сгорела...\n\n{text_board}"
                 )
                 try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_mines[game_id]
                 return
             else:
@@ -8955,13 +8928,13 @@ def callback_inline(call):
                         f"💰 Чистый выигрыш: <b>+{win_amt} Ня-коинов 🪙</b> (Коэфф: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
                     )
                     try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                    except Exception: pass
+                    except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_mines[game_id]
                     return
 
                 text_board, markup = render_mines_board(game_id)
                 try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('mco_'):
             game_id = action_data.replace('mco_', '')
@@ -8987,7 +8960,7 @@ def callback_inline(call):
                 f"🎉 Начислено: <b>+{win_amt} Ня-коинов 🪙</b> (Коэффициент: <b>{game['current_multiplier']:.2f}x</b>)!\n\n{text_board}"
             )
             try: bot.edit_message_text(cash_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             del active_mines[game_id]
 
         elif action_data.startswith('mcancel_'):
@@ -8999,7 +8972,7 @@ def callback_inline(call):
                 mark_dirty()
                 del active_mines[game_id]
             try: bot.edit_message_text("❌ Игра отменена, ставка возвращена на баланс. 😸", chat_id=chat_id, message_id=call.message.message_id)
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         # КЛАССИЧЕСКИЙ САПЁР
         elif action_data.startswith('cstart_'):
@@ -9030,7 +9003,7 @@ def callback_inline(call):
                 }
                 text_board, markup = render_classic_mines_board(game_id)
                 try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('cmmode_'):
             game_id = action_data.replace('cmmode_', '')
@@ -9042,7 +9015,7 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "🚩 Режим флага" if game['mode'] == 'flag' else "⛏ Режим копания")
             text_board, markup = render_classic_mines_board(game_id)
             try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('cmo_'):
             m_parts = action_data.split('_')
@@ -9069,7 +9042,7 @@ def callback_inline(call):
                 else: game['flags'].add(cell_idx)
                 text_board, markup = render_classic_mines_board(game_id)
                 try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 bot.answer_callback_query(call.id)
                 return
 
@@ -9096,7 +9069,7 @@ def callback_inline(call):
                 text_board, markup = render_classic_mines_board(game_id)
                 loss_text = f"💥 <b>БАБАХ! МИНА СДЕТОНИРОВАЛА!</b> 🙀\n\n{text_board}"
                 try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_c_mines[game_id]
                 return
 
@@ -9113,13 +9086,13 @@ def callback_inline(call):
                 text_board, markup = render_classic_mines_board(game_id)
                 win_text = f"🏆🧠 <b>ПОЛЕ ПОЛНОСТЬЮ РАЗМИНИРОВАНО!</b> 😻\n\n🎉 Награда: <b>+{reward} Ня-коинов 🪙</b> (+{exp_gain} EXP)!\n\n{text_board}"
                 try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_c_mines[game_id]
                 return
 
             text_board, markup = render_classic_mines_board(game_id)
             try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id)
 
         # ПИТОМЕЦ
@@ -9387,7 +9360,7 @@ def callback_inline(call):
                     f"🎁 <b>ПОДАРОК ЗАБРАН!</b> 😺\n\nБыстрее всех оказался(лась) {u_link} и забрал(а) <b>+{reward} Ня-коинов 🪙</b>! 😸",
                     chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         # ТРЕНИРОВКА ОПЫТА
         elif action_data == 'train_exp_btn':
@@ -9452,14 +9425,14 @@ def callback_inline(call):
                         f"💒 <b>Горько! Свадьба состоялась!</b> 🎉 😻\n\n{ring_emoji} {make_link(chat_id, prop['from_tag'], prop['from_id'], ping=True)} и {make_link(chat_id, user_name, user_id, ping=True)} теперь законные супруги! ❤️",
                         chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
                     )
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
             else:
                 try:
                     bot.edit_message_text(
                         f"💔 {make_link(chat_id, user_name, user_id, ping=False)} отклонил(а) предложение руки и сердца. 😿",
                         chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
                     )
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
             del pending_marriages[prop_id]
 
         # БЛЭКДЖЕК
@@ -9483,14 +9456,14 @@ def callback_inline(call):
                     game['finished'] = True
                     try:
                         bot.edit_message_text(f"💥 <b>Перебор ({p_score})!</b> Вы проиграли <b>{game['bet']} 🪙</b>. 😿\nВаши карты: {game['p_cards']}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
-                    except Exception: pass
+                    except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_bj_games[game_id]
                     return
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}:{user_id}"), InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}:{user_id}"))
                 try:
                     bot.edit_message_text(f"🃏 Ваши карты: {game['p_cards']} (Сумма: <b>{p_score}</b>)\nДилер: [{game['d_cards'][0]}, ❓] 😺", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
             else:
                 game['finished'] = True
                 p_score = calculate_bj_score(game['p_cards'])
@@ -9514,7 +9487,7 @@ def callback_inline(call):
 
                 try:
                     bot.edit_message_text(f"{res}\n\n👤 Ваши карты: {game['p_cards']} ({p_score})\n🤖 Карты дилера: {game['d_cards']} ({d_score})", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_bj_games[game_id]
 
         # ЦУЕФА
@@ -9573,7 +9546,7 @@ def callback_inline(call):
                         f"• {game['p2_tag']}: {c_map[c2]}\n\n{res}",
                         chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
                     )
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 active_rps_games.pop(game_id, None)
 
         # СНЯТИЕ РЕСТА
@@ -9601,7 +9574,7 @@ def callback_inline(call):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('del_rest_user_'):
             if not is_admin(chat_id, user_id):
@@ -9625,7 +9598,7 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"✅ Рест с {u_name} снят!")
                 try:
                     bot.edit_message_text(f"🗑 Рест с {u_link} успешно снят по кнопке! 😺", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
             else:
                 bot.answer_callback_query(call.id, "❌ Пользователь уже не в ресте!", show_alert=True)
 
@@ -9633,7 +9606,7 @@ def callback_inline(call):
             chat_rests = db.get('rests', {}).get(str(chat_id), {})
             if not chat_rests:
                 try: bot.edit_message_text('🌴 В данный момент никто не находится в ресте. 😸', chat_id=chat_id, message_id=call.message.message_id)
-                except Exception: pass
+                except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 return
 
             resp = '📋 <b>СПИСОК АКТИВНЫХ РЕСТОВ:</b> 😺\n──────────────────────\n'
@@ -9646,7 +9619,7 @@ def callback_inline(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🗑 Снять рест (Выбрать)", callback_data=f"rest_remove_menu:{user_id}"))
             try: bot.edit_message_text(resp, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         # НАСТРОЙКИ
         elif action_data == 'set_max_days':
@@ -9705,7 +9678,7 @@ def callback_inline(call):
             
             markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('shop_cat_titles_'):
             page = int(action_data.replace('shop_cat_titles_', ''))
@@ -9737,7 +9710,7 @@ def callback_inline(call):
             
             markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('shop_cat_pets_'):
             page = int(action_data.replace('shop_cat_pets_', ''))
@@ -9767,7 +9740,7 @@ def callback_inline(call):
 
             markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception: pass
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data == 'buy_cert_custom_title':
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -9889,7 +9862,7 @@ def callback_inline(call):
     except Exception as e:
         print(f"[CALLBACK ERROR] Исключение в callback: {e}")
         try: bot.answer_callback_query(call.id, "⚠️ Произошла ошибка!", show_alert=False)
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 
 # ---------------------------------------------------------
@@ -9973,7 +9946,7 @@ def process_stars_pre_checkout(pre_checkout_query):
     except Exception as e:
         print(f"[PRE-CHECKOUT ERROR] {e}")
         try: bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message='Платёж не прошёл проверку.')
-        except Exception: pass
+        except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(content_types=['successful_payment'])
 def process_stars_successful_payment(message):
@@ -9996,6 +9969,7 @@ def process_stars_successful_payment(message):
             return
         if charge_id:
             processed.append(charge_id)
+            mark_dirty()
             # Keep the persistent list bounded.
             if len(processed) > 10000:
                 del processed[:-10000]
