@@ -9932,7 +9932,12 @@ def process_stars_successful_payment(message):
         
         parts = payload.split(':')
         prod_type_key = parts[0]
-        buyer_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.from_user.id
+        # Для обычной покупки parts[1] — покупатель. Для подарка
+        # parts[1] — получатель, а parts[2] — реальный плательщик.
+        if prod_type_key.startswith('gift_'):
+            buyer_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else message.from_user.id
+        else:
+            buyer_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.from_user.id
         
         u = message.from_user
         user_name = (f"{u.first_name or ''} {u.last_name or ''}").strip() or u.username or "Пользователь"
