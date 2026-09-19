@@ -8097,7 +8097,12 @@ def callback_inline(call):
             if bp.get('garden_fertilizer', 0) <= 0:
                 bot.answer_callback_query(call.id, "❌ У вас нет удобрения! Купите в /shop 😿", show_alert=True)
                 return
+            fert_used = int(garden.get('fertilizer_used', 0))
+            if fert_used >= 3:
+                bot.answer_callback_query(call.id, "❌ Для этого растения уже использовано максимум 3 удобрения! 😿", show_alert=True)
+                return
             bp['garden_fertilizer'] -= 1
+            garden['fertilizer_used'] = fert_used + 1
             seed_info = GARDEN_SEEDS[garden['seed']]
             cut_time = seed_info['grow_time'] * 0.10
             garden['planted_at'] -= cut_time
