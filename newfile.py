@@ -258,7 +258,7 @@ STARS_COIN_PACKS = {
 STARS_VIP_PASS = {
     'pass_7_days': {'name': '⭐️ VIP Nya Pass (7 дней)', 'days': 7, 'stars': 1, 'desc': '-30% ко всем кулдаунам, 2x /bonus, 100% защита от ограблений'},
     'pass_30_days': {'name': '⭐️ VIP Nya Pass (30 дней)', 'days': 30, 'stars': 3, 'desc': 'Месяц полного VIP комфорта и удвоенных наград'},
-    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 10, 'desc': 'Пожизненный VIP статус и все привилегии навсегда!'}
+    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 25, 'desc': 'Пожизненный VIP статус и все привилегии навсегда!'}
 }
 
 VIP_BADGES = {
@@ -326,7 +326,8 @@ BUFF_ITEMS = {
     'energy_drink': {'name': '⚡️ Энергетик Red Cat', 'short': '⚡️ Энергетик', 'price': 400, 'desc': 'Мгновенный сброс всех кулдаунов работы, замеров, мусорки и охоты (кд 30 мин)'},
     'luck_clover': {'name': '🍀 Клевер Удачи (1 час)', 'short': '🍀 Клевер', 'price': 700, 'desc': '+15% к удаче во всех играх казино на 1 час'},
     'alarm_system': {'name': '🛡 Охранная сигнализация', 'short': '🛡 Сигнализация', 'price': 600, 'desc': 'Защита от 1 ограбления (вор оглушается и платит вам штраф)'},
-    'invis_mask': {'name': '🥷 Маска-невидимка (24 часа)', 'short': '🥷 Невидимка', 'price': 500, 'desc': 'Скрывает мемные замеры в общих топах чата'}
+    'invis_mask': {'name': '🥷 Маска-невидимка (24 часа)', 'short': '🥷 Невидимка', 'price': 500, 'desc': 'Скрывает мемные замеры в общих топах чата'},
+    'garden_fertilizer': {'name': '🧪 Супер-удобрение для сада', 'short': '🧪 Удобрение', 'price': 5000, 'desc': 'Одно применение ускоряет текущий рост растения на 10%. Можно покупать сколько угодно.'}
 }
 
 # ---------------------------------------------------------
@@ -713,17 +714,20 @@ def load_data():
         'meme_winners': [],
         'chest_claims': {}
     }
-    try:
-        if DB_CHANNEL_ID:
-            chat = bot.get_chat(DB_CHANNEL_ID)
-            if chat and chat.pinned_message and chat.pinned_message.document:
-                file_info = bot.get_file(chat.pinned_message.document.file_id)
-                downloaded_file = bot.download_file(file_info.file_path)
-                with open(DATA_FILE, 'wb') as new_file:
-                    new_file.write(downloaded_file)
-                print("Успешно загружен бекап из закрепа в Telegram-канале!")
-    except Exception as e:
-        print(f"Инфо: Загрузка из Telegram пропущена: {e}")
+    # Безопасное восстановление: закреплённый бэкап используется только если
+    # локальной базы ещё нет. Иначе свежая локальная база не будет затёрта старым бэкапом.
+    if not os.path.exists(DATA_FILE):
+        try:
+            if DB_CHANNEL_ID:
+                chat = bot.get_chat(DB_CHANNEL_ID)
+                if chat and chat.pinned_message and chat.pinned_message.document:
+                    file_info = bot.get_file(chat.pinned_message.document.file_id)
+                    downloaded_file = bot.download_file(file_info.file_path)
+                    with open(DATA_FILE, 'wb') as new_file:
+                        new_file.write(downloaded_file)
+                    print("Успешно загружен бекап из закрепа в Telegram-канале!")
+        except Exception as e:
+            print(f"Инфо: Загрузка из Telegram пропущена: {e}")
 
     if os.path.exists(DATA_FILE):
         try:
@@ -1174,7 +1178,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
         ('daily_casino_profit', 0), ('daily_transferred', 0), ('daily_stats_date', ''),
-        ('karma', 0), ('garden', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
+        ('karma', 0), ('chat_ids', []), ('garden', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
@@ -1375,6 +1379,18 @@ def can_process_user_message(message):
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
     is_super_admin = (user_id == ADMIN_ID or user_username == ADMIN_USERNAME.lower())
+
+    # Запоминаем чаты, где пользователь реально встречался. Это позволяет
+    # строить чатовые топы без смешивания участников разных чатов.
+    try:
+        econ = get_user_econ(user_id=user_id, user_tag=message.from_user.username or message.from_user.first_name, username=message.from_user.username)
+        chat_ids = econ.setdefault('chat_ids', [])
+        cid = int(message.chat.id)
+        if cid not in chat_ids:
+            chat_ids.append(cid)
+            mark_dirty()
+    except Exception as e:
+        print(f"[CHAT TRACK ERROR] {e}")
 
     bot_is_active = db.get('bot_active', True)
     if not bot_is_active and not is_super_admin:
@@ -2465,6 +2481,7 @@ def cmd_brick(message):
     if not can_process_user_message(message):
         return
 
+    chat_id = message.chat.id
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
@@ -2571,6 +2588,7 @@ def cmd_crash(message):
     if not can_process_user_message(message):
         return
 
+    chat_id = message.chat.id
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
@@ -3304,6 +3322,7 @@ def cmd_mines(message):
     if not can_process_user_message(message):
         return
 
+    chat_id = message.chat.id
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
@@ -4763,6 +4782,43 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         except Exception: pass
 
 # ---------------------------------------------------------
+# ЗАЩИТА ПОКУПОК TELEGRAM STARS
+# ---------------------------------------------------------
+def stars_item_is_one_time(item):
+    """Косметика, питомцы и pass навсегда покупаются только один раз."""
+    if not item:
+        return False
+    item_type = item.get('type')
+    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'bp_premium'}
+
+def stars_item_owned(econ, kind, item_key):
+    if kind == 'vippass':
+        return item_key == 'pass_forever' and bool(econ.get('vip_forever'))
+    if kind == 'cosm':
+        item = STARS_COSMETICS.get(item_key)
+        if not item:
+            return False
+        t = item.get('type')
+        if t == 'bp_premium':
+            return bool(econ.get('bp_premium'))
+        if t == 'title_cert':
+            return bool(econ.get('has_custom_title_cert'))
+        if t == 'theme':
+            return item.get('theme_id') in econ.get('purchased_themes', ['default'])
+        if t == 'badge':
+            return item.get('emoji') in econ.get('inventory', [])
+        if t == 'pet':
+            return item_key in econ.get('paid_stars_items', [])
+    return False
+
+def stars_purchase_error(econ, kind, item_key):
+    if not stars_item_owned(econ, kind, item_key):
+        return None
+    if kind == 'vippass':
+        return '❌ Вечный VIP уже куплен. Его нельзя купить повторно. 😸'
+    return '❌ Этот вечный Stars-предмет уже есть у вас. Повторная покупка запрещена. 😸'
+
+# ---------------------------------------------------------
 # ФУНКЦИИ МАГАЗИНА TELEGRAM STARS
 # ---------------------------------------------------------
 def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=None):
@@ -4820,8 +4876,11 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
             "• 😻 Особое уважение и статус в чате!\n"
         ]
         for pass_k, pass_v in STARS_VIP_PASS.items():
-            lines.append(f"• <b>{pass_v['name']}</b> — <b>{pass_v['stars']} ⭐️</b>")
-            markup.add(InlineKeyboardButton(f"Купить {pass_v['name']} ({pass_v['stars']} ⭐️)", callback_data=f"star_buy_pass_{pass_k}:{user_id}"))
+            owned = stars_item_owned(econ, 'vippass', pass_k)
+            status = ' ✅ УЖЕ КУПЛЕН' if owned else ''
+            lines.append(f"• <b>{pass_v['name']}</b> — <b>{pass_v['stars']} ⭐️</b>{status}")
+            if not owned:
+                markup.add(InlineKeyboardButton(f"Купить {pass_v['name']} ({pass_v['stars']} ⭐️)", callback_data=f"star_buy_pass_{pass_k}:{user_id}"))
         lines.append("──────────────────────")
         markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
 
@@ -4832,8 +4891,11 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
             "<i>Уникальная косметика и привилегии, доступные только за Звёзды:</i>\n"
         ]
         for c_k, c_v in STARS_COSMETICS.items():
-            lines.append(f"• <b>{c_v['name']}</b> — <b>{c_v['stars']} ⭐️</b>\n  <i>{c_v['desc']}</i>")
-            markup.add(InlineKeyboardButton(f"Купить: {c_v['name']} ({c_v['stars']} ⭐️)", callback_data=f"star_buy_cosm_{c_k}:{user_id}"))
+            owned = stars_item_owned(econ, 'cosm', c_k)
+            status = ' ✅ УЖЕ КУПЛЕНО' if owned else ''
+            lines.append(f"• <b>{c_v['name']}</b> — <b>{c_v['stars']} ⭐️</b>{status}\n  <i>{c_v['desc']}</i>")
+            if not owned:
+                markup.add(InlineKeyboardButton(f"Купить: {c_v['name']} ({c_v['stars']} ⭐️)", callback_data=f"star_buy_cosm_{c_k}:{user_id}"))
         lines.append("──────────────────────")
         markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
 
@@ -5626,7 +5688,12 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     )
     markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg{uid_tag}"))
 
-    visible_items = {k: v for k, v in econ_items.items() if category in ['rich', 'msg', 'karma'] or v.get('invis_until', 0) <= now}
+    # Только пользователи, которые были замечены в этом чате. Для старых
+    # аккаунтов без chat_ids оставляем их вне чатового топа до следующего сообщения.
+    visible_items = {
+        k: v for k, v in econ_items.items()
+        if chat_id in v.get('chat_ids', []) and (category in ['rich', 'msg', 'karma'] or v.get('invis_until', 0) <= now)
+    }
 
     if category == 'rich':
         sorted_data = sorted(visible_items.items(), key=lambda x: (x[1].get('balance', 0) + x[1].get('bank_deposit', 0)), reverse=True)
@@ -6469,6 +6536,169 @@ def cmd_gift_stars(message):
         reply_markup=markup,
         parse_mode='HTML'
     )
+
+# ---------------------------------------------------------
+# СУПЕР-АДМИН: ВЫДАЧА ЛЮБЫХ ПРЕДМЕТОВ, ВКЛЮЧАЯ STARS-ДОНАТЫ
+# Только ADMIN_ID / ADMIN_USERNAME. Целевая выдача не зависит от прав чата.
+# Примеры:
+# /give @user coins 100000
+# /give @user vip 30
+# /give @user vip_forever
+# /give @user pet_griffin
+# /give @user theme_gold
+# /give @user badge_crown
+# /give @user bp_premium
+# /give @user all
+# ---------------------------------------------------------
+def _is_owner_admin(message):
+    return bool(message and message.from_user and (
+        message.from_user.id == ADMIN_ID or
+        (message.from_user.username or '').lower() == ADMIN_USERNAME.lower()
+    ))
+
+def _grant_all_donations(econ):
+    econ['vip_forever'] = True
+    econ['bp_premium'] = True
+    econ['has_custom_title_cert'] = True
+    econ.setdefault('paid_stars_items', [])
+    for item_id, item in STARS_COSMETICS.items():
+        item_type = item.get('type')
+        if item_type == 'theme' and item.get('theme_id'):
+            purchased = econ.setdefault('purchased_themes', ['default'])
+            if item['theme_id'] not in purchased:
+                purchased.append(item['theme_id'])
+        elif item_type == 'badge' and item.get('emoji'):
+            inv = econ.setdefault('inventory', [])
+            if item['emoji'] not in inv:
+                inv.append(item['emoji'])
+        elif item_type == 'pet':
+            if item_id not in econ['paid_stars_items']:
+                econ['paid_stars_items'].append(item_id)
+            pet_id = item.get('pet_id')
+            if pet_id in PETS_DATA:
+                pinfo = PETS_DATA[pet_id]
+                econ['pet'] = {'id': pet_id, 'name': pinfo['name'], 'luck_bonus': pinfo['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+        elif item_type == 'bp_premium':
+            if 'bp_premium' not in econ['paid_stars_items']:
+                econ['paid_stars_items'].append('bp_premium')
+        elif item_type == 'title_cert':
+            if 'custom_title' not in econ['paid_stars_items']:
+                econ['paid_stars_items'].append('custom_title')
+    if 'pet_griffin' in STARS_COSMETICS and 'pet_griffin' not in econ['paid_stars_items']:
+        econ['paid_stars_items'].append('pet_griffin')
+
+def _admin_grant(message):
+    if not _is_owner_admin(message):
+        return False
+    raw = (message.text or '').strip()
+    parts = raw.split()
+    if len(parts) < 3:
+        bot.reply_to(message, "❌ Формат: <code>/give @user coins 100000</code> или <code>/give @user all</code>.", parse_mode='HTML')
+        return True
+    target_raw = parts[1]
+    target_id = None
+    target_name = None
+    if message.reply_to_message and (target_raw in ('reply', '.', '-', '@reply') or target_raw.lower() == 'this'):
+        target = message.reply_to_message.from_user
+        target_id = target.id
+        target_name = target.username or target.first_name or f'ID:{target_id}'
+    else:
+        target_id, target_name = resolve_user_from_string(message.chat.id, target_raw)
+    if not target_id:
+        bot.reply_to(message, "❌ Не удалось найти пользователя. Используй @username, ID или ответ на его сообщение.")
+        return True
+
+    econ = get_user_econ(user_id=target_id, user_tag=target_name)
+    item = parts[2].lower()
+    amount = parts[3] if len(parts) > 3 else None
+    changed = []
+
+    if item in ('coins', 'coin', 'коины', 'коины'):
+        try: value = int(amount or '0')
+        except ValueError: value = 0
+        if value <= 0:
+            bot.reply_to(message, "❌ Укажи положительное количество коинов.")
+            return True
+        econ['balance'] += value; changed.append(f'+{value:,} 🪙')
+    elif item in ('vip', 'vip_days'):
+        try: days = int(amount or '30')
+        except ValueError: days = 0
+        if days <= 0:
+            bot.reply_to(message, "❌ Количество дней должно быть больше 0.")
+            return True
+        econ['vip_until'] = max(time.time(), econ.get('vip_until', 0)) + days * 86400
+        changed.append(f'VIP +{days} дн.')
+    elif item in ('vip_forever', 'vip_forever_25', 'вечный_vip'):
+        econ['vip_forever'] = True; changed.append('VIP навсегда')
+    elif item in ('all', 'everything', 'донаты', 'donates'):
+        _grant_all_donations(econ); changed.append('все Stars-донаты')
+    elif item in STARS_COSMETICS:
+        c = STARS_COSMETICS[item]
+        t = c.get('type')
+        if t == 'bp_premium': econ['bp_premium'] = True
+        elif t == 'title_cert': econ['has_custom_title_cert'] = True
+        elif t == 'theme':
+            th = c.get('theme_id'); purchased = econ.setdefault('purchased_themes', ['default'])
+            if th and th not in purchased: purchased.append(th)
+            if th: econ['profile_theme'] = th
+        elif t == 'badge':
+            em = c.get('emoji'); inv = econ.setdefault('inventory', [])
+            if em and em not in inv: inv.append(em)
+            econ['badge'] = em
+        elif t == 'pet':
+            pid = c.get('pet_id'); econ.setdefault('paid_stars_items', [])
+            if item not in econ['paid_stars_items']: econ['paid_stars_items'].append(item)
+            if pid in PETS_DATA:
+                pi=PETS_DATA[pid]; econ['pet']={'id':pid,'name':pi['name'],'luck_bonus':pi['luck_bonus'],'hunger':100,'cleanliness':100,'pet_exp':0,'last_update':time.time()}
+        changed.append(c.get('name', item))
+    elif item in ('pass_forever', 'vip_pass_forever'):
+        econ['vip_forever'] = True; changed.append('VIP навсегда')
+    elif item in ('bp_premium', 'premium_pass'):
+        econ['bp_premium'] = True; econ.setdefault('paid_stars_items', [])
+        if 'bp_premium' not in econ['paid_stars_items']: econ['paid_stars_items'].append('bp_premium')
+        changed.append('Премиум Pass')
+    elif item.startswith('theme_'):
+        key=item.replace('theme_','',1)
+        if key in THEMES:
+            purchased=econ.setdefault('purchased_themes',['default'])
+            if key not in purchased: purchased.append(key)
+            econ['profile_theme']=key; changed.append(THEMES[key]['name'])
+        else:
+            bot.reply_to(message, "❌ Такой темы нет."); return True
+    elif item.startswith('badge_'):
+        key=item
+        if key in STARS_COSMETICS and STARS_COSMETICS[key].get('type')=='badge':
+            em=STARS_COSMETICS[key]['emoji']; inv=econ.setdefault('inventory',[])
+            if em not in inv: inv.append(em)
+            econ['badge']=em; changed.append(em)
+        elif key in VIP_BADGES:
+            em=VIP_BADGES[key]['emoji']; inv=econ.setdefault('inventory',[])
+            if em not in inv: inv.append(em)
+            econ['badge']=em; changed.append(em)
+        else:
+            bot.reply_to(message, "❌ Такой VIP-значок не найден."); return True
+    elif item in ('pet_griffin', 'vip_griffin'):
+        econ.setdefault('paid_stars_items', [])
+        if 'pet_griffin' not in econ['paid_stars_items']: econ['paid_stars_items'].append('pet_griffin')
+        if 'vip_griffin' in PETS_DATA:
+            pi=PETS_DATA['vip_griffin']; econ['pet']={'id':'vip_griffin','name':pi['name'],'luck_bonus':pi['luck_bonus'],'hunger':100,'cleanliness':100,'pet_exp':0,'last_update':time.time()}
+        changed.append('👑 Королевский Грифон')
+    elif item == 'stars':
+        try: value=int(amount or '0')
+        except ValueError: value=0
+        if value <= 0: bot.reply_to(message,"❌ Укажи положительное число Stars."); return True
+        econ['stars_donated']=econ.get('stars_donated',0)+value; changed.append(f'+{value} ⭐️ в статистику донатов')
+    else:
+        bot.reply_to(message, "❌ Неизвестный предмет. Используй <code>all</code>, <code>coins</code>, <code>vip</code>, <code>vip_forever</code>, <code>pet_griffin</code> или ID товара из Stars-магазина.", parse_mode='HTML')
+        return True
+
+    mark_dirty()
+    bot.reply_to(message, f"✅ <b>Выдача выполнена</b>\n👤 {html.escape(str(target_name or target_id))}\n🎁 {html.escape(', '.join(changed))}", parse_mode='HTML')
+    return True
+
+@bot.message_handler(commands=['give', 'выдать', 'grant'])
+def admin_give_command(message):
+    _admin_grant(message)
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -7747,6 +7977,11 @@ def callback_inline(call):
             pass_key = action_data.replace('star_buy_pass_', '')
             if pass_key in STARS_VIP_PASS:
                 item = STARS_VIP_PASS[pass_key]
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                purchase_error = stars_purchase_error(econ, 'vippass', pass_key)
+                if purchase_error:
+                    bot.answer_callback_query(call.id, purchase_error, show_alert=True)
+                    return
                 try:
                     bot.send_invoice(
                         chat_id=chat_id,
@@ -7767,6 +8002,11 @@ def callback_inline(call):
             cosm_key = action_data.replace('star_buy_cosm_', '')
             if cosm_key in STARS_COSMETICS:
                 item = STARS_COSMETICS[cosm_key]
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                purchase_error = stars_purchase_error(econ, 'cosm', cosm_key)
+                if purchase_error:
+                    bot.answer_callback_query(call.id, purchase_error, show_alert=True)
+                    return
                 try:
                     bot.send_invoice(
                         chat_id=chat_id,
@@ -7859,10 +8099,10 @@ def callback_inline(call):
                 return
             bp['garden_fertilizer'] -= 1
             seed_info = GARDEN_SEEDS[garden['seed']]
-            cut_time = seed_info['grow_time'] * 0.5
+            cut_time = seed_info['grow_time'] * 0.10
             garden['planted_at'] -= cut_time
             mark_dirty()
-            bot.answer_callback_query(call.id, "🧪 Растение удобрено! Рост ускорен на 50%! 😻", show_alert=True)
+            bot.answer_callback_query(call.id, "🧪 Растение удобрено! Рост ускорен на 10%! 😻", show_alert=True)
             render_garden_view(chat_id, user_id, user_name, call.message.message_id)
             return
 
@@ -9609,6 +9849,7 @@ def validate_stars_payload(payload, amount, buyer_id):
             else:
                 item = STARS_COSMETICS.get(actual)
             expected = item.get('stars') if item else None
+            target_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
             payload_buyer = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
         else:
             return False, 'Неизвестный товар.'
@@ -9616,6 +9857,34 @@ def validate_stars_payload(payload, amount, buyer_id):
             return False, 'Неверная сумма товара.'
         if payload_buyer is not None and int(payload_buyer) != int(buyer_id):
             return False, 'Плательщик не совпадает с владельцем счёта.'
+
+        # Защита от повторной покупки вечных предметов даже по старому счёту.
+        buyer_econ = get_user_econ(user_id=buyer_id)
+        if key.startswith('vippass_'):
+            item_key = key.replace('vippass_', '', 1)
+            err = stars_purchase_error(buyer_econ, 'vippass', item_key)
+            if err:
+                return False, err.replace('❌ ', '')
+        elif key.startswith('cosm_'):
+            item_key = key.replace('cosm_', '', 1)
+            err = stars_purchase_error(buyer_econ, 'cosm', item_key)
+            if err:
+                return False, err.replace('❌ ', '')
+        elif key.startswith('gift_') and target_id:
+            # Для подарков проверяем владение именно получателя.
+            target_econ = get_user_econ(user_id=target_id)
+            if actual.startswith('pass_'):
+                item_key = actual.replace('pass_', '', 1)
+                err = stars_purchase_error(target_econ, 'vippass', item_key)
+                if err:
+                    return False, 'Получатель уже владеет этим вечным VIP.'
+            elif actual == 'bp_premium':
+                if target_econ.get('bp_premium'):
+                    return False, 'Получатель уже владеет Премиум Pass.'
+            elif actual in STARS_COSMETICS:
+                err = stars_purchase_error(target_econ, 'cosm', actual)
+                if err:
+                    return False, 'Получатель уже владеет этим вечным Stars-предметом.'
         return True, ''
     except Exception:
         return False, 'Некорректный платёжный payload.'
@@ -9664,10 +9933,30 @@ def process_stars_successful_payment(message):
         user_name = (f"{u.first_name or ''} {u.last_name or ''}").strip() or u.username or "Пользователь"
         econ = get_user_econ(buyer_id, user_name, username=u.username)
         
-        econ['stars_donated'] = econ.get('stars_donated', 0) + stars_amount
         user_link = make_link(chat_id, user_name, buyer_id, ping=True)
-        
-                # 0. Проверка на подарок другому человеку
+
+        # Повторно не выдаём вечные подарки/покупки, даже если платёж создан до
+        # предыдущей покупки. Монеты и временный VIP остаются многократными.
+        if prod_type_key.startswith('vippass_'):
+            _pk = prod_type_key.replace('vippass_', '', 1)
+            _err = stars_purchase_error(econ, 'vippass', _pk)
+            if _err:
+                print(f"[STARS SECURITY] permanent VIP replay blocked: {_pk} buyer={buyer_id}")
+                return
+        elif prod_type_key.startswith('cosm_'):
+            _ck = prod_type_key.replace('cosm_', '', 1)
+            _err = stars_purchase_error(econ, 'cosm', _ck)
+            if _err:
+                print(f"[STARS SECURITY] permanent cosmetic replay blocked: {_ck} buyer={buyer_id}")
+                return
+        elif prod_type_key.startswith('bpprem_') and econ.get('bp_premium'):
+            print(f"[STARS SECURITY] premium pass replay blocked: buyer={buyer_id}")
+            return
+
+        # Только после успешной проверки товара учитываем Stars в статистике поддержки.
+        econ['stars_donated'] = econ.get('stars_donated', 0) + stars_amount
+
+        # 0. Проверка на подарок другому человеку
         is_gift = prod_type_key.startswith('gift_')
         if is_gift:
             actual_prod = prod_type_key.replace('gift_', '', 1)
@@ -9690,7 +9979,13 @@ def process_stars_successful_payment(message):
                 else: target_econ['vip_until'] = max(time.time(), target_econ.get('vip_until', 0)) + (days * 86400)
                 prod_name = v_item['name']
             elif actual_prod == 'bp_premium':
+                if target_econ.get('bp_premium'):
+                    print(f"[STARS SECURITY] duplicate gifted premium pass blocked: target={target_id}")
+                    return
                 target_econ['bp_premium'] = True
+                target_econ.setdefault('paid_stars_items', [])
+                if 'bp_premium' not in target_econ['paid_stars_items']:
+                    target_econ['paid_stars_items'].append('bp_premium')
                 prod_name = "🎃 Премиум Хеллоуин Pass"
             elif actual_prod == 'custom_title':
                 target_econ['has_custom_title_cert'] = True
