@@ -7952,6 +7952,77 @@ def callback_inline(call):
             bot.answer_callback_query(call.id)
             return
 
+        # ИНИЦИАЦИЯ ПОДАРКА TELEGRAM STARS ДРУГУ
+        # callback: star_gift_<kind>_<item_key>_<target_id>:<buyer_id>
+        elif action_data.startswith('star_gift_'):
+            gift_data = action_data[len('star_gift_'):]
+            gift_parts = gift_data.split('_')
+            if len(gift_parts) < 3:
+                bot.answer_callback_query(call.id, "❌ Некорректный подарок!", show_alert=True)
+                return
+
+            gift_kind = gift_parts[0]
+            target_id = None
+            buyer_id = user_id
+            try:
+                # В action_data target_id — последний числовой компонент.
+                target_id = int(gift_parts[-1])
+            except (TypeError, ValueError):
+                bot.answer_callback_query(call.id, "❌ Не удалось определить получателя!", show_alert=True)
+                return
+
+            if owner_id and owner_id != user_id:
+                bot.answer_callback_query(call.id, "❌ Этот подарок может оформить только его отправитель!", show_alert=True)
+                return
+            if target_id == user_id:
+                bot.answer_callback_query(call.id, "❌ Нельзя подарить товар самому себе. Используйте /stars!", show_alert=True)
+                return
+
+            # Формируем ключ товара из callback.
+            if gift_kind == 'coins':
+                item_key = '_'.join(gift_parts[1:-1])
+                item = STARS_COIN_PACKS.get(item_key)
+            elif gift_kind == 'pass':
+                item_key = '_'.join(gift_parts[1:-1])
+                item = STARS_VIP_PASS.get(item_key)
+            elif gift_kind == 'cosm':
+                item_key = '_'.join(gift_parts[1:-1])
+                item = STARS_COSMETICS.get(item_key)
+            else:
+                item_key = ''
+                item = None
+
+            if not item:
+                bot.answer_callback_query(call.id, "❌ Товар подарка не найден!", show_alert=True)
+                return
+
+            target_econ = get_user_econ(user_id=target_id)
+            if gift_kind == 'pass':
+                owned_error = stars_purchase_error(target_econ, 'vippass', item_key)
+            elif gift_kind == 'cosm':
+                owned_error = stars_purchase_error(target_econ, 'cosm', item_key)
+            else:
+                owned_error = None
+            if owned_error:
+                bot.answer_callback_query(call.id, f"❌ Получатель уже владеет этим товаром.", show_alert=True)
+                return
+
+            try:
+                bot.send_invoice(
+                    chat_id=chat_id,
+                    title=f"🎁 Подарок: {item['name']}",
+                    description=f"Подарок для пользователя ID:{target_id}",
+                    invoice_payload=f"gift_{item_key}:{target_id}:{buyer_id}",
+                    provider_token="",
+                    currency="XTR",
+                    prices=[LabeledPrice(label=item['name'], amount=item['stars'])]
+                )
+                bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
+            except Exception as e:
+                print(f"[STARS GIFT INVOICE ERROR] {e}")
+                bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            return
+
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: ПАКЕТЫ КОИНОВ
         elif action_data.startswith('star_buy_coins_'):
             pack_key = action_data.replace('star_buy_coins_', '')
