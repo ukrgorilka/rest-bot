@@ -83,15 +83,30 @@ VD_CHAT_ID = normalize_tg_id(os.environ.get('VD_CHAT_ID', '-1003703264754'))
 DATA_FILE = 'rests_data.json'
 
 def leave_banned_chats():
-    try:
-        bot.leave_chat(-1003703264754)
-    except Exception:
-        pass
+    """Leave chats explicitly listed as banned in persistent DB/config."""
+    banned = db.get('banned_chats', [])
+    if isinstance(banned, dict):
+        banned = list(banned.keys())
+    for raw_chat_id in banned or []:
+        try:
+            chat_id = int(raw_chat_id)
+            bot.leave_chat(chat_id)
+        except Exception as e:
+            print(f"[BANNED CHAT] failed to leave {raw_chat_id}: {e}")
 
 def is_chat_banned(chat_id):
-    if not chat_id:
+    """Return True when the chat is explicitly banned."""
+    try:
+        chat_id = int(chat_id)
+    except (TypeError, ValueError):
         return False
-    return '3703264754' in str(chat_id)
+    banned = db.get('banned_chats', [])
+    if isinstance(banned, dict):
+        return str(chat_id) in banned or chat_id in banned
+    try:
+        return chat_id in {int(x) for x in (banned or [])}
+    except (TypeError, ValueError):
+        return False
 
 MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
 
@@ -188,6 +203,7 @@ BADGES = {
 }
 
 TITLES = {
+    'pumpkin_lord': {'name': 'Повелитель Тыкв', 'text': '🎃 Повелитель Тыкв', 'price': 0, 'buff': 'luck', 'val': 15, 'desc': '+15% к удаче во всех играх и событиях (Хеллоуин Pass)'},
     'king': {'name': 'Кинг', 'text': '👑 Кинг', 'price': 3000, 'buff': 'luck', 'val': 10, 'desc': '+10% к удаче в играх'},
     'sonya': {'name': 'Соня', 'text': '💤 Соня', 'price': 2200, 'buff': 'cd_reduction', 'val': 10, 'desc': '-10% ко всем кулдаунам'},
     'legend': {'name': 'Легенда', 'text': '🔥 Легенда', 'price': 3600, 'buff': 'exp_bonus', 'val': 25, 'desc': '+25% к опыту профиля'},
@@ -223,6 +239,7 @@ THEMES = {
     'emerald': {'name': '🌿 Изумрудный Лес', 'price': 2200, 'border': '🍃══════ 🌲 ══════🍃', 'header': '🌿 <b>ХРАНИТЕЛЬ ДРЕВНЕГО ЛЕСА</b> 🍃', 'icon': '🌱'},
     'synthwave': {'name': '🌇 Синтвейв 80s', 'price': 2800, 'border': '🌴══════ 🌆 ══════🌴', 'header': '🌇 <b>RETROWAVE SUNSET DRIVE</b> 🏎', 'icon': '📼'},
     'frost': {'name': '❄️ Вечная Мерзлота', 'price': 2600, 'border': '❄️══════ 🧊 ══════❄️', 'header': '❄️ <b>ЛЕДЯНОЙ ЧЕРТОГ АРКТИКИ</b> 🧊', 'icon': '💎'},
+    'halloween': {'name': '🎃 Тёмный Хеллоуин: Тыквенная Ночь 🦇', 'price': 0, 'border': '🎃══════ 🦇 🕸 🕯 ══════🎃', 'header': '🎃 <b>ТЁМНЫЙ ГРИМУАР ТЫКВЕННОЙ НОЧИ</b> 🦇', 'icon': '🦇'},
     'stars_gold': {'name': '🌟 Императорское Золото VIP', 'price': 0, 'border': '⭐️══════ ⚜️ ══════⭐️', 'header': '🌟 <b>ИМПЕРАТОРСКИЙ STARS ПРОФИЛЬ</b> 👑', 'icon': '⭐️'},
     'stars_anime': {'name': '🎀 Аниме Люкс VIP', 'price': 0, 'border': '✨══════ 🎀 ══════✨', 'header': '🎀 <b>ANIME LUXURY SUPREME ID</b> 💖', 'icon': '💫'},
     'stars_galaxy': {'name': '🌌 Бездна Сингулярности VIP', 'price': 0, 'border': '🪐══════ 🌀 ══════🌌', 'header': '🌌 <b>БЕЗДНА КОСМИЧЕСКОЙ СИНГУЛЯРНОСТИ</b> 🛸', 'icon': '🪐'}
@@ -254,6 +271,7 @@ VIP_BADGES = {
 }
 
 STARS_COSMETICS = {
+    'bp_premium': {'name': '🎃 Премиум Хеллоуинский Pass', 'stars': 2, 'type': 'bp_premium', 'desc': 'Открывает премиум-ветку наград, Тыквокота и Тёмную тему!'},
     'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 2, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
     'pet_griffin': {'name': '👑 Питомец: Королевский Грифон', 'stars': 3, 'type': 'pet', 'pet_id': 'vip_griffin', 'desc': 'Эксклюзивный питомец (+150% к удаче)'},
     'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 1, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
@@ -420,6 +438,7 @@ HUNT_TYPES = [
 ]
 
 PETS_DATA = {
+    'pumpkin_cat': {'name': '🎃 Тыквоголовый Кот', 'short': '🎃 Тыквокот', 'price': 0, 'luck_bonus': 120, 'desc': '+120% к удаче, хранитель хеллоуинской магии'},
     'cat': {'name': '🐱 Котик Усач', 'short': '🐱 Котик', 'price': 720, 'luck_bonus': 15, 'desc': '+15% к удаче в охоте/рыбалке'},
     'dog': {'name': '🐶 Пёсель Верный', 'short': '🐶 Пёсель', 'price': 1450, 'luck_bonus': 25, 'desc': '+25% к удаче в охоте/рыбалке'},
     'fox': {'name': '🦊 Хитрая Лисичка', 'short': '🦊 Лисичка', 'price': 3000, 'luck_bonus': 40, 'desc': '+40% к удаче в охоте/рыбалке'},
@@ -600,6 +619,53 @@ ALWAYS_ACTIVE_PATTERNS = {
     ]
 }
 
+
+# ---------------------------------------------------------
+# СЕМЕЙНЫЕ ДОМА И МЕБЕЛЬ (ПАССИВНЫЙ ДОХОД В СЕЙФ СЕМЬИ)
+# ---------------------------------------------------------
+FAMILY_HOUSES = {
+    'moscow': {'name': '🏙 Квартира на Арбате (Москва)', 'price': 15000, 'income': 10, 'city': 'Москва 🇷🇺'},
+    'kyiv': {'name': '🏛 Пентхаус на Крещатике (Киев)', 'price': 15000, 'income': 10, 'city': 'Киев 🇺🇦'},
+    'bern': {'name': '🏔 Шале в Альпах (Берн, Швейцария)', 'price': 45000, 'income': 35, 'city': 'Берн 🇨🇭'},
+    'tokyo': {'name': '🌸 Пагода в Сибуе (Токио)', 'price': 70000, 'income': 60, 'city': 'Токио 🇯🇵'},
+    'london': {'name': '🏰 Особняк у Тауэра (Лондон)', 'price': 120000, 'income': 110, 'city': 'Лондон 🇬🇧'}
+}
+
+FAMILY_FURNITURE = {
+    'fireplace': {'name': '🔥 Уютный камин', 'price': 2500, 'income': 3},
+    'sofa': {'name': '🛋 Мягкий велюровый диван', 'price': 1800, 'income': 2},
+    'jacuzzi': {'name': '🛁 Джакузи с подсветкой', 'price': 6500, 'income': 8},
+    'cinema': {'name': '🎬 Домашний кинотеатр 4K', 'price': 12000, 'income': 15},
+    'cat_castle': {'name': '🐱 Игровой замок котика', 'price': 3500, 'income': 5},
+    'pool': {'name': '🏊‍♂️ Бассейн во дворе', 'price': 25000, 'income': 30}
+}
+
+# ---------------------------------------------------------
+# МЕМНЫЕ БОЛЕЗНИ И АПТЕКА
+# ---------------------------------------------------------
+MEME_DISEASES = {
+    'tygydyk': {'name': '🐾 Кошачий тыгыдык', 'suffix': '...тыгыдык-тыгыдык! 🐾', 'cure': 'chamomile_tea'},
+    'anime_fever': {'name': '🌸 Острая аниме-зависимость', 'suffix': '...ня! десу~ 🌸', 'cure': 'anti_anime'},
+    'lazy_butt': {'name': '💤 Синдром ленивой жопки', 'suffix': '...зевнул(а) и лёг(ла) спать 💤', 'cure': 'energy_shot'},
+    'oink': {'name': '🐷 Хрюкающий токсикоз', 'suffix': '...хрю! 🐷', 'cure': 'oink_syrup'},
+    'kus_fever': {'name': '😼 Хронический кусь', 'suffix': '...кусь за бочок! 😼', 'cure': 'kus_vaccine'}
+}
+
+PHARMACY_ITEMS = {
+    'chamomile_tea': {'name': '🍵 Чай с ромашкой', 'price': 50, 'cure': 'tygydyk', 'desc': 'Лечит Кошачий тыгыдык'},
+    'anti_anime': {'name': '💊 Таблетка Анти-Аниме', 'price': 60, 'cure': 'anime_fever', 'desc': 'Лечит Аниме-зависимость'},
+    'energy_shot': {'name': '💉 Бодрящий укол кофеина', 'price': 70, 'cure': 'lazy_butt', 'desc': 'Лечит Синдром ленивой жопки'},
+    'oink_syrup': {'name': '🍯 Сироп «Не хрюкай»', 'price': 50, 'cure': 'oink', 'desc': 'Лечит Хрюканье'},
+    'kus_vaccine': {'name': '🩹 Вакцина от куся', 'price': 60, 'cure': 'kus_fever', 'desc': 'Лечит Хронический кусь'},
+    'aibolit_panacea': {'name': '🧪 Панацея Айболита', 'price': 150, 'cure': 'all', 'desc': 'Исцеляет от всех болезней + иммунитет на 24 часа!'}
+}
+
+# ---------------------------------------------------------
+# СЕЗОННЫЙ ХЕЛЛОУИНСКИЙ PASS (BATTLE PASS 30 УРОВНЕЙ)
+# ---------------------------------------------------------
+HALLOWEEN_BP_LEVELS = 30
+HALLOWEEN_BP_EXP_PER_LVL = 100
+
 # ---------------------------------------------------------
 # ИГРОВЫЕ СТРУКТУРЫ
 # ---------------------------------------------------------
@@ -612,9 +678,13 @@ active_crash = {}
 active_brick = {}
 active_c_mines = {}
 active_durak = {}
+active_wanted = {}  # {(chat_id, user_id): wanted_data}
+active_pet_fights = {}
+active_memes = {}
+active_quizzes = {}
 
 gold_rush_event = {'active': False, 'until': 0}
-current_quiz = {'question': None, 'answer': None, 'reward': 0, 'chat_id': None}
+current_quiz = {}
 
 user_flood_history = {}
 user_flood_muted = {}
@@ -636,7 +706,9 @@ def load_data():
         'marriages': {},
         'lottery': {'tickets': {}, 'pot': 0, 'last_draw': 0},
         'bot_active': True,
-        'casino_pool': 1000000
+        'casino_pool': 1000000,
+        'safe': {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []},
+        'daily_memes': []
     }
     try:
         if DB_CHANNEL_ID:
@@ -663,6 +735,10 @@ def load_data():
                     data['promos']['FIX'] = {'reward': 5000, 'exp': 100, 'claimed': []}
                 if 'fix' not in data['promos']:
                     data['promos']['fix'] = data['promos']['FIX']
+                if 'safe' not in data:
+                    data['safe'] = {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []}
+                if 'daily_memes' not in data:
+                    data['daily_memes'] = []
                 return data
         except Exception as e:
             print(f'Ошибка чтения файла: {e}')
@@ -761,6 +837,17 @@ def setup_bot_commands():
         BotCommand('slots', '🎰 Слоты'),
         BotCommand('tasks', '📋 Задания и квесты'),
         BotCommand('top', '🏆 Таблицы лидеров чата'),
+        BotCommand('safe', '🔒 Взлом 4-значного сейфа чата'),
+        BotCommand('house', '🏡 Семейный дом и обустройство'),
+        BotCommand('sheriff', '👮‍♂️ Полиция чата и служба шерифа'),
+        BotCommand('jail', '🔒 КПЗ и статус тюрьмы'),
+        BotCommand('escape', '🏃‍♂️ Попытка побега из тюрьмы'),
+        BotCommand('pet_fight', '⚔️ Подпольные бои питомцев'),
+        BotCommand('meme', '📸 Опубликовать мем дня'),
+        BotCommand('story', '📜 Смешная история / фанфик про участников'),
+        BotCommand('pass', '🎃 Хеллоуинский Боевой Пропуск'),
+        BotCommand('pharmacy', '💊 Аптека и лечение мемных болезней'),
+        BotCommand('gift_stars', '🎁 Подарить Stars товар другу'),
         BotCommand('settings', '⚙️ Настройки бота в чате')
     ]
     try:
@@ -918,7 +1005,7 @@ def merge_user_econ_data(dest, src):
     if not src or not isinstance(src, dict):
         return dest
 
-    for num_field in ['balance', 'bank_deposit', 'account_exp', 'work_exp', 'smeh', 'cooked_meals', 'bonus_streak', 'stars_donated']:
+    for num_field in ['balance', 'bank_deposit', 'account_exp', 'work_exp', 'smeh', 'cooked_meals', 'bonus_streak', 'stars_donated', 'bp_exp']:
         dest[num_field] = dest.get(num_field, 0) + src.get(num_field, 0)
 
     for ts_field in [
@@ -927,7 +1014,7 @@ def merge_user_econ_data(dest, src):
         'last_chromosomes_time', 'last_dick_time', 'last_wheel_time', 
         'last_pet_walk', 'last_case_time', 'last_rob_time', 'last_stream_time',
         'luck_clover_until', 'invis_until', 'last_streak_time', 'last_energy_drink_time',
-        'last_trash_time', 'vip_until'
+        'last_trash_time', 'vip_until', 'jail_until', 'disease_immunity_until', 'last_safe_try'
     ]:
         dest[ts_field] = max(dest.get(ts_field, 0), src.get(ts_field, 0))
 
@@ -1060,7 +1147,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
-        ('last_energy_drink_time', 0), ('vip_until', 0), ('vip_forever', False), ('stars_donated', 0)
+        ('last_energy_drink_time', 0), ('vip_until', 0), ('vip_forever', False), ('stars_donated', 0), ('is_sheriff', False), ('jail_until', 0), ('disease', None), ('disease_immunity_until', 0), ('bp_exp', 0), ('bp_claimed_free', []), ('bp_claimed_prem', []), ('bp_premium', False), ('last_safe_try', 0)
     ]:
         if field not in u_data:
             u_data[field] = default
@@ -1139,8 +1226,98 @@ def add_coins(user_id=None, user_tag=None, amount=0, username=None):
 def check_casino_limits(econ, bet, is_multiplayer=False):
     return True
 
-def process_casino_bet(bet):
+
+def get_chat_safe(chat_id):
+    """Return a safe state isolated per chat."""
+    safe_root = db.setdefault('safe', {})
+    # Backward compatibility: migrate legacy global safe into the current chat once.
+    if 'code' in safe_root or 'pot' in safe_root or 'tried_codes' in safe_root:
+        legacy = safe_root.copy()
+        db['safe'] = {}
+        if chat_id is not None:
+            db['safe'][str(chat_id)] = legacy
+        safe_root = db['safe']
+    key = str(chat_id)
+    safe = safe_root.setdefault(key, {
+        'code': f"{random.randint(0, 9999):04d}",
+        'pot': 30000,
+        'tried_codes': []
+    })
+    safe.setdefault('code', f"{random.randint(0, 9999):04d}")
+    safe.setdefault('pot', 30000)
+    safe.setdefault('tried_codes', [])
+    return safe
+
+def add_to_safe_pot(amount, chat_id=None):
+    # Если вызывающий код не передал чат, сохраняем старую совместимость через
+    # глобальный ключ, но новые вызовы должны передавать chat_id.
+    if chat_id is None:
+        chat_id = 0
+    safe = get_chat_safe(chat_id)
+    add_amount = max(1, int(amount * 0.5))
+    safe['pot'] = safe.get('pot', 30000) + add_amount
+    mark_dirty()
+
+def update_family_house_income(marriage_data):
+    if not marriage_data or not isinstance(marriage_data, dict):
+        return 0
+    house_id = marriage_data.get('house')
+    if not house_id or house_id not in FAMILY_HOUSES:
+        marriage_data['last_house_calc'] = time.time()
+        return 0
+    now = time.time()
+    last_calc = marriage_data.get('last_house_calc', now)
+    hours_passed = (now - last_calc) / 3600.0
+    if hours_passed < 0.1:
+        return 0
+    hourly_rate = FAMILY_HOUSES[house_id]['income']
+    for furn in marriage_data.get('furniture', []):
+        if furn in FAMILY_FURNITURE:
+            hourly_rate += FAMILY_FURNITURE[furn]['income']
+    earned = int(hourly_rate * hours_passed)
+    if earned > 0:
+        marriage_data['vault'] = marriage_data.get('vault', 0) + earned
+        marriage_data['last_house_calc'] = now
+        mark_dirty()
+    return earned
+
+def is_in_jail(user_id):
+    econ = get_user_econ(user_id=user_id)
+    jail_until = econ.get('jail_until', 0)
+    if jail_until > time.time():
+        left_min = max(1, int((jail_until - time.time()) // 60))
+        return True, left_min
+    return False, 0
+
+def get_user_bp_level(bp_exp):
+    lvl = min(30, max(1, (bp_exp // HALLOWEEN_BP_EXP_PER_LVL) + 1))
+    in_lvl_exp = bp_exp % HALLOWEEN_BP_EXP_PER_LVL
+    pct = min(1.0, in_lvl_exp / float(HALLOWEEN_BP_EXP_PER_LVL))
+    bar_len = int(pct * 8)
+    bar = "🎃" * bar_len + "🕸" * (8 - bar_len)
+    return lvl, in_lvl_exp, HALLOWEEN_BP_EXP_PER_LVL, bar
+
+def add_bp_exp(user_id, user_tag, amount=5, username=None):
+    econ = get_user_econ(user_id, user_tag, username=username)
+    econ['bp_exp'] = econ.get('bp_exp', 0) + amount
+    mark_dirty()
+
+def try_infect_user(user_id, user_tag, disease_id=None, chance=0.03):
+    econ = get_user_econ(user_id, user_tag)
+    now = time.time()
+    if econ.get('disease') or econ.get('disease_immunity_until', 0) > now:
+        return None
+    if random.random() <= chance:
+        if not disease_id:
+            disease_id = random.choice(list(MEME_DISEASES.keys()))
+        econ['disease'] = disease_id
+        mark_dirty()
+        return MEME_DISEASES[disease_id]['name']
+    return None
+
+def process_casino_bet(bet, chat_id=None):
     db['casino_pool'] = max(10000, db.get('casino_pool', 1000000) + max(0, bet))
+    add_to_safe_pot(bet, chat_id=chat_id)
     mark_dirty()
 
 def process_casino_win(win):
@@ -1344,10 +1521,16 @@ def make_link(chat_id, user_name, user_id=None, ping=True):
     return f'<b>{html.escape(name)}</b>{badge_str}{title_str}'
 
 def is_admin(chat_id, user_id):
+    # В личном чате Telegram не предоставляет статуса администратора:
+    # доступ должен быть только у владельца/ADMIN_ID.
     if user_id == ADMIN_ID:
         return True
+    try:
+        chat_id = int(chat_id)
+    except (TypeError, ValueError):
+        return False
     if chat_id > 0:
-        return True
+        return False
     try:
         member = bot.get_chat_member(chat_id, user_id)
         return member.status in ['administrator', 'creator']
@@ -2004,10 +2187,7 @@ def chat_quiz_worker():
             if not active_chats: continue
             target_chat = int(random.choice(active_chats))
             q_data = random.choice(quiz_questions)
-            current_quiz['question'] = q_data[0]
-            current_quiz['answer'] = q_data[1].lower().strip()
-            current_quiz['reward'] = q_data[2]
-            current_quiz['chat_id'] = target_chat
+            current_quiz[target_chat] = {'question': q_data[0], 'answer': q_data[1].lower().strip(), 'reward': q_data[2], 'chat_id': target_chat}
             msg_text = (
                 "⚡️ <b>ЭКСПРЕСС-ВИКТОРИНА В ЧАТЕ!</b> 😺\n"
                 "──────────────────────\n"
@@ -2270,7 +2450,7 @@ def cmd_brick(message):
         return
 
     econ['balance'] -= bet
-    process_casino_bet(bet)
+    process_casino_bet(bet, chat_id)
     
     game_id = f"brick_{user_id}_{int(time.time())}"
     active_brick[game_id] = {
@@ -2376,7 +2556,7 @@ def cmd_crash(message):
         return
 
     econ['balance'] -= bet
-    process_casino_bet(bet)
+    process_casino_bet(bet, chat_id)
 
     game_id = f"cr_{user_id}_{int(time.time())}"
     
@@ -2701,7 +2881,7 @@ def process_sport_dice_game(message, game_type, bet):
         return
 
     econ['balance'] -= bet
-    process_casino_bet(bet)
+    process_casino_bet(bet, chat_id)
 
     emoji_map = {'football': '⚽', 'basketball': '🏀', 'darts': '🎯', 'bowling': '🎳'}
     dice_emoji = emoji_map.get(game_type, '🎲')
@@ -3109,7 +3289,7 @@ def cmd_mines(message):
         return
 
     econ['balance'] -= bet
-    process_casino_bet(bet)
+    process_casino_bet(bet, chat_id)
 
     game_id = f"m_{user_id}_{int(time.time())}"
     active_mines[game_id] = {
@@ -4896,7 +5076,7 @@ def process_bj_game(message, bet):
         return
 
     econ['balance'] -= bet
-    process_casino_bet(bet)
+    process_casino_bet(bet, chat_id)
 
     game_id = f"bj_{user_id}_{int(time.time())}"
     deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4
@@ -5243,6 +5423,14 @@ def cmd_balance(message):
 def cmd_stars(message):
     if not can_process_user_message(message):
         return
+    # Сохраняем старый алиас /pass, но направляем его в Battle Pass,
+    # чтобы два обработчика не конкурировали за одну и ту же команду.
+    command = (message.text or '').split()[0].split('@')[0].lower()
+    if command == '/pass':
+        user_id = message.from_user.id
+        user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+        render_halloween_bp_view(message.chat.id, user_id, user_name)
+        return
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_stars_shop(message.chat.id, user_id, user_name, category='main')
@@ -5456,6 +5644,705 @@ def cmd_top(message):
 # ---------------------------------------------------------
 # ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ И КОМАНД
 # ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# ИГРА СЕЙФ (ВЗЛОМ 4-ЗНАЧНОГО ШИФРА)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['safe', 'сейф'])
+def cmd_safe(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    chat_id = message.chat.id
+
+    in_j, left_j = is_in_jail(user_id)
+    if in_j:
+        bot.reply_to(message, f"🔒 Вы отбываете срок в КПЗ! До выхода: <b>{left_j} мин.</b> 😿", parse_mode='HTML')
+        return
+
+    safe = get_chat_safe(chat_id)
+    pot = safe.get('pot', 30000)
+    tried = safe.setdefault('tried_codes', [])
+
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        bot.reply_to(
+            message,
+            f"🔒 <b>СЕЙФ ЧАТА (4-ЗНАЧНЫЙ ШИФР)</b> 🏦 😺\n"
+            f"──────────────────────\n"
+            f"💰 Накопленный банк сейфа: <b>{pot:,} Ня-коинов 🪙</b>!\n"
+            f"<i>(В сейф отчисляется 50% от всех проигрышей чата в казино и спорте!)</i> 😻\n\n"
+            f"📝 Уже опробовано комбинаций: <b>{len(tried)}</b>\n"
+            f"💡 Чтобы попробовать угадать шифр (раз в 20 мин):\n"
+            f"👉 <code>/safe 4815</code>\n"
+            f"──────────────────────",
+            parse_mode='HTML'
+        )
+        return
+
+    code_entered = parts[1].strip()
+    if not (len(code_entered) == 4 and code_entered.isdigit()):
+        bot.reply_to(message, "❌ Код сейфа должен состоять ровно из 4 цифр (от 0000 до 9999)!\nПример: <code>/safe 4815</code> 😾", parse_mode='HTML')
+        return
+
+    now = time.time()
+    last_try = econ.get('last_safe_try', 0)
+    cooldown = 1200
+    left = cooldown_text(last_try, cooldown, econ)
+    if left:
+        bot.reply_to(message, f"⏳ Руки дрожат от отмычек! Следующая попытка через: <b>{left}</b>. 😿", parse_mode='HTML')
+        return
+
+    if code_entered in tried:
+        bot.reply_to(message, f"❌ <b>Этот код уже писали!</b> Комбинацию <code>{code_entered}</code> уже кто-то вводил, и она оказалась неверной. Попробуйте другой код! 😿\n💰 В сейфе: <b>{pot:,} 🪙</b>", parse_mode='HTML')
+        return
+
+    econ['last_safe_try'] = now
+    u_link = make_link(chat_id, user_name, user_id, ping=True)
+
+    if code_entered == safe.get('code'):
+        won_pot = pot
+        econ['balance'] += won_pot
+        add_account_exp(user_id, user_name, 200, username=message.from_user.username)
+        change_karma(user_id, user_name, 5)
+
+        new_code = f"{random.randint(0, 9999):04d}"
+        safe['code'] = new_code
+        safe['pot'] = 15000
+        safe['tried_codes'] = []
+        mark_dirty()
+
+        log_event('СЕЙФ ВЗЛОМАН', f'Игрок {u_link} подобрал шифр <b>{code_entered}</b> и сорвал джекпот <b>{won_pot:,} 🪙</b>!')
+
+        win_msg = (
+            f"🎉💥🔓 <b>СЕЙФ УСПЕШНО ВЗЛОМАН!</b> 😻\n"
+            f"──────────────────────\n"
+            f"👤 Мега-медвежатник: {u_link}\n"
+            f"🔑 Верный шифр: <b>{code_entered}</b>\n"
+            f"💰 Сорванный куш: <b>+{won_pot:,} Ня-коинов 🪙</b>! 🙀\n"
+            f"⭐ Опыт: <b>+200 EXP</b> | Карма: <b>+5</b>\n"
+            f"──────────────────────\n"
+            f"<i>Замки заменены на новые, в сейф заложен стартовый фонд 15,000 🪙! Охота продолжается!</i> 😸"
+        )
+        bot.send_message(chat_id, win_msg, parse_mode='HTML')
+    else:
+        tried.append(code_entered)
+        add_account_exp(user_id, user_name, 5, username=message.from_user.username)
+        mark_dirty()
+        bot.reply_to(
+            message,
+            f"❌ <b>Щёлк! Код {code_entered} не подошёл!</b> 😿\n"
+            f"Этот код добавлен в список неудачных попыток.\n"
+            f"💰 Текущий банк сейфа: <b>{pot:,} Ня-коинов 🪙</b> (ждёт своего победителя!)\n"
+            f"⏳ Повторная попытка доступна через 20 минут.",
+            parse_mode='HTML'
+        )
+
+# ---------------------------------------------------------
+# СЕМЕЙНЫЙ ДОМ И ОБУСТРОЙСТВО (/house, /дом)
+# ---------------------------------------------------------
+def render_house_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    m = econ.get('marriage')
+    if not m:
+        text = "❌ <b>Семейный дом доступен только тем, кто состоит в браке!</b> 😿\nСделайте предложение через <code>брак @username</code>!"
+        if message_id:
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+            except Exception: pass
+            return
+        bot.send_message(chat_id, text, parse_mode='HTML')
+        return
+
+    update_family_house_income(m)
+    mark_dirty()
+
+    cur_house = m.get('house')
+    cur_furniture = m.get('furniture', [])
+
+    markup = InlineKeyboardMarkup(row_width=1)
+
+    if not cur_house:
+        lines = [
+            "🏡 <b>КАТАЛОГ СЕМЕЙНОЙ НЕДВИЖИМОСТИ</b> 😺",
+            "──────────────────────",
+            f"Супруги: <b>{m.get('partner_name')}</b> и {make_link(chat_id, user_name, user_id, ping=False)}",
+            "<i>Купите ваш первый семейный дом в одном из городов мира! Дом приносит постоянный пассивный доход в семейный сейф.</i> 😻\n",
+            "<b>Доступные дома:</b>"
+        ]
+        for h_k, h_v in FAMILY_HOUSES.items():
+            lines.append(f"• <b>{h_v['name']}</b> — <code>{h_v['price']:,} 🪙</code> (Доход: +{h_v['income']} 🪙/ч в сейф)")
+            markup.add(InlineKeyboardButton(f"Купить {h_v['name']} ({h_v['price']:,} 🪙)", callback_data=f"buy_house_{h_k}:{user_id}"))
+    else:
+        h_info = FAMILY_HOUSES.get(cur_house, FAMILY_HOUSES['moscow'])
+        hourly_total = h_info['income']
+        furn_names = []
+        for f_k in cur_furniture:
+            if f_k in FAMILY_FURNITURE:
+                furn_names.append(FAMILY_FURNITURE[f_k]['name'])
+                hourly_total += FAMILY_FURNITURE[f_k]['income']
+
+        furn_str = ", ".join(furn_names) if furn_names else "Пусто (нужна мебель)"
+        lines = [
+            f"🏡 <b>СЕМЕЙНЫЙ ОЧАГ: {h_info['name']}</b> 😺",
+            "──────────────────────",
+            f"📍 Город: <b>{h_info['city']}</b>",
+            f"👫 Владельцы: <b>{m.get('partner_name')}</b> & {make_link(chat_id, user_name, user_id, ping=False)}",
+            f"🛋 Интерьер и мебель: <i>{furn_str}</i>",
+            f"💰 Пассивный доход дома: <b>+{hourly_total} 🪙 в час</b> прямо в семейный сейф!",
+            f"🏦 В семейном сейфе: <b>{m.get('vault', 0):,} 🪙</b>",
+            "──────────────────────",
+            "<b>Каталог мебели для обустройства:</b>"
+        ]
+        for f_k, f_v in FAMILY_FURNITURE.items():
+            is_bought = " (Уже куплено)" if f_k in cur_furniture else ""
+            lines.append(f"• <b>{f_v['name']}</b> — <code>{f_v['price']:,} 🪙</code> (+{f_v['income']} 🪙/ч){is_bought}")
+            if f_k not in cur_furniture:
+                markup.add(InlineKeyboardButton(f"Купить {f_v['name']} ({f_v['price']:,} 🪙)", callback_data=f"buy_furn_{f_k}:{user_id}"))
+
+        markup.add(InlineKeyboardButton("🔄 Обновить статус дома", callback_data=f"house_refresh:{user_id}"))
+
+    text = "\n".join(lines)
+    if message_id:
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+        return
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+@bot.message_handler(commands=['house', 'дом'])
+def cmd_house(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_house_view(message.chat.id, user_id, user_name)
+
+# ---------------------------------------------------------
+# КРИМИНАЛ И ПОЛИЦИЯ ЧАТА (ШЕРИФ, РОЗЫСК, КПЗ, ПОБЕГ, ЗАЛОГ)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['sheriff', 'шериф'])
+def cmd_sheriff(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+
+    if econ.get('is_sheriff'):
+        econ['is_sheriff'] = False
+        mark_dirty()
+        bot.reply_to(message, "👮‍♂️ Вы сдали жетон и уволились из полиции чата. Теперь вы обычный гражданин! 😸", parse_mode='HTML')
+        return
+
+    lvl, _, _, _ = get_account_level(econ.get('account_exp', 0))
+    if lvl < 2:
+        bot.reply_to(message, "❌ Для службы в полиции чата требуется минимум <b>2-й уровень</b> профиля! 😾", parse_mode='HTML')
+        return
+
+    econ['is_sheriff'] = True
+    mark_dirty()
+    u_link = make_link(message.chat.id, user_name, user_id, ping=True)
+    bot.reply_to(
+        message,
+        f"👮‍♂️⭐ <b>ДОБРО ПОЖАЛОВАТЬ НА СЛУЖБУ, ШЕРИФ!</b> 😺\n"
+        f"──────────────────────\n"
+        f"Офицер: {u_link}\n"
+        f"Ваша задача — ловить грабителей по горячим следам!\n\n"
+        f"Когда кто-то совершит ограбление, у вас будет 15 минут, чтобы поймать преступника командой:\n"
+        f"👉 <code>поймать @вор</code> или <code>/catch @вор</code>\n\n"
+        f"💰 Награда за поимку: <b>+250 🪙</b>, +30 EXP и +3 к Карме! 😻\n"
+        f"──────────────────────",
+        parse_mode='HTML'
+    )
+
+@bot.message_handler(commands=['catch', 'поймать'])
+def cmd_catch(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    chat_id = message.chat.id
+
+    if not econ.get('is_sheriff'):
+        bot.reply_to(message, "❌ Ловить преступников могут только шерифы! Устройтесь на службу: <code>/sheriff</code> 👮‍♂️", parse_mode='HTML')
+        return
+
+    in_j, left_j = is_in_jail(user_id)
+    if in_j:
+        bot.reply_to(message, f"❌ Вы сами находитесь под стражей в КПЗ! 😿", parse_mode='HTML')
+        return
+
+    target_user, target_user_id, _ = parse_target_and_args(message, '/catch')
+    if not target_user:
+        target_user, target_user_id, _ = parse_target_and_args(message, 'поймать')
+
+    if not target_user or not target_user_id:
+        bot.reply_to(message, "❌ Укажите вора: <code>поймать @вор</code> или ответом на сообщение! 😾", parse_mode='HTML')
+        return
+
+    if target_user_id == user_id:
+        bot.reply_to(message, "❌ Шериф не может арестовать самого себя! 🙀", parse_mode='HTML')
+        return
+
+    now = time.time()
+    wanted_info = active_wanted.get((chat_id, target_user_id))
+    if not wanted_info or wanted_info.get('expire', 0) < now:
+        bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> сейчас не находится в оперативном розыске! 😾", parse_mode='HTML')
+        return
+
+    t_econ = get_user_econ(target_user_id, target_user)
+    u_link = make_link(chat_id, user_name, user_id, ping=True)
+    t_link = make_link(chat_id, target_user, target_user_id, ping=True)
+
+    # Шанс задержания 75%
+    if random.random() < 0.75:
+        fine = min(t_econ.get('balance', 0), 200)
+        t_econ['balance'] = max(0, t_econ.get('balance', 0) - fine)
+        t_econ['jail_until'] = now + 900  # 15 минут КПЗ
+
+        reward = 250
+        econ['balance'] += reward
+        add_account_exp(user_id, user_name, 35, username=message.from_user.username)
+        change_karma(user_id, user_name, 3)
+
+        active_wanted.pop((chat_id, target_user_id), None)
+        mark_dirty()
+
+        log_event('ПОЛИЦИЯ: АРЕСТ', f'Шериф {u_link} задержал вора {t_link}! Вор отправлен в КПЗ на 15 мин.')
+
+        bot.send_message(
+            chat_id,
+            f"🚨🚔 <b>ГРАБИТЕЛЬ ОБЕЗВРЕЖЕН И ЗАДЕРЖАН!</b> 👮‍♂️\n"
+            f"──────────────────────\n"
+            f"Шериф {u_link} мастерски скрутил вора {t_link}! 💥\n"
+            f"⚖️ С вора списан штраф: <b>-{fine} 🪙</b>\n"
+            f"🔒 Вор отправлен в КПЗ на <b>15 минут</b> (команды заработка заблокированы)!\n"
+            f"💰 Награда шерифу за службу: <b>+{reward} 🪙</b> (+35 EXP, +3 Кармы)! 😻\n"
+            f"──────────────────────",
+            parse_mode='HTML'
+        )
+    else:
+        bot.send_message(
+            chat_id,
+            f"💨 <b>ОПЕРАЦИЯ ПРОВАЛЕНА!</b> 🙀\n\n"
+            f"Вор {t_link} бросил дымовую шашку под ноги шерифу {u_link} и ловко скрылся во дворах! Погоня продолжается!",
+            parse_mode='HTML'
+        )
+
+@bot.message_handler(commands=['jail', 'кпз', 'тюрьма'])
+def cmd_jail(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    chat_id = message.chat.id
+
+    in_j, left_j = is_in_jail(user_id)
+    wanted_count = len([w for w in active_wanted.values() if w.get('expire', 0) > time.time()])
+
+    status_str = f"🔒 <b>ВЫ В КАМЕРЕ КПЗ!</b> До выхода: <b>{left_j} мин.</b>\nПопробуйте сбежать: <code>/escape</code> или попросите друга внести залог: <code>/bail</code>!" if in_j else "🕊 <b>Вы на свободе!</b> За вами нет правонарушений."
+
+    text = (
+        f"🏢 <b>ГОРОДСКОЕ ОТДЕЛЕНИЕ ПОЛИЦИИ И КПЗ</b> 👮‍♂️ 😺\n"
+        f"──────────────────────\n"
+        f"👤 Статус: {status_str}\n\n"
+        f"🚨 Преступников в розыске: <b>{wanted_count} чел.</b>\n"
+        f"──────────────────────\n"
+        f"💡 <b>Команды полиции и арестантов:</b> 😸\n"
+        f"• <code>/sheriff</code> — поступить на службу шерифом\n"
+        f"• <code>поймать @вор</code> — задержать преступника из розыска\n"
+        f"• <code>/escape</code> — совершить попытку побега из КПЗ (шанс 35%)\n"
+        f"• <code>/bail @вор</code> — выкупить друга под залог (300 🪙)"
+    )
+    bot.reply_to(message, text, parse_mode='HTML')
+
+@bot.message_handler(commands=['escape', 'побег'])
+def cmd_escape(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    chat_id = message.chat.id
+
+    in_j, left_j = is_in_jail(user_id)
+    if not in_j:
+        bot.reply_to(message, "Вы не находитесь в КПЗ, побег не требуется! 😸")
+        return
+
+    u_link = make_link(chat_id, user_name, user_id, ping=True)
+    if random.random() < 0.35:
+        econ['jail_until'] = 0
+        mark_dirty()
+        bot.send_message(
+            chat_id,
+            f"🏃‍♂️💨 <b>ДЕРЗКИЙ ПОБЕГ УДАЛСЯ!</b> 🙀\n\n"
+            f"{u_link} отогнул решётку ложкой и сбежал через вентиляцию! Вы снова на свободе! 😻",
+            parse_mode='HTML'
+        )
+    else:
+        econ['jail_until'] = econ.get('jail_until', time.time()) + 600
+        mark_dirty()
+        bot.send_message(
+            chat_id,
+            f"🚨🐕 <b>ПОБЕГ ПРОВАЛЕН!</b> 😾\n\n"
+            f"{u_link} застрял в форточке и был пойман дежурным с собаками! Срок в КПЗ увеличен на <b>+10 минут</b>! 😿",
+            parse_mode='HTML'
+        )
+
+@bot.message_handler(commands=['bail', 'залог'])
+def cmd_bail(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    chat_id = message.chat.id
+
+    target_user, target_user_id, _ = parse_target_and_args(message, '/bail')
+    if not target_user:
+        target_user, target_user_id, _ = parse_target_and_args(message, 'залог')
+
+    if not target_user or not target_user_id:
+        bot.reply_to(message, "❌ Укажите заключённого: <code>/bail @user</code> или ответом на сообщение! 😾", parse_mode='HTML')
+        return
+
+    t_in_j, _ = is_in_jail(target_user_id)
+    if not t_in_j:
+        bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> не сидит в КПЗ! 😸", parse_mode='HTML')
+        return
+
+    bail_cost = 300
+    if econ['balance'] < bail_cost:
+        bot.reply_to(message, f"❌ На внесение залога нужно <b>{bail_cost} 🪙</b>! У вас: {econ['balance']} 🪙. 😿", parse_mode='HTML')
+        return
+
+    econ['balance'] -= bail_cost
+    t_econ = get_user_econ(target_user_id, target_user)
+    t_econ['jail_until'] = 0
+    change_karma(user_id, user_name, 2)
+    mark_dirty()
+
+    u_link = make_link(chat_id, user_name, user_id, ping=True)
+    t_link = make_link(chat_id, target_user, target_user_id, ping=True)
+    bot.send_message(
+        chat_id,
+        f"🤝🔓 <b>ЗАЛОГ ВНЕСЁН!</b> 😻\n\n"
+        f"{u_link} заплатил залог <b>{bail_cost} 🪙</b> и освободил {t_link} из КПЗ! Настоящая дружба познаётся в беде! 😸",
+        parse_mode='HTML'
+    )
+
+# ---------------------------------------------------------
+# ПОДПОЛЬНЫЕ БОИ ПИТОМЦЕВ (/pet_fight, /бой)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['pet_fight', 'бой_питомцев', 'битвы_питомцев'])
+def cmd_pet_fight(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    chat_id = message.chat.id
+
+    in_j, left_j = is_in_jail(user_id)
+    if in_j:
+        bot.reply_to(message, f"🔒 Вы в КПЗ! До выхода: <b>{left_j} мин.</b> 😿", parse_mode='HTML')
+        return
+
+    pet1 = econ.get('pet')
+    if not pet1:
+        bot.reply_to(message, "❌ У вас нет питомца! Купите его в <code>/shop</code>. 😿", parse_mode='HTML')
+        return
+
+    target_user, target_user_id, raw_args = parse_target_and_args(message, '/pet_fight')
+    if not target_user:
+        target_user, target_user_id, raw_args = parse_target_and_args(message, 'бой_питомцев')
+
+    if not target_user or not target_user_id:
+        bot.reply_to(message, "❌ Формат: <code>/pet_fight @соперник [ставка]</code> или ответом на сообщение! 😾", parse_mode='HTML')
+        return
+
+    if target_user_id == user_id:
+        bot.reply_to(message, "❌ Нельзя драться питомцем с самим собой! 🙀", parse_mode='HTML')
+        return
+
+    t_econ = get_user_econ(target_user_id, target_user)
+    pet2 = t_econ.get('pet')
+    if not pet2:
+        bot.reply_to(message, f"❌ У соперника <b>{html.escape(target_user)}</b> нет питомца! 😿", parse_mode='HTML')
+        return
+
+    m_bet = re.search(r'\b(\d+)\b', raw_args)
+    bet = int(m_bet.group(1)) if m_bet else 50
+    if bet < 30:
+        bot.reply_to(message, "❌ Минимальная ставка — 30 Ня-коинов! 😾", parse_mode='HTML')
+        return
+
+    if econ['balance'] < bet:
+        bot.reply_to(message, f"❌ У вас недостаточно коинов! Ваш баланс: {econ['balance']} 🪙. 😿", parse_mode='HTML')
+        return
+    if t_econ['balance'] < bet:
+        bot.reply_to(message, f"❌ У соперника недостаточно коинов ({t_econ['balance']}/{bet} 🪙)! 😿", parse_mode='HTML')
+        return
+
+    econ['balance'] -= bet
+    t_econ['balance'] -= bet
+    mark_dirty()
+
+    # Расчет боевой мощи
+    p1_pow = pet1.get('power', 15) + (pet1.get('pet_exp', 0) // 20) + random.randint(1, 15)
+    p2_pow = pet2.get('power', 15) + (pet2.get('pet_exp', 0) // 20) + random.randint(1, 15)
+
+    u_link = make_link(chat_id, user_name, user_id, ping=True)
+    t_link = make_link(chat_id, target_user, target_user_id, ping=True)
+
+    rounds_log = [
+        f"🥊 <b>ПОДПОЛЬНЫЙ БОЙ ПИТОМЦЕВ!</b> 🐾 😺",
+        "──────────────────────",
+        f"🔴 {pet1['name']} ({u_link}) VS 🔵 {pet2['name']} ({t_link})",
+        f"💰 Банк арены: <b>{bet * 2} Ня-коинов 🪙</b>\n",
+        "<b>Ход битвы:</b>"
+    ]
+
+    # Симуляция раундов
+    if p1_pow >= p2_pow:
+        winner_id, winner_name, win_pet, loser_pet = user_id, user_name, pet1, pet2
+        loser_id, loser_name = target_user_id, target_user
+        rounds_log.append(f"1️⃣ {pet1['name']} проводит молниеносный выпад когтями! (-35 HP)")
+        rounds_log.append(f"2️⃣ {pet2['name']} пытается контратаковать, но промахивается!")
+        rounds_log.append(f"3️⃣ 🔥 <b>КРИТИЧЕСКИЙ УДАР!</b> {pet1['name']} опрокидывает соперника!")
+    else:
+        winner_id, winner_name, win_pet, loser_pet = target_user_id, target_user, pet2, pet1
+        loser_id, loser_name = user_id, user_name
+        rounds_log.append(f"1️⃣ {pet2['name']} встречает соперника мощным рыком!")
+        rounds_log.append(f"2️⃣ {pet1['name']} наносит удар, но натыкается на крепкий блок!")
+        rounds_log.append(f"3️⃣ 🔥 <b>УЛЬТИМЕЙТ!</b> {pet2['name']} проводит решающий коронный приём!")
+
+    total_pot = int(bet * 2 * 0.95)
+    w_econ = get_user_econ(winner_id, winner_name)
+    w_econ['balance'] += total_pot
+    win_pet['pet_exp'] = win_pet.get('pet_exp', 0) + 40
+    win_pet['fights_won'] = win_pet.get('fights_won', 0) + 1
+    loser_pet['pet_exp'] = loser_pet.get('pet_exp', 0) + 15
+    mark_dirty()
+
+    w_link = make_link(chat_id, winner_name, winner_id, ping=True)
+    rounds_log.append("──────────────────────")
+    rounds_log.append(f"🏆 <b>ПОБЕДИТЕЛЬ:</b> {win_pet['name']} (Тренер: {w_link})!")
+    rounds_log.append(f"💸 Выигрыш: <b>+{total_pot} 🪙</b> | Опыт победителя: <b>+40 EXP</b>! 😻")
+
+    bot.send_message(chat_id, "\n".join(rounds_log), parse_mode='HTML')
+
+# ---------------------------------------------------------
+# БИРЖА КОНТЕНТА И МЕМОДЕЛЬНЯ (/meme)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['meme', 'мем'])
+def cmd_meme(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    chat_id = message.chat.id
+
+    in_j, left_j = is_in_jail(user_id)
+    if in_j:
+        bot.reply_to(message, f"🔒 В КПЗ нельзя публиковать мемы! До выхода: <b>{left_j} мин.</b> 😿", parse_mode='HTML')
+        return
+
+    meme_id = f"m_{chat_id}_{message.message_id}"
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🔥 0", callback_data=f"meme_l_{meme_id}"),
+        InlineKeyboardButton("💩 0", callback_data=f"meme_d_{meme_id}")
+    )
+
+    u_link = make_link(chat_id, user_name, user_id, ping=False)
+    caption_text = f"🎭 <b>МЕМ ЧАТА</b> | Автор: {u_link}\n<i>Голосуйте реакциями ниже! Автор лучшего мема дня получит 1,500 🪙!</i> 😸"
+
+    active_memes[meme_id] = {
+        'author_id': user_id,
+        'author_name': user_name,
+        'chat_id': chat_id,
+        'likes': set(),
+        'dislikes': set(),
+        'date': daily_task_date()
+    }
+
+    add_bp_exp(user_id, user_name, 10, username=message.from_user.username)
+    bot.reply_to(message, caption_text, reply_markup=markup, parse_mode='HTML')
+
+# ---------------------------------------------------------
+# ГЕНЕРАТОР ИСТОРИЙ И ФАНФИКОВ (/story, /fanfic)
+# ---------------------------------------------------------
+STORY_TEMPLATES = [
+    "📖 <b>ХРОНИКИ ЧАТА: ДЕЛО О ШАУРМЕ</b> 🌯\n──────────────────────\nОднажды <b>{u1}</b> и <b>{u2}</b> решили открыть подпольный ларёк с шаурмой прямо в подвале Кровавой Бани. {u1} отвечал за секретный соус из кошачьих слёзок, а {u2} лично заманивал голодных участников чата. Бизнес шёл в гору, пока за шаурмой не пришёл местный шериф с ручным драконом! Теперь они оба флексят в центре площади и делают вид, что просто гуляли... 😹",
+    "📖 <b>ХРОНИКИ ЧАТА: ИСЕКАЙ В МИР ТАПОК</b> 🩴\n──────────────────────\nВчера <b>{u1}</b> случайно уронил(а) золотой тапок на ногу <b>{u2}</b>, и открылся пространственный портал! Они очнулись в фэнтези-мире, где королём был Гигачад, а вместо магии все спорили о размере писюна и количестве хромосом. {u1} стал(а) верховным магом кошачьего тыгыдыка, а {u2} победил(а) финального босса, метко метнув в него жареного карася! 😻",
+    "📖 <b>ХРОНИКИ ЧАТА: ОГРАБЛЕНИЕ ВЕКА</b> 🏦\n──────────────────────\n<b>{u1}</b> надел(а) маску-невидимку и позвал(а) <b>{u2}</b> грабить Ня-Банк. План был надёжен как швейцарские часы: {u1} отвлекает охрану танцем аниме-девочки, а {u2} взламывает сейф с помощью скрепки и молитвы семпаю. Всё шло идеально, пока сигнализация не заиграла гимн котиков на полную громкость! Пришлось убегать на дырявых сланцах с мешком коинов в зубах! 🏃‍♂️💨",
+    "📖 <b>ХРОНИКИ ЧАТА: ТАЙНА ПОДВАЛА</b> 🩸\n──────────────────────\nПоздней ночью <b>{u1}</b> и <b>{u2}</b> исследовали больницу милосердия в поисках редкого лута. Вдруг из темноты раздался зловещий шорох... {u1} схватил(а) бамбуковую удочку, а {u2} прикрылся(лась) питомцем-капибарой. Оказалось, это Джейсон Вурхиз просто варил ночной пельменный суп и забыл посолить! В итоге все трое мирно пили чай с ромашкой до самого утра. 🍵✨",
+    "📖 <b>ХРОНИКИ ЧАТА: КИБЕРПАНК 2077</b> 🤖\n──────────────────────\nВ неоновом мегаполисе <b>{u1}</b> прокачал(а) нейро-имплант для скоростного фапа, а <b>{u2}</b> установил(а) кибер-руку с лазерным бластером. Корпорация котиков объявила на них охоту за взлом биржи Ня-Биткоина. Уходя от дронов на боевой девятке ВАЗ-2107, они ворвались в стратосферу и навсегда вошли в легенды Ня-Стрит! 🚀🔥"
+]
+
+@bot.message_handler(commands=['story', 'fanfic', 'история_дня'])
+def cmd_story(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    chat_id = message.chat.id
+
+    target_user, target_user_id, _ = parse_target_and_args(message, '/story')
+    if not target_user:
+        target_user, target_user_id, _ = parse_target_and_args(message, 'история_дня')
+
+    if not target_user or target_user_id == user_id:
+        target_user = "Семпай"
+        target_user_id = None
+
+    u1_link = make_link(chat_id, user_name, user_id, ping=False)
+    u2_link = make_link(chat_id, target_user, target_user_id, ping=False) if target_user_id else f"<b>{html.escape(target_user)}</b>"
+
+    template = random.choice(STORY_TEMPLATES)
+    story_text = template.format(u1=u1_link, u2=u2_link)
+
+    add_account_exp(user_id, user_name, 10, username=message.from_user.username)
+    bot.reply_to(message, story_text, parse_mode='HTML')
+
+# ---------------------------------------------------------
+# СЕЗОННЫЙ ХЕЛЛОУИНСКИЙ PASS (/pass, /bp, /хеллоуин)
+# ---------------------------------------------------------
+def render_halloween_bp_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    bp_exp = econ.get('bp_exp', 0)
+    is_prem = econ.get('bp_premium', False)
+
+    lvl, in_exp, req_exp, bar = get_user_bp_level(bp_exp)
+
+    prem_status = "👑 Премиум Ветка АКТИВНА" if is_prem else "🔒 Бесплатная Ветка (Премиум за 2 ⭐️)"
+
+    lines = [
+        "🎃 <b>ХЕЛЛОУИНСКИЙ СЕЗОН: BATTLE PASS</b> 🦇 😺",
+        "──────────────────────",
+        f"👤 Участник: {make_link(chat_id, user_name, user_id, ping=False)}",
+        f"🏆 Уровень пропуска: <b>{lvl}/30 LVL</b> [{bar}] ({in_exp}/{req_exp} EXP)",
+        f"⭐️ Статус: <b>{prem_status}</b>\n",
+        "<i>Опыт даётся за смс в чате, работу, рыбалку, охоту, мусорку и игры!</i>\n",
+        "<b>Главные награды Хеллоуина:</b>",
+        "• <b>Ур. 15 (Free):</b> 🎃 Эксклюзивный значок Тыквы",
+        "• <b>Ур. 30 (Free):</b> 👑 Титул «🎃 Повелитель Тыкв» (+15% к удаче, +20% EXP)",
+        "• <b>Ур. 20 (Premium):</b> 🐱 Питомец: 🎃 Тыквоголовый Кот (+120% к удаче!)",
+        "• <b>Ур. 30 (Premium):</b> 🎨 Тема профиля: «🎃 Тёмный Хеллоуин: Тыквенная Ночь»! 🦇",
+        "──────────────────────"
+    ]
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🎁 Забрать доступные награды", callback_data=f"claim_bp_rewards:{user_id}"))
+
+    if not is_prem:
+        markup.add(InlineKeyboardButton("⭐️ Купить Премиум Pass (2 ⭐️ Stars)", callback_data=f"buy_bp_prem_stars:{user_id}"))
+
+    text = "\n".join(lines)
+    if message_id:
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+        return
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+@bot.message_handler(commands=['pass', 'bp', 'хеллоуин', 'battle_pass'])
+def cmd_halloween_pass(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_halloween_bp_view(message.chat.id, user_id, user_name)
+
+# ---------------------------------------------------------
+# АПТЕКА И МЕМНЫЕ БОЛЕЗНИ (/pharmacy, /аптека)
+# ---------------------------------------------------------
+def render_pharmacy_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    cur_disease = econ.get('disease')
+    d_name = MEME_DISEASES[cur_disease]['name'] if cur_disease in MEME_DISEASES else "Здоров(а) как бык! 🦾"
+
+    now = time.time()
+    imm_status = "✅ Действует" if econ.get('disease_immunity_until', 0) > now else "❌ Нет"
+
+    lines = [
+        "💊 <b>ГОРОДСКАЯ АПТЕКА «НЯ-ФАРМ»</b> 🏥 😺",
+        "──────────────────────",
+        f"👤 Пациент: {make_link(chat_id, user_name, user_id, ping=False)}",
+        f"🩺 Диагноз: <b>{d_name}</b>",
+        f"🛡 Иммунитет к вирусам: <b>{imm_status}</b>\n",
+        "<i>Лечите мемные хвори чата или сделайте прививку Айболита!</i> 😸\n",
+        "<b>Витрина медикаментов:</b>"
+    ]
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for p_k, p_v in PHARMACY_ITEMS.items():
+        lines.append(f"• <b>{p_v['name']}</b> — <code>{p_v['price']} 🪙</code> ({p_v['desc']})")
+        markup.add(InlineKeyboardButton(f"Купить {p_v['name']} ({p_v['price']} 🪙)", callback_data=f"buy_med_{p_k}:{user_id}"))
+
+    lines.append("──────────────────────")
+    text = "\n".join(lines)
+
+    if message_id:
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+        return
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+@bot.message_handler(commands=['pharmacy', 'аптека', 'больница'])
+def cmd_pharmacy(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_pharmacy_view(message.chat.id, user_id, user_name)
+
+# ---------------------------------------------------------
+# ПОДАРОК УСЛУГИ TELEGRAM STARS ДРУГУ (/gift_stars)
+# ---------------------------------------------------------
+@bot.message_handler(commands=['gift_stars', 'подарить_звезды', 'подарок_звезды'])
+def cmd_gift_stars(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    chat_id = message.chat.id
+
+    target_user, target_user_id, _ = parse_target_and_args(message, '/gift_stars')
+    if not target_user:
+        target_user, target_user_id, _ = parse_target_and_args(message, 'подарить_звезды')
+
+    if not target_user or not target_user_id:
+        bot.reply_to(message, "🎁 <b>КАК ПОДАРИТЬ УСЛУГУ ЗА ЗВЁЗДЫ ДРУГУ:</b>\n──────────────────────\nУкажите друга: <code>/gift_stars @username</code> или ответом на его сообщение! 😺", parse_mode='HTML')
+        return
+
+    if target_user_id == user_id:
+        bot.reply_to(message, "❌ Для покупки себе используйте <code>/stars</code>! 😸", parse_mode='HTML')
+        return
+
+    t_link = make_link(chat_id, target_user, target_user_id, ping=False)
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("💰 Подарить 100к коинов (3 ⭐️)", callback_data=f"star_gift_coins_coins_3_stars_{target_user_id}:{user_id}"),
+        InlineKeyboardButton("💳 Подарить 500к коинов (10 ⭐️)", callback_data=f"star_gift_coins_coins_10_stars_{target_user_id}:{user_id}"),
+        InlineKeyboardButton("👑 Подарить VIP Pass на месяц (3 ⭐️)", callback_data=f"star_gift_pass_pass_30_days_{target_user_id}:{user_id}"),
+        InlineKeyboardButton("🎃 Подарить Хеллоуин Pass (2 ⭐️)", callback_data=f"star_gift_cosm_bp_premium_{target_user_id}:{user_id}"),
+        InlineKeyboardButton("🌟 Подарить Кастомный Титул (2 ⭐️)", callback_data=f"star_gift_cosm_custom_title_{target_user_id}:{user_id}"),
+        InlineKeyboardButton("🐱 Подарить Королевского Грифона (3 ⭐️)", callback_data=f"star_gift_cosm_pet_griffin_{target_user_id}:{user_id}")
+    )
+
+    bot.reply_to(
+        message,
+        f"🎁 <b>ВЫБЕРИТЕ ПОДАРОК ЗА ЗВЁЗДЫ ДЛЯ {t_link}</b> ⭐️ 😻\n"
+        f"──────────────────────\n"
+        f"Оплата спишется с вашего баланса Telegram Stars, а товар мгновенно поступит на аккаунт друга! 😸",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
+
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     if not message or not getattr(message, 'from_user', None):
@@ -5472,6 +6359,7 @@ def handle_messages(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
     text_lower = text.lower()
     now_ts = time.time()
+    quiz = current_quiz.get(chat_id)
 
     is_super_admin = (user_id == ADMIN_ID or user_username == ADMIN_USERNAME.lower())
 
@@ -5522,6 +6410,14 @@ def handle_messages(message):
         return
 
     add_message_stat(user_id, user_name, username=user_username)
+    add_bp_exp(user_id, user_name, 2, username=user_username)
+    # МЕМНЫЕ БОЛЕЗНИ (СЛУЧАЙНОЕ ЗАРАЖЕНИЕ 2%)
+    if random.random() < 0.02:
+        d_got = try_infect_user(user_id, user_name, chance=1.0)
+        if d_got:
+            try: bot.send_message(chat_id, f"🤒 Ой-ой! {make_link(chat_id, user_name, user_id, ping=False)} подхватил(а) хворь: <b>{d_got}</b>! Загляните в <code>/pharmacy</code>! 🙀", parse_mode='HTML')
+            except Exception: pass
+
 
     # ПОВТОРЯЛКА
     m_say = re.match(r'^(?:бот,?\s+)?скажи\s+(.+)$', text, re.IGNORECASE)
@@ -5547,10 +6443,10 @@ def handle_messages(message):
             return
 
     # ВИКТОРИНА
-    if current_quiz.get('answer') and current_quiz.get('chat_id') == chat_id:
-        if text_lower == current_quiz['answer']:
-            reward = current_quiz['reward']
-            current_quiz['answer'] = None
+    if quiz and quiz.get('answer') and quiz.get('chat_id') == chat_id:
+        if text_lower == quiz['answer']:
+            reward = quiz['reward']
+            quiz['answer'] = None
             add_coins(user_id, user_name, reward, username=user_username)
             add_account_exp(user_id, user_name, 20, username=user_username)
             u_link = make_link(chat_id, user_name, user_id, ping=True)
@@ -6033,6 +6929,19 @@ def handle_messages(message):
     elif text_lower.startswith(('промо', 'промокод')): cmd_promo(message); return
     elif text_lower.startswith(('дурак', '/durak')): cmd_durak(message); return
     elif text_lower in ['настройки профиля', 'настройка профиля']: cmd_profile_settings(message); return
+    elif text_lower.startswith(('сейф', '/safe')): cmd_safe(message); return
+    elif text_lower in ['дом', 'мой дом', 'семейный дом', '/house']: cmd_house(message); return
+    elif text_lower in ['шериф', 'полиция', '/sheriff']: cmd_sheriff(message); return
+    elif text_lower.startswith(('поймать', '/catch')): cmd_catch(message); return
+    elif text_lower in ['кпз', 'тюрьма', '/jail']: cmd_jail(message); return
+    elif text_lower in ['побег', '/escape']: cmd_escape(message); return
+    elif text_lower.startswith(('залог', '/bail')): cmd_bail(message); return
+    elif text_lower.startswith(('бой питомцев', 'битвы питомцев', 'бой', '/pet_fight')): cmd_pet_fight(message); return
+    elif text_lower.startswith(('мем', '/meme')): cmd_meme(message); return
+    elif text_lower.startswith(('история', 'фанфик', '/story', '/fanfic')): cmd_story(message); return
+    elif text_lower in ['пасс', 'пас', 'пропуск', 'хеллоуин', 'bp', '/pass']: cmd_halloween_pass(message); return
+    elif text_lower in ['аптека', 'больница', '/pharmacy']: cmd_pharmacy(message); return
+    elif text_lower.startswith(('подарить звезды', 'подарок звезды', '/gift_stars')): cmd_gift_stars(message); return
 
     # ТОПЫ ТЕКСТОМ
     elif text_lower in ['топ', 'топы', 'лидеры', 'топ богачей', 'топ баланс', 'топ денег']: render_top_menu(chat_id, user_id=user_id, category='rich'); return
@@ -6120,7 +7029,7 @@ def handle_messages(message):
 
         if bet > 0:
             econ['balance'] -= bet
-            process_casino_bet(bet)
+            process_casino_bet(bet, chat_id)
 
         d1 = random.randint(1, 6)
         d2 = random.randint(1, 6)
@@ -6160,7 +7069,7 @@ def handle_messages(message):
             return
 
         econ['balance'] -= bet
-        process_casino_bet(bet)
+        process_casino_bet(bet, chat_id)
 
         symbols_pool = ['🍒', '🍋', '🍊', '🍀', '⭐', '💎']
         luck_bonus = econ['pet'].get('luck_bonus', 0) if econ.get('pet') else 0
@@ -6394,6 +7303,211 @@ def callback_inline(call):
             else:
                 bot.answer_callback_query(call.id, "❌ Это меню открыто другим пользователем!", show_alert=True)
                 return
+
+
+        # МЕМЫ: ГОЛОСОВАНИЕ
+        elif action_data.startswith('meme_l_') or action_data.startswith('meme_d_'):
+            meme_id = action_data[7:]
+            meme = active_memes.get(meme_id)
+            if not meme:
+                bot.answer_callback_query(call.id, "❌ Мем устарел!", show_alert=True)
+                return
+            is_like = action_data.startswith('meme_l_')
+            if is_like:
+                if user_id in meme['likes']:
+                    meme['likes'].remove(user_id)
+                else:
+                    meme['likes'].add(user_id)
+                    meme['dislikes'].discard(user_id)
+            else:
+                if user_id in meme['dislikes']:
+                    meme['dislikes'].remove(user_id)
+                else:
+                    meme['dislikes'].add(user_id)
+                    meme['likes'].discard(user_id)
+            markup = InlineKeyboardMarkup()
+            markup.add(
+                InlineKeyboardButton(f"🔥 {len(meme['likes'])}", callback_data=f"meme_l_{meme_id}"),
+                InlineKeyboardButton(f"💩 {len(meme['dislikes'])}", callback_data=f"meme_d_{meme_id}")
+            )
+            try: bot.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
+            except Exception: pass
+            bot.answer_callback_query(call.id, "Ваш голос учтён! 😸")
+            return
+
+        # СЕМЕЙНЫЙ ДОМ: КНОПКИ
+        elif action_data.startswith('buy_house_'):
+            h_k = action_data.replace('buy_house_', '')
+            if h_k in FAMILY_HOUSES:
+                h_info = FAMILY_HOUSES[h_k]
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                m = econ.get('marriage')
+                if not m:
+                    bot.answer_callback_query(call.id, "❌ Только для пар в браке!", show_alert=True)
+                    return
+                if econ['balance'] < h_info['price']:
+                    bot.answer_callback_query(call.id, f"❌ Нужно {h_info['price']:,} 🪙! 😿", show_alert=True)
+                    return
+                econ['balance'] -= h_info['price']
+                m['house'] = h_k
+                m['furniture'] = []
+                m['last_house_calc'] = time.time()
+                p_econ = get_user_econ(m.get('partner_id'))
+                if p_econ.get('marriage'):
+                    p_econ['marriage']['house'] = h_k
+                    p_econ['marriage']['furniture'] = []
+                    p_econ['marriage']['last_house_calc'] = time.time()
+                mark_dirty()
+                bot.answer_callback_query(call.id, f"🎉 Вы приобрели {h_info['name']}! 😻", show_alert=True)
+                render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            return
+
+        elif action_data.startswith('buy_furn_'):
+            f_k = action_data.replace('buy_furn_', '')
+            if f_k in FAMILY_FURNITURE:
+                f_info = FAMILY_FURNITURE[f_k]
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                m = econ.get('marriage')
+                if not m: return
+                furn_list = m.setdefault('furniture', [])
+                if f_k in furn_list:
+                    bot.answer_callback_query(call.id, "❌ Этот предмет мебели уже куплен!", show_alert=True)
+                    return
+                if econ['balance'] < f_info['price']:
+                    bot.answer_callback_query(call.id, f"❌ Нужно {f_info['price']:,} 🪙! 😿", show_alert=True)
+                    return
+                econ['balance'] -= f_info['price']
+                furn_list.append(f_k)
+                p_econ = get_user_econ(m.get('partner_id'))
+                if p_econ.get('marriage'):
+                    p_econ['marriage'].setdefault('furniture', []).append(f_k)
+                mark_dirty()
+                bot.answer_callback_query(call.id, f"🛋 Куплена мебель: {f_info['name']}! 😻", show_alert=True)
+                render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            return
+
+        elif action_data == 'house_refresh':
+            render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            bot.answer_callback_query(call.id, "Статус дома обновлен! 😸")
+            return
+
+        # АПТЕКА: КНОПКИ
+        elif action_data.startswith('buy_med_'):
+            med_k = action_data.replace('buy_med_', '')
+            if med_k in PHARMACY_ITEMS:
+                med = PHARMACY_ITEMS[med_k]
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                if econ['balance'] < med['price']:
+                    bot.answer_callback_query(call.id, f"❌ Нужно {med['price']} 🪙! 😿", show_alert=True)
+                    return
+                econ['balance'] -= med['price']
+                cur_d = econ.get('disease')
+                if med['cure'] == 'all':
+                    econ['disease'] = None
+                    econ['disease_immunity_until'] = time.time() + 86400
+                    bot.answer_callback_query(call.id, "🧪 Панацея Айболита исцелила от всего и дала иммунитет на 24 часа! 😻", show_alert=True)
+                elif cur_d == med['cure']:
+                    econ['disease'] = None
+                    bot.answer_callback_query(call.id, f"✅ Вы выпили лекарство и полностью исцелились от {MEME_DISEASES[cur_d]['name']}! 😸", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, f"💊 Препарат куплен, но у вас другой диагноз! 😸")
+                mark_dirty()
+                render_pharmacy_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            return
+
+        # ХЕЛЛОУИН BATTLE PASS: КНОПКИ
+        elif action_data == 'claim_bp_rewards':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            bp_exp = econ.get('bp_exp', 0)
+            lvl, _, _, _ = get_user_bp_level(bp_exp)
+            is_prem = econ.get('bp_premium', False)
+            claimed_free = econ.setdefault('bp_claimed_free', [])
+            claimed_prem = econ.setdefault('bp_claimed_prem', [])
+
+            free_gains = 0
+            for l in range(1, lvl + 1):
+                if l not in claimed_free:
+                    claimed_free.append(l)
+                    free_gains += 100 * l
+                    if l == 15 and '🎃' not in econ.get('inventory', []):
+                        econ.setdefault('inventory', []).append('🎃')
+                    if l == 30 and 'pumpkin_lord' not in econ.get('titles', []):
+                        econ.setdefault('titles', []).append('pumpkin_lord')
+                        econ['active_title'] = 'pumpkin_lord'
+
+            prem_gains = 0
+            if is_prem:
+                for l in range(1, lvl + 1):
+                    if l not in claimed_prem:
+                        claimed_prem.append(l)
+                        prem_gains += 350 * l
+                        if l == 20:
+                            p_info = PETS_DATA['pumpkin_cat']
+                            econ['pet'] = {'id': 'pumpkin_cat', 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+                        if l == 30:
+                            p_th = econ.setdefault('purchased_themes', ['default'])
+                            if 'halloween' not in p_th: p_th.append('halloween')
+                            econ['profile_theme'] = 'halloween'
+
+            tot_coins = free_gains + prem_gains
+            econ['balance'] += tot_coins
+            mark_dirty()
+            if tot_coins > 0:
+                bot.answer_callback_query(call.id, f"🎉 Награды получены: +{tot_coins:,} 🪙 и трофеи сезона! 😻", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "Все доступные награды уже получены! Повышайте уровень BP. 😸", show_alert=True)
+            render_halloween_bp_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            return
+
+        elif action_data == 'buy_bp_prem_stars':
+            try:
+                bot.send_invoice(
+                    chat_id=chat_id,
+                    title="🎃 Премиум Хеллоуинский Pass",
+                    description="Доступ к премиум-ветке наград: Тыквокот, Тёмная тема, горы коинов!",
+                    invoice_payload=f"bpprem_self:{user_id}:{int(time.time())}",
+                    provider_token="",
+                    currency="XTR",
+                    prices=[LabeledPrice(label="Хеллоуин Pass", amount=2)]
+                )
+                bot.answer_callback_query(call.id, "⭐️ Счёт на 2 ⭐️ выставлен!")
+            except Exception as e:
+                bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            return
+
+        # ИНИЦИАЦИЯ ОПЛАТЫ STARS: ПОДАРОК ДРУГУ
+        elif action_data.startswith('star_gift_'):
+            # format: star_gift_TYPE_KEY_TARGETID
+            parts_g = action_data.split('_')
+            target_id = owner_id if owner_id else int(parts_g[-1])
+            prod_full_key = "_".join(parts_g[2:-1])
+            stars_price = 2
+            prod_title = "Подарок за Звёзды"
+
+            if prod_full_key in STARS_COIN_PACKS:
+                stars_price = STARS_COIN_PACKS[prod_full_key]['stars']
+                prod_title = f"Подарок: {STARS_COIN_PACKS[prod_full_key]['name']}"
+            elif prod_full_key in STARS_VIP_PASS:
+                stars_price = STARS_VIP_PASS[prod_full_key]['stars']
+                prod_title = f"Подарок: {STARS_VIP_PASS[prod_full_key]['name']}"
+            elif prod_full_key in STARS_COSMETICS:
+                stars_price = STARS_COSMETICS[prod_full_key]['stars']
+                prod_title = f"Подарок: {STARS_COSMETICS[prod_full_key]['name']}"
+
+            try:
+                bot.send_invoice(
+                    chat_id=chat_id,
+                    title=prod_title,
+                    description=f"Подарок для пользователя ID:{target_id}",
+                    invoice_payload=f"gift_{prod_full_key}:{target_id}:{user_id}:{int(time.time())}",
+                    provider_token="",
+                    currency="XTR",
+                    prices=[LabeledPrice(label=prod_title, amount=stars_price)]
+                )
+                bot.answer_callback_query(call.id, f"⭐️ Счёт для подарка на {stars_price} ⭐️ выставлен!")
+            except Exception as e:
+                bot.answer_callback_query(call.id, f"❌ Ошибка: {e}", show_alert=True)
+            return
 
         # НАСТРОЙКИ ПРОФИЛЯ
         elif action_data == 'open_profile_settings':
@@ -8343,6 +9457,19 @@ def process_stars_successful_payment(message):
         sp = message.successful_payment
         payload = sp.invoice_payload
         stars_amount = sp.total_amount
+
+        # Telegram can retry delivery of an update. Process each successful
+        # payment only once using its unique charge id.
+        charge_id = getattr(sp, 'telegram_payment_charge_id', None)
+        processed = db.setdefault('processed_stars_charges', [])
+        if charge_id and charge_id in processed:
+            print(f"[STARS] duplicate payment ignored: {charge_id}")
+            return
+        if charge_id:
+            processed.append(charge_id)
+            # Keep the persistent list bounded.
+            if len(processed) > 10000:
+                del processed[:-10000]
         chat_id = message.chat.id
         
         parts = payload.split(':')
@@ -8356,6 +9483,91 @@ def process_stars_successful_payment(message):
         econ['stars_donated'] = econ.get('stars_donated', 0) + stars_amount
         user_link = make_link(chat_id, user_name, buyer_id, ping=True)
         
+                # 0. Проверка на подарок другому человеку
+        is_gift = prod_type_key.startswith('gift_')
+        if is_gift:
+            actual_prod = prod_type_key.replace('gift_', '', 1)
+            target_id = int(parts[1])
+            actual_buyer_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else buyer_id
+
+            target_econ = get_user_econ(user_id=target_id)
+            target_name = target_econ.get('display_name', f"ID:{target_id}")
+            t_link = make_link(chat_id, target_name, target_id, ping=True)
+
+            # Начисление подарка
+            if actual_prod in STARS_COIN_PACKS:
+                pack = STARS_COIN_PACKS[actual_prod]
+                target_econ['balance'] += pack['coins']
+                prod_name = pack['name']
+            elif actual_prod in STARS_VIP_PASS:
+                v_item = STARS_VIP_PASS[actual_prod]
+                days = v_item['days']
+                if days == -1: target_econ['vip_forever'] = True
+                else: target_econ['vip_until'] = max(time.time(), target_econ.get('vip_until', 0)) + (days * 86400)
+                prod_name = v_item['name']
+            elif actual_prod == 'bp_premium':
+                target_econ['bp_premium'] = True
+                prod_name = "🎃 Премиум Хеллоуин Pass"
+            elif actual_prod == 'custom_title':
+                target_econ['has_custom_title_cert'] = True
+                prod_name = "🌟 Сертификат Кастомного Титула"
+            elif actual_prod == 'pet_griffin':
+                p_info = PETS_DATA['vip_griffin']
+                target_econ['pet'] = {'id': 'vip_griffin', 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+                prod_name = p_info['name']
+            elif actual_prod in STARS_COSMETICS:
+                cosm = STARS_COSMETICS[actual_prod]
+                c_type = cosm.get('type')
+                if c_type == 'title_cert':
+                    target_econ['has_custom_title_cert'] = True
+                elif c_type == 'theme':
+                    theme_id = cosm.get('theme_id')
+                    purchased = target_econ.setdefault('purchased_themes', ['default'])
+                    if theme_id and theme_id not in purchased:
+                        purchased.append(theme_id)
+                    if theme_id:
+                        target_econ['profile_theme'] = theme_id
+                elif c_type == 'badge':
+                    badge_emoji = cosm.get('emoji')
+                    if badge_emoji:
+                        inv = target_econ.setdefault('inventory', [])
+                        if badge_emoji not in inv:
+                            inv.append(badge_emoji)
+                        target_econ['badge'] = badge_emoji
+                elif c_type == 'pet':
+                    pet_id = cosm.get('pet_id')
+                    if pet_id in PETS_DATA:
+                        p_info = PETS_DATA[pet_id]
+                        target_econ['pet'] = {'id': pet_id, 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+                prod_name = cosm.get('name', actual_prod)
+            else:
+                # Never silently convert an unknown paid product into coins.
+                print(f"[STARS] unknown gift product: {actual_prod}")
+                prod_name = f"неизвестный товар {actual_prod}"
+
+            mark_dirty()
+            log_event('STARS ПОДАРОК', f'{user_link} подарил {t_link} товар: {prod_name} за {stars_amount} ⭐️!')
+            bot.send_message(
+                chat_id,
+                f"🎁⭐️ <b>РОСКОШНЫЙ ПОДАРОК ЗА ЗВЁЗДЫ!</b> 😻\n"
+                f"──────────────────────\n"
+                f"👤 Щедрый даритель: {user_link}\n"
+                f"🎉 Счастливый получатель: {t_link}\n"
+                f"📦 Подарок: <b>{prod_name}</b> ({stars_amount} ⭐️)!\n"
+                f"──────────────────────\n"
+                f"<i>Огромное спасибо за поддержку сервера и доброту!</i> 😸",
+                parse_mode='HTML'
+            )
+            return
+
+        # Покупка bp_premium себе
+        if prod_type_key.startswith('bpprem_') or prod_type_key == 'cosm_bp_premium':
+            econ['bp_premium'] = True
+            mark_dirty()
+            log_event('STARS BP PREM', f'{user_link} активировал Премиум Хеллоуин Pass!')
+            bot.reply_to(message, f"🎃 <b>ПРЕМИУМ ХЕЛЛОУИН PASS АКТИВИРОВАН!</b> 😻\nТеперь вам доступны все премиум-награды, Тыквокот и Тёмная тема в <code>/pass</code>!", parse_mode='HTML')
+            return
+
         # 1. Покупка пакета коинов
         if prod_type_key.startswith('coinpack_'):
             pack_id = prod_type_key.replace('coinpack_', '')
