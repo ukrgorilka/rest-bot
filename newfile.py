@@ -708,7 +708,10 @@ def load_data():
         'bot_active': True,
         'casino_pool': 1000000,
         'safe': {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []},
-        'daily_memes': []
+        'daily_memes': [],
+        'processed_stars_charges': [],
+        'meme_winners': [],
+        'chest_claims': {}
     }
     try:
         if DB_CHANNEL_ID:
@@ -739,6 +742,12 @@ def load_data():
                     data['safe'] = {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []}
                 if 'daily_memes' not in data:
                     data['daily_memes'] = []
+                if 'processed_stars_charges' not in data:
+                    data['processed_stars_charges'] = []
+                if 'meme_winners' not in data:
+                    data['meme_winners'] = []
+                if 'chest_claims' not in data:
+                    data['chest_claims'] = {}
                 return data
         except Exception as e:
             print(f'Ошибка чтения файла: {e}')
@@ -773,6 +782,10 @@ def auto_save_worker():
     global db_dirty
     while True:
         time.sleep(10)
+        try:
+            finalize_meme_contests()
+        except Exception:
+            pass
         if db_dirty:
             save_data(send_backup=False)
 
@@ -822,6 +835,11 @@ def setup_bot_commands():
         BotCommand('bank', '🏦 Ня-Банк и депозиты (+1% / 6ч)'),
         BotCommand('loan', '💳 Взять кредит в банке'),
         BotCommand('case', '📦 Ежедневный бесплатный кейс'),
+        BotCommand('chest', '🎁 Ежедневный сундук и серия наград'),
+        BotCommand('inventory', '🎒 Коллекция питомцев и косметики'),
+        BotCommand('memes', '📸 Мемы дня и рейтинг'),
+        BotCommand('top_daily', '🏆 Топ активности за сегодня'),
+        BotCommand('top_weekly', '🏆 Топ активности за неделю'),
         BotCommand('lottery', '🎟 Лотерея джекпота'),
         BotCommand('business', '🏢 Бизнесы 2.0 и прокачка'),
         BotCommand('miner', '💻 Криптоферма и майнинг NYA'),
@@ -1113,6 +1131,19 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         mark_dirty()
 
     u_data = db['economy'][key]
+    # Integrity check: старый бесплатный VIP-грифон без подтверждённой Stars-покупки больше не считается действительным.
+    # Если покупка была совершена в старой версии, stars_donated >= 3 позволяет сохранить питомца; новые покупки
+    # всегда получают явный paid_stars_items entitlement.
+    pet_state = u_data.get('pet')
+    if isinstance(pet_state, dict) and pet_state.get('id') == 'vip_griffin':
+        paid_items = u_data.setdefault('paid_stars_items', [])
+        if 'pet_griffin' not in paid_items:
+            if u_data.get('stars_donated', 0) >= 3:
+                paid_items.append('pet_griffin')
+                mark_dirty()
+            else:
+                u_data['pet'] = None
+                mark_dirty()
     if clean_d:
         u_data['display_name'] = clean_d
     if clean_u:
@@ -1136,7 +1167,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('hunt_inventory', {}), ('cooked_meals', 0), ('crypto_portfolio', {}),
         ('last_fish_time', 0), ('last_hunt_time', 0), ('achievements', []),
         ('stats', {}), ('work_exp', 0), ('last_work_time', 0), ('last_train_time', 0),
-        ('pet', None), ('bank_deposit', 0), ('last_bank_calc', time.time()),
+        ('pet', None), ('paid_stars_items', []), ('chest_streak', 0), ('bank_deposit', 0), ('last_bank_calc', time.time()),
         ('last_case_time', 0), ('last_rob_time', 0), ('last_trash_time', 0),
         ('profile_theme', 'default'), ('purchased_themes', ['default']),
         ('profile_font', 'default'), ('purchased_fonts', ['default']),
@@ -4270,7 +4301,7 @@ def cmd_bank(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_bank_view(message.chat.id, message.from_user.id, user_name)
 
-@bot.message_handler(commands=['case', 'кейс', 'сундук'])
+@bot.message_handler(commands=['case', 'кейс', 'сундук', 'chest', 'чест'])
 def cmd_case(message):
     if not can_process_user_message(message):
         return
@@ -4280,6 +4311,8 @@ def cmd_case(message):
 
     now = time.time()
     last_case = econ.get('last_case_time', 0)
+    chest_claims = db.setdefault('chest_claims', {})
+    previous = chest_claims.get(str(user_id), {}).get('date')
     cooldown = 86400
 
     left = cooldown_text(last_case, cooldown, econ)
@@ -4288,6 +4321,10 @@ def cmd_case(message):
         return
 
     econ['last_case_time'] = now
+    today = daily_task_date()
+    yesterday = (now_msk() - timedelta(days=1)).strftime('%Y-%m-%d')
+    econ['chest_streak'] = econ.get('chest_streak', 0) + 1 if previous == yesterday else 1
+    chest_claims[str(user_id)] = {'date': today, 'streak': econ['chest_streak']}
 
     roll = random.random()
     if roll < 0.50:
@@ -4308,6 +4345,10 @@ def cmd_case(message):
         prize_str = f"🏹 Охотничий трофей: <b>{trophy}</b>!"
 
     add_account_exp(user_id, user_name, 20, username=message.from_user.username)
+    if econ.get('chest_streak', 0) >= 3:
+        streak_bonus = min(1000, econ['chest_streak'] * 100)
+        econ['balance'] += streak_bonus
+        prize_str += f"\n🔥 Серия сундуков {econ['chest_streak']} дн.: <b>+{streak_bonus} 🪙</b>"
     check_achievements(user_id, user_name, 'cases_opened', 1, message.chat.id, username=message.from_user.username)
     mark_dirty()
 
@@ -5419,21 +5460,23 @@ def cmd_balance(message):
     bot.reply_to(message, f"💵 <b>Ваш кошелек:</b> <b>{econ['balance']} Ня-коинов 💸</b>\n🏦 <b>В банке:</b> <b>{econ.get('bank_deposit', 0)} 🪙</b>{streak_info} 😺", parse_mode='HTML')
 
 
-@bot.message_handler(commands=['stars', 'donate', 'vip', 'pass', 'донат', 'звезды', 'пасс'])
+@bot.message_handler(commands=['stars', 'donate', 'vip', 'донат', 'звезды', 'пасс'])
 def cmd_stars(message):
     if not can_process_user_message(message):
-        return
-    # Сохраняем старый алиас /pass, но направляем его в Battle Pass,
-    # чтобы два обработчика не конкурировали за одну и ту же команду.
-    command = (message.text or '').split()[0].split('@')[0].lower()
-    if command == '/pass':
-        user_id = message.from_user.id
-        user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-        render_halloween_bp_view(message.chat.id, user_id, user_name)
         return
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_stars_shop(message.chat.id, user_id, user_name, category='main')
+
+
+@bot.message_handler(commands=['inventory','инвентарь','инв'])
+def cmd_inventory(message):
+    if not can_process_user_message(message): return
+    uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ=get_user_econ(uid,name,username=message.from_user.username); pet=econ.get('pet')
+    titles=[TITLES[t]['text'] for t in econ.get('titles',[]) if t in TITLES]
+    lines=['🎒 <b>ИНВЕНТАРЬ И КОЛЛЕКЦИЯ</b>','──────────────────────',f"🐾 Питомец: <b>{pet.get('name')}</b>" if pet else '🐾 Питомец: <i>нет</i>',f"🏅 Значки: {', '.join(map(str,econ.get('inventory',[]))) if econ.get('inventory') else 'нет'}",f"👑 Титулы: {', '.join(titles) if titles else 'нет'}",f"🎨 Темы: {', '.join(econ.get('purchased_themes',['default']))}",f"⭐️ Stars-предметы: {', '.join(econ.get('paid_stars_items',[])) if econ.get('paid_stars_items') else 'нет'}",'──────────────────────','💡 Экипировка доступна через /profile и /shop.']
+    bot.reply_to(message,'\n'.join(lines),parse_mode='HTML')
 
 @bot.message_handler(commands=['shop', 'магазин'])
 def cmd_shop(message):
@@ -5634,6 +5677,27 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
         return
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
     except Exception: pass
+
+
+def render_activity_leaderboard(chat_id, period='day'):
+    key='day_count' if period=='day' else 'week_count'; label='СЕГОДНЯ' if period=='day' else 'ЭТУ НЕДЕЛЮ'
+    items=[]
+    for info in db.get('economy',{}).values():
+        count=info.get('msg_stats',{}).get(key,0)
+        if count>0: items.append((count,info))
+    items.sort(key=lambda x:x[0],reverse=True)
+    lines=[f'🏆 <b>ТОП АКТИВНОСТИ {label}</b>','──────────────────────']
+    for i,(count,info) in enumerate(items[:10],1): lines.append(f"{i}. {make_link(chat_id,info.get('display_name','Пользователь'),info.get('user_id'),ping=False)} — <b>{count} смс</b>")
+    if not items: lines.append('<i>Активности пока нет.</i>')
+    bot.send_message(chat_id,'\n'.join(lines),parse_mode='HTML')
+
+@bot.message_handler(commands=['top_daily','топ_день'])
+def cmd_top_daily(message):
+    if can_process_user_message(message): render_activity_leaderboard(message.chat.id,'day')
+
+@bot.message_handler(commands=['top_weekly','топ_неделя'])
+def cmd_top_weekly(message):
+    if can_process_user_message(message): render_activity_leaderboard(message.chat.id,'week')
 
 @bot.message_handler(commands=['top', 'топ'])
 def cmd_top(message):
@@ -6138,6 +6202,72 @@ def cmd_pet_fight(message):
 # ---------------------------------------------------------
 # БИРЖА КОНТЕНТА И МЕМОДЕЛЬНЯ (/meme)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# МЕМ-КОНКУРС 2.0
+# ---------------------------------------------------------
+def finalize_meme_contests(current_date=None):
+    current_date = current_date or daily_task_date()
+    memes = db.setdefault('daily_memes', [])
+    winners = db.setdefault('meme_winners', [])
+    changed = False
+    # Выбираем одного победителя на чат и дату по score = likes - dislikes.
+    for date in sorted({m.get('date') for m in memes if m.get('date') and m.get('date') < current_date}):
+        chats = sorted({m.get('chat_id') for m in memes if m.get('date') == date})
+        for chat_id in chats:
+            group = [m for m in memes if m.get('date') == date and m.get('chat_id') == chat_id and not m.get('winner_paid')]
+            if not group:
+                continue
+            winner = max(group, key=lambda m: len(m.get('likes', [])) - len(m.get('dislikes', [])))
+            score = len(winner.get('likes', [])) - len(winner.get('dislikes', []))
+            winner['winner_paid'] = True
+            changed = True
+            if score > 0 and winner.get('author_id'):
+                econ = get_user_econ(user_id=winner['author_id'])
+                econ['balance'] = econ.get('balance', 0) + 1500
+                winners.append({'date': date, 'chat_id': chat_id, 'author_id': winner['author_id'], 'score': score, 'reward': 1500})
+                try:
+                    bot.send_message(chat_id, f"🏆 <b>МЕМ ДНЯ!</b> Автор {make_link(chat_id, winner.get('author_name', 'Пользователь'), winner['author_id'], ping=True)} получает <b>+1 500 🪙</b>! 😻", parse_mode='HTML')
+                except Exception: pass
+    if len(memes) > 500:
+        del memes[:-500]
+    if len(winners) > 200:
+        del winners[:-200]
+    if changed: mark_dirty()
+
+def record_meme_vote(meme_id, user_id, is_like):
+    meme = active_memes.get(meme_id)
+    if not meme: return False, 'Мем устарел!'
+    if user_id == meme.get('author_id'): return False, 'Автор не может голосовать за свой мем!'
+    if is_like:
+        if user_id in meme['likes']: meme['likes'].remove(user_id)
+        else:
+            meme['likes'].add(user_id); meme['dislikes'].discard(user_id)
+    else:
+        if user_id in meme['dislikes']: meme['dislikes'].remove(user_id)
+        else:
+            meme['dislikes'].add(user_id); meme['likes'].discard(user_id)
+    for entry in db.setdefault('daily_memes', []):
+        if entry.get('meme_id') == meme_id:
+            entry['likes'] = list(meme['likes']); entry['dislikes'] = list(meme['dislikes']); break
+    mark_dirty()
+    return True, 'Ваш голос учтён! 😸'
+
+@bot.message_handler(commands=['memes', 'мемы'])
+def cmd_memes(message):
+    if not can_process_user_message(message): return
+    finalize_meme_contests()
+    chat_id=message.chat.id; today=daily_task_date()
+    entries=[m for m in db.get('daily_memes',[]) if m.get('chat_id')==chat_id and m.get('date')==today]
+    if not entries:
+        bot.reply_to(message,'📸 <b>Мемов сегодня ещё нет.</b>\nОпубликуйте первый через <code>/meme</code>! 😸',parse_mode='HTML'); return
+    entries.sort(key=lambda m: len(m.get('likes',[]))-len(m.get('dislikes',[])), reverse=True)
+    lines=['📸 <b>МЕМЫ ДНЯ</b>','──────────────────────']
+    for i,m in enumerate(entries[:10],1):
+        score=len(m.get('likes',[]))-len(m.get('dislikes',[]))
+        lines.append(f"{i}. {make_link(chat_id,m.get('author_name','Пользователь'),m.get('author_id'),ping=False)} — 🔥 {len(m.get('likes',[]))} / 💩 {len(m.get('dislikes',[]))} — <b>{score:+d}</b>")
+    lines.append('──────────────────────'); lines.append('🏆 Победитель предыдущего дня получает 1 500 🪙 автоматически.')
+    bot.reply_to(message,'\n'.join(lines),parse_mode='HTML')
+
 @bot.message_handler(commands=['meme', 'мем'])
 def cmd_meme(message):
     if not can_process_user_message(message):
@@ -6151,6 +6281,7 @@ def cmd_meme(message):
         bot.reply_to(message, f"🔒 В КПЗ нельзя публиковать мемы! До выхода: <b>{left_j} мин.</b> 😿", parse_mode='HTML')
         return
 
+    finalize_meme_contests()
     meme_id = f"m_{chat_id}_{message.message_id}"
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -6161,14 +6292,10 @@ def cmd_meme(message):
     u_link = make_link(chat_id, user_name, user_id, ping=False)
     caption_text = f"🎭 <b>МЕМ ЧАТА</b> | Автор: {u_link}\n<i>Голосуйте реакциями ниже! Автор лучшего мема дня получит 1,500 🪙!</i> 😸"
 
-    active_memes[meme_id] = {
-        'author_id': user_id,
-        'author_name': user_name,
-        'chat_id': chat_id,
-        'likes': set(),
-        'dislikes': set(),
-        'date': daily_task_date()
-    }
+    meme_entry = {'meme_id': meme_id, 'author_id': user_id, 'author_name': user_name, 'chat_id': chat_id, 'likes': [], 'dislikes': [], 'date': daily_task_date(), 'winner_paid': False}
+    active_memes[meme_id] = {**meme_entry, 'likes': set(), 'dislikes': set()}
+    db.setdefault('daily_memes', []).append(meme_entry)
+    mark_dirty()
 
     add_bp_exp(user_id, user_name, 10, username=message.from_user.username)
     bot.reply_to(message, caption_text, reply_markup=markup, parse_mode='HTML')
@@ -6707,8 +6834,9 @@ def handle_messages(message):
             econ['balance'] -= fine
             t_econ['balance'] += fine
             change_karma(user_id, user_name, -5)
+            active_wanted[(chat_id, user_id)] = {'name': user_name, 'expire': now + 900, 'reason': 'ограбление'}
             mark_dirty()
-            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            u_link = make_link(chat_id, user_name, user_id)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
             bot.send_message(chat_id, f"🚨🔊 <b>СИГНАЛИЗАЦИЯ СРАБОТАЛА!</b> 🙀\n\n{u_link} попытался проникнуть в карман {t_link}, но сработала <b>Охранная сигнализация</b>!\nВор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы! (Карма -5)", parse_mode='HTML')
             return
@@ -7313,18 +7441,10 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "❌ Мем устарел!", show_alert=True)
                 return
             is_like = action_data.startswith('meme_l_')
-            if is_like:
-                if user_id in meme['likes']:
-                    meme['likes'].remove(user_id)
-                else:
-                    meme['likes'].add(user_id)
-                    meme['dislikes'].discard(user_id)
-            else:
-                if user_id in meme['dislikes']:
-                    meme['dislikes'].remove(user_id)
-                else:
-                    meme['dislikes'].add(user_id)
-                    meme['likes'].discard(user_id)
+            ok_vote, vote_msg = record_meme_vote(meme_id, user_id, is_like)
+            if not ok_vote:
+                bot.answer_callback_query(call.id, vote_msg, show_alert=True)
+                return
             markup = InlineKeyboardMarkup()
             markup.add(
                 InlineKeyboardButton(f"🔥 {len(meme['likes'])}", callback_data=f"meme_l_{meme_id}"),
@@ -7429,6 +7549,11 @@ def callback_inline(call):
                 if l not in claimed_free:
                     claimed_free.append(l)
                     free_gains += 100 * l
+                    milestone_free = {5: '🎃 Маленький фонарь', 10: '🕸 Паутинка', 25: '🦇 Летучая мышь'}
+                    if l in milestone_free:
+                        econ.setdefault('inventory', [])
+                        if milestone_free[l] not in econ['inventory']:
+                            econ['inventory'].append(milestone_free[l])
                     if l == 15 and '🎃' not in econ.get('inventory', []):
                         econ.setdefault('inventory', []).append('🎃')
                     if l == 30 and 'pumpkin_lord' not in econ.get('titles', []):
@@ -7441,6 +7566,10 @@ def callback_inline(call):
                     if l not in claimed_prem:
                         claimed_prem.append(l)
                         prem_gains += 350 * l
+                        if l == 10:
+                            econ.setdefault('inventory', [])
+                            if '🎃 Премиум-тыква' not in econ['inventory']:
+                                econ['inventory'].append('🎃 Премиум-тыква')
                         if l == 20:
                             p_info = PETS_DATA['pumpkin_cat']
                             econ['pet'] = {'id': 'pumpkin_cat', 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
@@ -9391,10 +9520,16 @@ def callback_inline(call):
             if pet_id in PETS_DATA:
                 p_data = PETS_DATA[pet_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ['balance'] < p_data['price']:
-                    bot.answer_callback_query(call.id, f"❌ Нужно {p_data['price']} 🪙! 😿", show_alert=True)
-                    return
-                econ['balance'] -= p_data['price']
+                if pet_id == 'vip_griffin':
+                    # Грифон — Stars-only. Нулевой price в каталоге никогда не означает бесплатную выдачу.
+                    if 'pet_griffin' not in econ.setdefault('paid_stars_items', []):
+                        bot.answer_callback_query(call.id, "❌ Королевский Грифон доступен только после успешной оплаты 3 ⭐️ в Stars-магазине.", show_alert=True)
+                        return
+                else:
+                    if econ['balance'] < p_data['price']:
+                        bot.answer_callback_query(call.id, f"❌ Нужно {p_data['price']} 🪙! 😿", show_alert=True)
+                        return
+                    econ['balance'] -= p_data['price']
                 econ['pet'] = {'id': pet_id, 'name': p_data['name'], 'luck_bonus': p_data['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🎉 Вы завели питомца {p_data['name']}! 😻", show_alert=True)
@@ -9444,12 +9579,56 @@ def callback_inline(call):
 # ---------------------------------------------------------
 # ОБРАБОТЧИКИ ОПЛАТЫ TELEGRAM STARS (PRE-CHECKOUT & SUCCESS)
 # ---------------------------------------------------------
+def validate_stars_payload(payload, amount, buyer_id):
+    try:
+        parts = str(payload or '').split(':')
+        key = parts[0]
+        expected = None
+        payload_buyer = None
+        if key.startswith('coinpack_'):
+            item = STARS_COIN_PACKS.get(key.replace('coinpack_', ''))
+            expected = item.get('stars') if item else None
+            payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        elif key.startswith('vippass_'):
+            item = STARS_VIP_PASS.get(key.replace('vippass_', ''))
+            expected = item.get('stars') if item else None
+            payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        elif key.startswith('cosm_'):
+            item = STARS_COSMETICS.get(key.replace('cosm_', ''))
+            expected = item.get('stars') if item else None
+            payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        elif key.startswith('bpprem_'):
+            expected = 2
+            payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        elif key.startswith('gift_'):
+            actual = key.replace('gift_', '', 1)
+            if actual.startswith('coins_'):
+                item = STARS_COIN_PACKS.get(actual)
+            elif actual.startswith('pass_'):
+                item = STARS_VIP_PASS.get(actual)
+            else:
+                item = STARS_COSMETICS.get(actual)
+            expected = item.get('stars') if item else None
+            payload_buyer = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+        else:
+            return False, 'Неизвестный товар.'
+        if expected is None or int(amount) != int(expected):
+            return False, 'Неверная сумма товара.'
+        if payload_buyer is not None and int(payload_buyer) != int(buyer_id):
+            return False, 'Плательщик не совпадает с владельцем счёта.'
+        return True, ''
+    except Exception:
+        return False, 'Некорректный платёжный payload.'
+
 @bot.pre_checkout_query_handler(func=lambda query: True)
 def process_stars_pre_checkout(pre_checkout_query):
     try:
-        bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+        ok, reason = validate_stars_payload(pre_checkout_query.invoice_payload, pre_checkout_query.total_amount, pre_checkout_query.from_user.id)
+        bot.answer_pre_checkout_query(pre_checkout_query.id, ok=ok, error_message=None if ok else reason)
     except Exception as e:
         print(f"[PRE-CHECKOUT ERROR] {e}")
+        try: bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message='Платёж не прошёл проверку.')
+        except Exception: pass
 
 @bot.message_handler(content_types=['successful_payment'])
 def process_stars_successful_payment(message):
@@ -9457,6 +9636,11 @@ def process_stars_successful_payment(message):
         sp = message.successful_payment
         payload = sp.invoice_payload
         stars_amount = sp.total_amount
+
+        ok, reason = validate_stars_payload(payload, stars_amount, message.from_user.id)
+        if not ok:
+            print(f"[STARS SECURITY] rejected payment: {reason}; payload={payload!r}")
+            return
 
         # Telegram can retry delivery of an update. Process each successful
         # payment only once using its unique charge id.
@@ -9513,6 +9697,9 @@ def process_stars_successful_payment(message):
                 prod_name = "🌟 Сертификат Кастомного Титула"
             elif actual_prod == 'pet_griffin':
                 p_info = PETS_DATA['vip_griffin']
+                target_econ.setdefault('paid_stars_items', [])
+                if 'pet_griffin' not in target_econ['paid_stars_items']:
+                    target_econ['paid_stars_items'].append('pet_griffin')
                 target_econ['pet'] = {'id': 'vip_griffin', 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
                 prod_name = p_info['name']
             elif actual_prod in STARS_COSMETICS:
@@ -9537,6 +9724,9 @@ def process_stars_successful_payment(message):
                 elif c_type == 'pet':
                     pet_id = cosm.get('pet_id')
                     if pet_id in PETS_DATA:
+                        target_econ.setdefault('paid_stars_items', [])
+                        if actual_prod not in target_econ['paid_stars_items']:
+                            target_econ['paid_stars_items'].append(actual_prod)
                         p_info = PETS_DATA[pet_id]
                         target_econ['pet'] = {'id': pet_id, 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
                 prod_name = cosm.get('name', actual_prod)
@@ -9563,6 +9753,9 @@ def process_stars_successful_payment(message):
         # Покупка bp_premium себе
         if prod_type_key.startswith('bpprem_') or prod_type_key == 'cosm_bp_premium':
             econ['bp_premium'] = True
+            econ.setdefault('paid_stars_items', [])
+            if 'bp_premium' not in econ['paid_stars_items']:
+                econ['paid_stars_items'].append('bp_premium')
             mark_dirty()
             log_event('STARS BP PREM', f'{user_link} активировал Премиум Хеллоуин Pass!')
             bot.reply_to(message, f"🎃 <b>ПРЕМИУМ ХЕЛЛОУИН PASS АКТИВИРОВАН!</b> 😻\nТеперь вам доступны все премиум-награды, Тыквокот и Тёмная тема в <code>/pass</code>!", parse_mode='HTML')
@@ -9684,6 +9877,9 @@ def process_stars_successful_payment(message):
                     return
                 elif c_type == 'pet':
                     pet_id = cosm['pet_id']
+                    econ.setdefault('paid_stars_items', [])
+                    if cosm_id not in econ['paid_stars_items']:
+                        econ['paid_stars_items'].append(cosm_id)
                     p_info = PETS_DATA[pet_id]
                     econ['pet'] = {
                         'id': pet_id,
