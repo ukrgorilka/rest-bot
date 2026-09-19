@@ -1008,6 +1008,7 @@ def update_pet_stats(pet):
         pet['hunger'] = max(0, pet.get('hunger', 100) - int(hours_passed * 4))
         pet['cleanliness'] = max(0, pet.get('cleanliness', 100) - int(hours_passed * 3))
         pet['last_update'] = now
+        mark_dirty()
 
 def update_bank_interest(econ):
     bank_dep = econ.get('bank_deposit', 0)
@@ -1066,9 +1067,15 @@ def merge_user_econ_data(dest, src):
     if src.get('has_custom_title_cert'):
         dest['has_custom_title_cert'] = True
 
-    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts', 'achievements']:
+    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts', 'achievements', 'paid_stars_items']:
         combined = list(dict.fromkeys(dest.get(list_field, []) + src.get(list_field, [])))
         dest[list_field] = combined
+
+    # Одноразовые Stars-энтитлменты тоже обязаны переживать объединение
+    # старого tag_аккаунта с новым id_аккаунтом.
+    for bool_field in ['bp_premium', 'has_custom_title_cert', 'vip_forever']:
+        if src.get(bool_field):
+            dest[bool_field] = True
 
     for dict_field in ['fish_inventory', 'hunt_inventory']:
         dest_dict = dest.setdefault(dict_field, {})
@@ -1208,6 +1215,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         u_data['daily_casino_win'] = 0
         u_data['daily_casino_profit'] = 0
         u_data['daily_transferred'] = 0
+        mark_dirty()
 
     update_bank_interest(u_data)
 
@@ -2513,7 +2521,7 @@ def cmd_brick(message):
     econ['balance'] -= bet
     process_casino_bet(bet, chat_id)
     
-    game_id = f"brick_{user_id}_{int(time.time())}"
+    game_id = f"brick_{user_id}_{time.time_ns()}"
     active_brick[game_id] = {
         'user_id': user_id,
         'user_name': user_name,
@@ -2620,7 +2628,7 @@ def cmd_crash(message):
     econ['balance'] -= bet
     process_casino_bet(bet, chat_id)
 
-    game_id = f"cr_{user_id}_{int(time.time())}"
+    game_id = f"cr_{user_id}_{time.time_ns()}"
     
     r = random.random()
     pool = db.get('casino_pool', 1000000)
@@ -3354,7 +3362,7 @@ def cmd_mines(message):
     econ['balance'] -= bet
     process_casino_bet(bet, chat_id)
 
-    game_id = f"m_{user_id}_{int(time.time())}"
+    game_id = f"m_{user_id}_{time.time_ns()}"
     active_mines[game_id] = {
         'user_id': user_id,
         'user_tag': user_name,
@@ -5194,7 +5202,7 @@ def process_bj_game(message, bet):
     econ['balance'] -= bet
     process_casino_bet(bet, chat_id)
 
-    game_id = f"bj_{user_id}_{int(time.time())}"
+    game_id = f"bj_{user_id}_{time.time_ns()}"
     deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4
     random.shuffle(deck)
 
@@ -5269,7 +5277,7 @@ def cmd_rps(message):
     target_econ['balance'] -= bet
     mark_dirty()
 
-    game_id = f"rps_{user_id}_{target_user_id}_{int(time.time())}"
+    game_id = f"rps_{user_id}_{target_user_id}_{time.time_ns()}"
     active_rps_games[game_id] = {
         'p1_id': user_id, 'p1_tag': user_name,
         'p2_id': target_user_id, 'p2_tag': target_user,
@@ -6532,13 +6540,15 @@ def cmd_gift_stars(message):
 
     t_link = make_link(chat_id, target_user, target_user_id, ping=False)
     markup = InlineKeyboardMarkup(row_width=1)
+    # Новый формат callback: gift2|тип|товар|получатель|плательщик.
+    # Никакого split по '_' — названия товаров могут содержать подчёркивания.
     markup.add(
-        InlineKeyboardButton("💰 Подарить 100к коинов (3 ⭐️)", callback_data=f"star_gift_coins_coins_3_stars_{target_user_id}:{user_id}"),
-        InlineKeyboardButton("💳 Подарить 500к коинов (10 ⭐️)", callback_data=f"star_gift_coins_coins_10_stars_{target_user_id}:{user_id}"),
-        InlineKeyboardButton("👑 Подарить VIP Pass на месяц (3 ⭐️)", callback_data=f"star_gift_pass_pass_30_days_{target_user_id}:{user_id}"),
-        InlineKeyboardButton("🎃 Подарить Хеллоуин Pass (2 ⭐️)", callback_data=f"star_gift_cosm_bp_premium_{target_user_id}:{user_id}"),
-        InlineKeyboardButton("🌟 Подарить Кастомный Титул (2 ⭐️)", callback_data=f"star_gift_cosm_custom_title_{target_user_id}:{user_id}"),
-        InlineKeyboardButton("🐱 Подарить Королевского Грифона (3 ⭐️)", callback_data=f"star_gift_cosm_pet_griffin_{target_user_id}:{user_id}")
+        InlineKeyboardButton("💰 Подарить 100к коинов (3 ⭐️)", callback_data=f"gift2|coins|coins_3_stars|{target_user_id}|{user_id}"),
+        InlineKeyboardButton("💳 Подарить 500к коинов (10 ⭐️)", callback_data=f"gift2|coins|coins_10_stars|{target_user_id}|{user_id}"),
+        InlineKeyboardButton("👑 Подарить VIP Pass на месяц (3 ⭐️)", callback_data=f"gift2|pass|pass_30_days|{target_user_id}|{user_id}"),
+        InlineKeyboardButton("🎃 Подарить Хеллоуин Pass (2 ⭐️)", callback_data=f"gift2|cosm|bp_premium|{target_user_id}|{user_id}"),
+        InlineKeyboardButton("🌟 Подарить Кастомный Титул (2 ⭐️)", callback_data=f"gift2|cosm|custom_title|{target_user_id}|{user_id}"),
+        InlineKeyboardButton("🐱 Подарить Королевского Грифона (3 ⭐️)", callback_data=f"gift2|cosm|pet_griffin|{target_user_id}|{user_id}")
     )
 
     bot.reply_to(
@@ -7932,23 +7942,20 @@ def callback_inline(call):
             return
 
         # ИНИЦИАЦИЯ ПОДАРКА TELEGRAM STARS ДРУГУ
-        # callback: star_gift_<kind>_<item_key>_<target_id>:<buyer_id>
-        elif action_data.startswith('star_gift_'):
-            gift_data = action_data[len('star_gift_'):]
+        # Новый callback: gift2|kind|item_key|target_id|buyer_id
+        elif action_data.startswith('gift2|'):
             try:
-                left, buyer_part = gift_data.rsplit(':', 1)
-                buyer_id = int(buyer_part)
-                gift_parts = left.split('_')
-                if len(gift_parts) < 3:
-                    raise ValueError('short payload')
-                gift_kind = gift_parts[0]
-                target_id = int(gift_parts[-1])
-                item_key = '_'.join(gift_parts[1:-1])
+                parts_cb = action_data.split('|')
+                if len(parts_cb) != 5 or parts_cb[0] != 'gift2':
+                    raise ValueError('invalid gift callback')
+                gift_kind = parts_cb[1]
+                item_key = parts_cb[2]
+                target_id = int(parts_cb[3])
+                buyer_id = int(parts_cb[4])
             except (TypeError, ValueError):
                 bot.answer_callback_query(call.id, "❌ Некорректный подарок!", show_alert=True)
                 return
 
-            # Кнопку может подтвердить только тот, кто её открыл/создал.
             if buyer_id != user_id or (owner_id and owner_id != user_id):
                 bot.answer_callback_query(call.id, "❌ Этот подарок может оформить только его отправитель!", show_alert=True)
                 return
@@ -7956,36 +7963,43 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "❌ Нельзя подарить товар самому себе. Используйте /stars!", show_alert=True)
                 return
 
-            if gift_kind == 'coins':
-                item = STARS_COIN_PACKS.get(item_key)
-            elif gift_kind == 'pass':
-                item = STARS_VIP_PASS.get(item_key)
-            elif gift_kind == 'cosm':
-                item = STARS_COSMETICS.get(item_key)
-            else:
-                item = None
-
+            catalogs = {'coins': STARS_COIN_PACKS, 'pass': STARS_VIP_PASS, 'cosm': STARS_COSMETICS}
+            item = catalogs.get(gift_kind, {}).get(item_key)
+            # Спец-подарки, которые могут существовать вне STARS_COSMETICS.
+            if gift_kind == 'cosm' and item is None and item_key == 'bp_premium':
+                item = {'name': '🎃 Премиум Хеллоуин Pass', 'stars': 2}
+            if gift_kind == 'cosm' and item is None and item_key == 'custom_title':
+                item = {'name': '🌟 Сертификат Кастомного Титула', 'stars': 2}
+            if gift_kind == 'cosm' and item is None and item_key == 'pet_griffin':
+                item = {'name': '🐱 Королевский Грифон', 'stars': 3}
             if not item:
                 bot.answer_callback_query(call.id, "❌ Товар подарка не найден!", show_alert=True)
                 return
 
             target_econ = get_user_econ(user_id=target_id)
+            owned_error = None
             if gift_kind == 'pass':
                 owned_error = stars_purchase_error(target_econ, 'vippass', item_key)
             elif gift_kind == 'cosm':
-                owned_error = stars_purchase_error(target_econ, 'cosm', item_key)
-            else:
-                owned_error = None
+                if item_key == 'bp_premium' and target_econ.get('bp_premium'):
+                    owned_error = 'У получателя уже есть Премиум Pass.'
+                elif item_key == 'custom_title' and target_econ.get('has_custom_title_cert'):
+                    owned_error = 'У получателя уже есть сертификат титула.'
+                elif item_key == 'pet_griffin' and 'pet_griffin' in target_econ.get('paid_stars_items', []):
+                    owned_error = 'У получателя уже есть Королевский Грифон.'
+                elif item_key in STARS_COSMETICS:
+                    owned_error = stars_purchase_error(target_econ, 'cosm', item_key)
             if owned_error:
-                bot.answer_callback_query(call.id, "❌ Получатель уже владеет этим товаром.", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ " + owned_error.replace('❌ ', ''), show_alert=True)
                 return
 
             try:
+                payload = f"gift2|{gift_kind}|{item_key}|{target_id}|{buyer_id}"
                 bot.send_invoice(
                     chat_id=chat_id,
                     title=f"🎁 Подарок: {item['name']}",
                     description=f"Подарок для пользователя ID:{target_id}",
-                    invoice_payload=f"gift_{item_key}:{target_id}:{buyer_id}",
+                    invoice_payload=payload,
                     provider_token="",
                     currency="XTR",
                     prices=[LabeledPrice(label=item['name'], amount=item['stars'])]
@@ -8202,7 +8216,7 @@ def callback_inline(call):
                 econ['balance'] -= bet
                 mark_dirty()
 
-            game_id = f"durak_{user_id}_{int(time.time())}"
+            game_id = f"durak_{user_id}_{time.time_ns()}"
             deck = create_durak_deck()
             trump_card = deck[0]
             trump_suit = trump_card['suit']
@@ -8981,7 +8995,7 @@ def callback_inline(call):
                 d_info = CSAPER_DIFFICULTIES[diff_key]
                 cols = d_info.get('cols', 5)
                 rows = d_info.get('rows', 5)
-                game_id = f"cm_{user_id}_{int(time.time())}"
+                game_id = f"cm_{user_id}_{time.time_ns()}"
                 active_c_mines[game_id] = {
                     'user_id': user_id,
                     'user_name': user_name,
@@ -9870,7 +9884,44 @@ def callback_inline(call):
 # ---------------------------------------------------------
 def validate_stars_payload(payload, amount, buyer_id):
     try:
-        parts = str(payload or '').split(':')
+        raw_payload = str(payload or '')
+        if raw_payload.startswith('gift2|'):
+            g = raw_payload.split('|')
+            if len(g) != 5:
+                return False, 'Некорректный подарочный payload.'
+            _, gift_kind, item_key, target_raw, payload_buyer_raw = g
+            catalogs = {'coins': STARS_COIN_PACKS, 'pass': STARS_VIP_PASS, 'cosm': STARS_COSMETICS}
+            item = catalogs.get(gift_kind, {}).get(item_key)
+            if gift_kind == 'cosm' and item is None:
+                special = {'bp_premium': ('🎃 Премиум Хеллоуин Pass', 2), 'custom_title': ('🌟 Сертификат Кастомного Титула', 2), 'pet_griffin': ('🐱 Королевский Грифон', 3)}
+                if item_key in special:
+                    n, st = special[item_key]; item = {'name': n, 'stars': st}
+            if not item:
+                return False, 'Товар подарка не найден.'
+            if int(amount) != int(item['stars']):
+                return False, 'Неверная сумма товара.'
+            try:
+                target_id = int(target_raw); payload_buyer = int(payload_buyer_raw)
+            except ValueError:
+                return False, 'Некорректный пользователь в подарке.'
+            if payload_buyer != int(buyer_id):
+                return False, 'Плательщик не совпадает с владельцем счёта.'
+            if target_id == payload_buyer:
+                return False, 'Нельзя подарить товар самому себе.'
+            target_econ = get_user_econ(user_id=target_id)
+            if gift_kind == 'pass':
+                err = stars_purchase_error(target_econ, 'vippass', item_key)
+                if err: return False, 'Получатель уже владеет этим VIP.'
+            elif gift_kind == 'cosm':
+                if item_key == 'bp_premium' and target_econ.get('bp_premium'): return False, 'Получатель уже владеет Премиум Pass.'
+                if item_key == 'custom_title' and target_econ.get('has_custom_title_cert'): return False, 'Получатель уже владеет сертификатом.'
+                if item_key == 'pet_griffin' and 'pet_griffin' in target_econ.get('paid_stars_items', []): return False, 'Получатель уже владеет Грифоном.'
+                if item_key in STARS_COSMETICS:
+                    err = stars_purchase_error(target_econ, 'cosm', item_key)
+                    if err: return False, 'Получатель уже владеет этим Stars-предметом.'
+            return True, ''
+
+        parts = raw_payload.split(':')
         key = parts[0]
         expected = None
         payload_buyer = None
@@ -9889,17 +9940,25 @@ def validate_stars_payload(payload, amount, buyer_id):
         elif key.startswith('bpprem_'):
             expected = 2
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
-        elif key.startswith('gift_'):
-            actual = key.replace('gift_', '', 1)
-            if actual.startswith('coins_'):
-                item = STARS_COIN_PACKS.get(actual)
-            elif actual.startswith('pass_'):
-                item = STARS_VIP_PASS.get(actual)
-            else:
-                item = STARS_COSMETICS.get(actual)
+            # Не разрешаем даже выставлять новый счёт за вечный Pass, если он уже есть.
+            if payload_buyer is not None:
+                buyer_econ = get_user_econ(user_id=payload_buyer)
+                if buyer_econ.get('bp_premium'):
+                    return False, 'Премиум Pass уже куплен.'
+        elif key.startswith('gift2:'):
+            g = key.split(':')
+            if len(g) != 5:
+                return False, 'Некорректный подарочный payload.'
+            _, gift_kind, item_key, target_raw, buyer_raw = g
+            catalogs = {'coins': STARS_COIN_PACKS, 'pass': STARS_VIP_PASS, 'cosm': STARS_COSMETICS}
+            item = catalogs.get(gift_kind, {}).get(item_key)
+            if gift_kind == 'cosm' and item is None:
+                special = {'bp_premium': ('🎃 Премиум Хеллоуин Pass', 2), 'custom_title': ('🌟 Сертификат Кастомного Титула', 2), 'pet_griffin': ('🐱 Королевский Грифон', 3)}
+                if item_key in special:
+                    n, st = special[item_key]; item = {'name': n, 'stars': st}
             expected = item.get('stars') if item else None
-            target_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
-            payload_buyer = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+            target_id = int(target_raw) if target_raw.isdigit() else None
+            payload_buyer = int(buyer_raw) if buyer_raw.isdigit() else None
         else:
             return False, 'Неизвестный товар.'
         if expected is None or int(amount) != int(expected):
@@ -9919,7 +9978,7 @@ def validate_stars_payload(payload, amount, buyer_id):
             err = stars_purchase_error(buyer_econ, 'cosm', item_key)
             if err:
                 return False, err.replace('❌ ', '')
-        elif key.startswith('gift_') and target_id:
+        elif key.startswith('gift2:') and target_id:
             # Для подарков проверяем владение именно получателя.
             target_econ = get_user_econ(user_id=target_id)
             if actual.startswith('pass_'):
@@ -9977,9 +10036,13 @@ def process_stars_successful_payment(message):
         
         parts = payload.split(':')
         prod_type_key = parts[0]
-        # Для обычной покупки parts[1] — покупатель. Для подарка
-        # parts[1] — получатель, а parts[2] — реальный плательщик.
-        if prod_type_key.startswith('gift_'):
+        if payload.startswith('gift2|'):
+            gift_parts = payload.split('|')
+            if len(gift_parts) != 5:
+                print(f'[STARS SECURITY] malformed gift2 payload: {payload!r}')
+                return
+            buyer_id = int(gift_parts[4])
+        elif prod_type_key.startswith('gift_'):
             buyer_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else message.from_user.id
         else:
             buyer_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.from_user.id
@@ -10012,11 +10075,18 @@ def process_stars_successful_payment(message):
         econ['stars_donated'] = econ.get('stars_donated', 0) + stars_amount
 
         # 0. Проверка на подарок другому человеку
-        is_gift = prod_type_key.startswith('gift_')
+        is_gift = payload.startswith('gift2|') or prod_type_key.startswith('gift_')
         if is_gift:
-            actual_prod = prod_type_key.replace('gift_', '', 1)
-            target_id = int(parts[1])
-            actual_buyer_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else buyer_id
+            if payload.startswith('gift2|'):
+                gift_parts = payload.split('|')
+                _, gift_kind, actual_prod, target_raw, actual_buyer_raw = gift_parts
+            else:
+                gift_kind = None
+                actual_prod = prod_type_key.replace('gift_', '', 1)
+                target_raw = parts[1]
+                actual_buyer_raw = parts[2] if len(parts) > 2 else str(buyer_id)
+            target_id = int(target_raw)
+            actual_buyer_id = int(actual_buyer_raw)
 
             target_econ = get_user_econ(user_id=target_id)
             target_name = target_econ.get('display_name', f"ID:{target_id}")
