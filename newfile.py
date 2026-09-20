@@ -4256,10 +4256,17 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
 
     if message_id:
         try:
-            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+            bot.edit_message_text(
+                text,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
             return
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-    bot.send_message(chat_id, text, parse_mode='HTML')
+        except Exception as e:
+            print(f"[NONFATAL ERROR] {e}")
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['backpack', 'рюкзак', 'инвентарь_баффов'])
 def cmd_backpack(message):
@@ -4704,6 +4711,27 @@ def sync_durak_pm(game_id):
                 sent = bot.send_message(u_id, text_msg, reply_markup=markup, parse_mode='HTML')
                 p['pm_msg_id'] = sent.message_id
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
+
+def refresh_durak_group_board(game_id):
+    """Обновляет именно групповое сообщение Дурака, даже когда callback пришёл из ЛС."""
+    game = active_durak.get(game_id)
+    if not game:
+        return
+    group_chat_id = game.get('chat_id')
+    group_msg_id = game.get('msg_id')
+    if not group_chat_id or not group_msg_id:
+        return
+    text, markup = render_durak_board(game_id)
+    try:
+        bot.edit_message_text(
+            text,
+            chat_id=group_chat_id,
+            message_id=group_msg_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        print(f"[NONFATAL ERROR] Не удалось обновить стол Дурака: {e}")
 
 def render_durak_board(game_id, viewer_id=None):
     game = active_durak.get(game_id)
@@ -9713,7 +9741,7 @@ def callback_inline(call):
 
             if mode_num == 1:
                 bet = 0  # Против бота игра без ставок (множитель 2х отключен)
-                p_human = {'id': user_id, 'name': user_name, 'hand': []}
+                p_human = {'id': user_id, 'name': user_name, 'hand': [], 'pm_msg_id': None}
                 p_bot = {'id': 'bot', 'name': '🤖 Ня-Бот', 'hand': []}
                 players = [p_human, p_bot]
                 game = {
@@ -9805,9 +9833,9 @@ def callback_inline(call):
                 game['status_text'] = f"Все игроки в сборе! Ходит {game['players'][0]['name']}! Карты розданы в ЛС."
                 sync_durak_pm(game_id)
 
-            text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            game['chat_id'] = chat_id
+            game['msg_id'] = call.message.message_id
+            refresh_durak_group_board(game_id)
             bot.answer_callback_query(call.id, "✅ Вы успешно сели за игровой стол! Карты придут в ЛС! 😸")
 
         # ДУРАК: ХОД КАРТОЙ
@@ -9903,16 +9931,12 @@ def callback_inline(call):
                         win_text += f"💰 Победители разделили банк: <b>+{split_win} 🪙</b> каждому!"
 
                 game['status_text'] = win_text
-                text, markup = render_durak_board(game_id, viewer_id=user_id)
-                try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
-                except Exception as e: print(f"[NONFATAL ERROR] {e}")
+                refresh_durak_group_board(game_id)
                 sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
                 return
 
-            text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            refresh_durak_group_board(game_id)
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
@@ -9941,9 +9965,7 @@ def callback_inline(call):
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
 
-            text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            refresh_durak_group_board(game_id)
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
@@ -9962,9 +9984,7 @@ def callback_inline(call):
             if game['target_players'] == 2 and game['players'][1]['id'] == 'bot':
                 durak_bot_turn(game)
 
-            text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            refresh_durak_group_board(game_id)
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
 
