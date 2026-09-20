@@ -59,7 +59,7 @@ PREMIUM_EMOJI_IDS = {
     # Набор 1 — 29 эмодзи
     "face_01": "5276337181055533947",
     "face_02": "530757646769193020",
-    "face_03": "5328170176173918",
+    "face_03": "5328171071176713918",
     "face_04": "532809826289112273",
     "face_05": "5325799368761027493",
     "face_06": "5328205125972403196",
@@ -136,17 +136,53 @@ PREMIUM_EMOJI_ALIASES = {
 }
 
 
-def premium_emoji(name, fallback="✨"):
-    """Возвращает Telegram Custom Emoji в HTML-формате.
+PREMIUM_EMOJI_ALTS = {}
+PREMIUM_EMOJI_METADATA_LOADED = False
+PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
 
-    Функция безопасна для старого интерфейса: если имя/ID не найден,
-    возвращается обычный fallback-эмодзи.
+
+def load_premium_emoji_metadata():
+    """Получает правильный emoji-alt для каждого custom_emoji_id через Bot API.
+
+    Telegram требует валидный альтернативный emoji внутри <tg-emoji>. Поэтому
+    не полагаемся на случайный fallback вроде 💰 для ID, который на самом деле
+    связан с другим emoji. Если Bot API временно недоступен, просто оставляем
+    обычные emoji — это не ломает команды и профиль.
     """
+    global PREMIUM_EMOJI_METADATA_LOADED
+    if PREMIUM_EMOJI_METADATA_LOADED:
+        return
+    with PREMIUM_EMOJI_METADATA_LOCK:
+        if PREMIUM_EMOJI_METADATA_LOADED:
+            return
+        try:
+            ids = list(dict.fromkeys(str(v) for v in PREMIUM_EMOJI_IDS.values() if v))
+            if hasattr(bot, 'get_custom_emoji_stickers') and ids:
+                stickers = bot.get_custom_emoji_stickers(ids)
+                for sticker in stickers or []:
+                    cid = getattr(sticker, 'custom_emoji_id', None)
+                    alt = getattr(sticker, 'emoji', None)
+                    if cid and alt:
+                        PREMIUM_EMOJI_ALTS[str(cid)] = str(alt)
+                print(f"[PREMIUM EMOJI] Загружено alt-emoji: {len(PREMIUM_EMOJI_ALTS)}/{len(ids)}")
+        except Exception as e:
+            print(f"[PREMIUM EMOJI] Не удалось получить метаданные: {e}")
+        finally:
+            # Не повторяем сетевой запрос на каждом сообщении при временной ошибке.
+            PREMIUM_EMOJI_METADATA_LOADED = True
+
+
+def premium_emoji(name, fallback="✨"):
+    """Возвращает Telegram Custom Emoji в HTML-формате с корректным alt."""
     key = PREMIUM_EMOJI_ALIASES.get(name, name)
     emoji_id = PREMIUM_EMOJI_IDS.get(key)
     if not emoji_id:
         return fallback
-    return f'<tg-emoji emoji-id="{html.escape(str(emoji_id))}">{html.escape(fallback)}</tg-emoji>'
+
+    # Метаданные загружаются лениво после создания bot.
+    load_premium_emoji_metadata()
+    alt = PREMIUM_EMOJI_ALTS.get(str(emoji_id), fallback)
+    return f'<tg-emoji emoji-id="{html.escape(str(emoji_id))}">{html.escape(str(alt))}</tg-emoji>'
 
 
 def premium_emoji_id(name):
@@ -180,13 +216,42 @@ GLOBAL_PREMIUM_EMOJI_MAP = {
     "🍖": "face_27", "🧼": "face_28", "🦮": "face_29",
 }
 
-def apply_global_premium_emojis(text):
-    """Заменяет обычные UI-эмодзи на Custom Emoji во всех HTML-сообщениях бота."""
+def format_large_numbers(text):
+    """Форматирует обычные целые числа в сообщениях: 1000000 -> 1,000,000.
+
+    HTML-теги и их атрибуты не трогаем, чтобы не испортить custom emoji ID,
+    ссылки tg://user и прочие идентификаторы. Годы 1900-2099 оставляем без запятых.
+    """
     if not isinstance(text, str) or not text:
         return text
 
-    # Уже созданные <tg-emoji>...</tg-emoji> временно защищаем, иначе
-    # глобальная замена повторно обработает fallback-emoji внутри тега.
+    parts = re.split(r'(<[^>]+>)', text)
+    number_re = re.compile(r'(?<![\d,.])\d{4,}(?![\d,.])')
+
+    def repl(match):
+        raw = match.group(0)
+        if len(raw) == 4 and raw.isdigit() and 1900 <= int(raw) <= 2099:
+            return raw
+        try:
+            return f"{int(raw):,}"
+        except (TypeError, ValueError):
+            return raw
+
+    for i, part in enumerate(parts):
+        if not (part.startswith('<') and part.endswith('>')):
+            parts[i] = number_re.sub(repl, part)
+    return ''.join(parts)
+
+
+def apply_global_premium_emojis(text):
+    """Заменяет UI-эмодзи на Custom Emoji в HTML-сообщениях."""
+    if not isinstance(text, str) or not text:
+        return text
+
+    # Сначала форматируем числа, затем защищаем HTML-теги. Это даёт единый
+    # вид 1,000,000 по всему интерфейсу и не меняет custom_emoji_id внутри тегов.
+    text = format_large_numbers(text)
+
     protected = []
     def protect(match):
         protected.append(match.group(0))
@@ -204,7 +269,7 @@ def apply_global_premium_emojis(text):
 
 
 def _patch_telegram_text_methods():
-    """Подключает единый Premium Emoji слой к исходящим текстам Telegram."""
+    """Безопасно подключает Premium Emoji слой. При отказе Telegram отправляет обычный текст."""
     original_send_message = bot.send_message
     original_reply_to = bot.reply_to
     original_edit_text = bot.edit_message_text
@@ -218,42 +283,90 @@ def _patch_telegram_text_methods():
 
     def send_message(chat_id, text, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
+            original_text = text
             text = _transform(text)
+            try:
+                return original_send_message(chat_id, text, *args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] send_message: {premium_error}")
+                return original_send_message(chat_id, original_text, *args, **kwargs)
         return original_send_message(chat_id, text, *args, **kwargs)
 
     def reply_to(message, text, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
+            original_text = text
             text = _transform(text)
+            try:
+                return original_reply_to(message, text, *args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] reply_to: {premium_error}")
+                return original_reply_to(message, original_text, *args, **kwargs)
         return original_reply_to(message, text, *args, **kwargs)
 
     def edit_message_text(text, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
+            original_text = text
             text = _transform(text)
+            try:
+                return original_edit_text(text, *args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] edit_message_text: {premium_error}")
+                return original_edit_text(original_text, *args, **kwargs)
         return original_edit_text(text, *args, **kwargs)
 
     def edit_message_caption(*args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
+            original_args = args
+            original_caption = kwargs.get('caption')
             if 'caption' in kwargs:
                 kwargs['caption'] = _transform(kwargs['caption'])
             elif args:
                 args = list(args)
-                # У TeleBot первый позиционный аргумент — caption.
                 args[0] = _transform(args[0])
+            try:
+                return original_edit_caption(*args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] edit_message_caption: {premium_error}")
+                kwargs['caption'] = original_caption if original_caption is not None else kwargs.get('caption')
+                if original_caption is None and original_args:
+                    original_args = list(original_args)
+                return original_edit_caption(*(original_args if original_caption is None else args), **kwargs)
         return original_edit_caption(*args, **kwargs)
 
     def send_photo(chat_id, photo, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
-            kwargs['caption'] = _transform(kwargs['caption'])
+            original_caption = kwargs['caption']
+            kwargs['caption'] = _transform(original_caption)
+            try:
+                return original_send_photo(chat_id, photo, *args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] send_photo: {premium_error}")
+                kwargs['caption'] = original_caption
+                return original_send_photo(chat_id, photo, *args, **kwargs)
         return original_send_photo(chat_id, photo, *args, **kwargs)
 
     def send_animation(chat_id, animation, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
-            kwargs['caption'] = _transform(kwargs['caption'])
+            original_caption = kwargs['caption']
+            kwargs['caption'] = _transform(original_caption)
+            try:
+                return original_send_animation(chat_id, animation, *args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] send_animation: {premium_error}")
+                kwargs['caption'] = original_caption
+                return original_send_animation(chat_id, animation, *args, **kwargs)
         return original_send_animation(chat_id, animation, *args, **kwargs)
 
     def send_video(chat_id, video, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
-            kwargs['caption'] = _transform(kwargs['caption'])
+            original_caption = kwargs['caption']
+            kwargs['caption'] = _transform(original_caption)
+            try:
+                return original_send_video(chat_id, video, *args, **kwargs)
+            except Exception as premium_error:
+                print(f"[PREMIUM EMOJI FALLBACK] send_video: {premium_error}")
+                kwargs['caption'] = original_caption
+                return original_send_video(chat_id, video, *args, **kwargs)
         return original_send_video(chat_id, video, *args, **kwargs)
 
     bot.send_message = send_message
@@ -570,7 +683,10 @@ FONT_MAPS = {
 }
 
 def apply_font(text_str, font_key='default'):
-    if not text_str or font_key == 'default':
+    if not text_str:
+        return text_str
+    text_str = format_large_numbers(text_str)
+    if font_key == 'default':
         return text_str
     if font_key == 'monospace':
         return f"<code>{text_str}</code>"
@@ -5461,11 +5577,12 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception:
+        except Exception as profile_edit_error:
+            print(f"[PROFILE EDIT ERROR] {profile_edit_error}")
             try:
                 bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
                 return
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            except Exception as e: print(f"[PROFILE EDIT CAPTION ERROR] {e}")
 
     pfp_id = econ.get('pfp_file_id')
     if pfp_id:
@@ -5475,7 +5592,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
             else:
                 bot.send_photo(chat_id, pfp_id, caption=text, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
+        except Exception as e: print(f"[PROFILE PHOTO ERROR] {e}")
 
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
@@ -7988,7 +8105,7 @@ def handle_messages(message):
         add_coins(user_id=target_id, user_tag=target_u, amount=receive_amount)
         mark_dirty()
         target_link = make_link(chat_id, target_u, target_id, ping=True)
-        bot.reply_to(message, f"💸 <b>Перевод выполнен!</b>\n\n👤 Получатель: {target_link}\n💰 Отправлено: <b>{amount:,} 🪙</b>\n🧾 Комиссия 3%: <b>{tax:,} 🪙</b>\n📥 Получит: <b>{receive_amount:,} 🪙</b>\n💳 Остаток: <b>{sender_econ['balance']:,} 🪙</b> 😸".replace(',', ' '), parse_mode='HTML')
+        bot.reply_to(message, f"💸 <b>Перевод выполнен!</b>\n\n👤 Получатель: {target_link}\n💰 Отправлено: <b>{amount:,} 🪙</b>\n🧾 Комиссия 3%: <b>{tax:,} 🪙</b>\n📥 Получит: <b>{receive_amount:,} 🪙</b>\n💳 Остаток: <b>{sender_econ['balance']:,} 🪙</b> 😸", parse_mode='HTML')
         return
 
     # БАНК: пополнение/снятие прямо текстом, без кнопок.
@@ -8007,16 +8124,16 @@ def handle_messages(message):
                 return
             econ['balance'] -= amount
             econ['bank_deposit'] = econ.get('bank_deposit', 0) + amount
-            action_text = f"📥 На счёт внесено <b>{amount:,} 🪙</b>".replace(',', ' ')
+            action_text = f"📥 На счёт внесено <b>{amount:,} 🪙</b>"
         else:
             if econ.get('bank_deposit', 0) < amount:
                 bot.reply_to(message, f"❌ На депозите только <b>{econ.get('bank_deposit', 0)} 🪙</b>.", parse_mode='HTML')
                 return
             econ['bank_deposit'] -= amount
             econ['balance'] += amount
-            action_text = f"📤 Со счёта снято <b>{amount:,} 🪙</b>".replace(',', ' ')
+            action_text = f"📤 Со счёта снято <b>{amount:,} 🪙</b>"
         mark_dirty()
-        bot.reply_to(message, f"🏦 <b>НЯ-БАНК</b>\n{action_text}\n💳 В банке: <b>{econ.get('bank_deposit', 0):,} 🪙</b>\n💵 В кошельке: <b>{econ.get('balance', 0):,} 🪙</b>".replace(',', ' '), parse_mode='HTML')
+        bot.reply_to(message, f"🏦 <b>НЯ-БАНК</b>\n{action_text}\n💳 В банке: <b>{econ.get('bank_deposit', 0):,} 🪙</b>\n💵 В кошельке: <b>{econ.get('balance', 0):,} 🪙</b>", parse_mode='HTML')
         return
 
     # Удобные русские названия существующих разделов.
