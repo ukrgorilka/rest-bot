@@ -154,6 +154,119 @@ def premium_emoji_id(name):
     key = PREMIUM_EMOJI_ALIASES.get(name, name)
     return PREMIUM_EMOJI_IDS.get(key)
 
+# Единое оформление всего текстового интерфейса.
+# Кнопки Telegram не поддерживают HTML-теги custom emoji, поэтому здесь
+# обновляются сообщения, подписи, профили, уведомления и ответы бота.
+GLOBAL_PREMIUM_EMOJI_MAP = {
+    "🐱": "cat_01", "😻": "cat_02", "😺": "cat_03", "😸": "cat_04",
+    "😹": "cat_05", "😽": "cat_06", "🙀": "cat_07", "😿": "cat_08",
+    "😾": "cat_09", "🐾": "cat_10", "💰": "face_01", "💎": "face_02",
+    "💼": "face_03", "🏠": "cat_03", "🌱": "cat_12", "🌿": "cat_13",
+    "🌟": "face_14", "⭐": "face_14", "✨": "face_08", "👑": "cat_18",
+    "🎁": "cat_25", "🛍": "cat_25", "🛒": "cat_25", "🎰": "face_13",
+    "🎲": "face_13", "🏆": "face_14", "⚡": "face_08", "🔥": "face_15",
+    "❤️": "face_14", "❤": "face_14", "💖": "face_14", "💗": "face_14",
+    "👍": "face_08", "👎": "face_11", "❌": "face_11", "✅": "face_08",
+    "⚠️": "face_11", "⚠": "face_11", "❗": "face_11", "❓": "face_11",
+    "🎨": "cat_16", "🔤": "cat_17", "🏷": "cat_18", "📸": "cat_19",
+    "🎒": "cat_20", "🚘": "cat_21", "💍": "cat_22", "🏢": "cat_23",
+    "🏦": "cat_24", "📊": "cat_26", "📈": "cat_27", "💳": "cat_28",
+    "🪙": "face_03", "💸": "face_04", "🎉": "face_05", "🤝": "face_06",
+    "🔄": "face_07", "🔙": "face_09", "⚙️": "face_10", "⚙": "face_10",
+    "📥": "face_12", "📤": "face_12", "🔔": "face_16", "👤": "face_17",
+    "🧑": "face_17", "💥": "face_18", "🤖": "face_19", "🪖": "face_20",
+    "⚖️": "face_21", "⚖": "face_21", "🕊": "face_22", "😇": "face_22",
+    "😈": "face_23", "👹": "face_24", "🍀": "face_25", "🧪": "face_26",
+    "🍖": "face_27", "🧼": "face_28", "🦮": "face_29",
+}
+
+def apply_global_premium_emojis(text):
+    """Заменяет обычные UI-эмодзи на Custom Emoji во всех HTML-сообщениях бота."""
+    if not isinstance(text, str) or not text:
+        return text
+
+    # Уже созданные <tg-emoji>...</tg-emoji> временно защищаем, иначе
+    # глобальная замена повторно обработает fallback-emoji внутри тега.
+    protected = []
+    def protect(match):
+        protected.append(match.group(0))
+        return f"\x00TGEMOJI{len(protected)-1}\x00"
+
+    text = re.sub(r'<tg-emoji\b[^>]*>.*?</tg-emoji>', protect, text, flags=re.DOTALL)
+
+    for emoji in sorted(GLOBAL_PREMIUM_EMOJI_MAP, key=len, reverse=True):
+        alias = GLOBAL_PREMIUM_EMOJI_MAP[emoji]
+        text = text.replace(emoji, premium_emoji(alias, emoji))
+
+    for i, tag in enumerate(protected):
+        text = text.replace(f"\x00TGEMOJI{i}\x00", tag)
+    return text
+
+
+def _patch_telegram_text_methods():
+    """Подключает единый Premium Emoji слой к исходящим текстам Telegram."""
+    original_send_message = bot.send_message
+    original_reply_to = bot.reply_to
+    original_edit_text = bot.edit_message_text
+    original_edit_caption = bot.edit_message_caption
+    original_send_photo = bot.send_photo
+    original_send_animation = bot.send_animation
+    original_send_video = bot.send_video
+
+    def _transform(text):
+        return apply_global_premium_emojis(text)
+
+    def send_message(chat_id, text, *args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
+            text = _transform(text)
+        return original_send_message(chat_id, text, *args, **kwargs)
+
+    def reply_to(message, text, *args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
+            text = _transform(text)
+        return original_reply_to(message, text, *args, **kwargs)
+
+    def edit_message_text(text, *args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
+            text = _transform(text)
+        return original_edit_text(text, *args, **kwargs)
+
+    def edit_message_caption(*args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
+            if 'caption' in kwargs:
+                kwargs['caption'] = _transform(kwargs['caption'])
+            elif args:
+                args = list(args)
+                # У TeleBot первый позиционный аргумент — caption.
+                args[0] = _transform(args[0])
+        return original_edit_caption(*args, **kwargs)
+
+    def send_photo(chat_id, photo, *args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
+            kwargs['caption'] = _transform(kwargs['caption'])
+        return original_send_photo(chat_id, photo, *args, **kwargs)
+
+    def send_animation(chat_id, animation, *args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
+            kwargs['caption'] = _transform(kwargs['caption'])
+        return original_send_animation(chat_id, animation, *args, **kwargs)
+
+    def send_video(chat_id, video, *args, **kwargs):
+        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
+            kwargs['caption'] = _transform(kwargs['caption'])
+        return original_send_video(chat_id, video, *args, **kwargs)
+
+    bot.send_message = send_message
+    bot.reply_to = reply_to
+    bot.edit_message_text = edit_message_text
+    bot.edit_message_caption = edit_message_caption
+    bot.send_photo = send_photo
+    bot.send_animation = send_animation
+    bot.send_video = send_video
+
+
+_patch_telegram_text_methods()
+
 db_lock = threading.Lock()
 db_dirty = False
 db_version = 0
@@ -352,6 +465,16 @@ TITLES = {
     'shadow_ninja': {'name': 'Теневой Ниндзя', 'text': '🥷 Теневой Ниндзя', 'price': 3500, 'buff': 'rob_save', 'val': 50, 'desc': '-50% штраф при ограблении'},
     'sakura_lord': {'name': 'Сакура', 'text': '🌸 Сакура', 'price': 2800, 'buff': 'pet_exp', 'val': 30, 'desc': '+30% к опыту питомца'},
     'gigachad': {'name': 'Гигачад', 'text': '🗿 Гигачад', 'price': 6000, 'buff': 'all_power', 'val': 10, 'desc': '+10% ко всем доходам и удаче'},
+    # Stars-донатные титулы. Они не продаются за коины и доступны только через /stars.
+    'donor_sponsor': {'name': 'Золотой Спонсор', 'text': '💎 Золотой Спонсор', 'price': 0, 'donor_only': True,
+                      'donor_buffs': {'work_bonus': 0.10, 'bonus_mult': 0.10, 'business_bonus': 0.05},
+                      'desc': '+10% к зарплате, +10% к /bonus, +5% к прибыли бизнесов'},
+    'donor_diamond': {'name': 'Алмазный Спонсор', 'text': '💠 Алмазный Спонсор', 'price': 0, 'donor_only': True,
+                      'donor_buffs': {'work_bonus': 0.15, 'bonus_mult': 0.15, 'business_bonus': 0.10},
+                      'desc': '+15% к зарплате, +15% к /bonus, +10% к прибыли бизнесов'},
+    'donor_emperor': {'name': 'Император Доната', 'text': '👑 Император Доната', 'price': 0, 'donor_only': True,
+                      'donor_buffs': {'work_bonus': 0.20, 'bonus_mult': 0.20, 'business_bonus': 0.15},
+                      'desc': '+20% к зарплате, +20% к /bonus, +15% к прибыли бизнесов'},
     'clown': {'name': 'Главный Клоун', 'text': '🤡 Главный Клоун', 'price': 2000, 'buff': 'smeh_boost', 'val': 100, 'desc': '+1 очко Смехуятинки за смс'},
     'beer_baron': {'name': 'Пивной Барон', 'text': '🍺 Пивной Барон', 'price': 3200, 'buff': 'bonus_coins', 'val': 25, 'desc': '+25 коинов к /bonus'},
     'tapok_master': {'name': 'Повелитель Тапка', 'text': '🩴 Повелитель Тапка', 'price': 4000, 'buff': 'luck', 'val': 15, 'desc': '+15% к удаче охоты/рыбалки'},
@@ -386,17 +509,17 @@ THEMES = {
 # ЭКОНОМИКА TELEGRAM STARS (ЗВЁЗДЫ) & VIP PASS
 # ---------------------------------------------------------
 STARS_COIN_PACKS = {
-    'coins_1_star': {'name': '💰 35,000 Ня-коинов', 'coins': 35000, 'stars': 3, 'desc': 'Стартовый мешочек коинов (выгодный курс)'},
-    'coins_3_stars': {'name': '💵 100,000 Ня-коинов', 'coins': 100000, 'stars': 5, 'desc': 'Народный пак: 100к коинов всего за 3 ⭐️!'},
-    'coins_5_stars': {'name': '💳 200,000 Ня-коинов', 'coins': 200000, 'stars': 7, 'desc': 'Крупный капитал для предприятий и бизнеса'},
-    'coins_10_stars': {'name': '🏦 500,000 Ня-коинов', 'coins': 500000, 'stars': 12, 'desc': 'Капитал магната для покорения биржи и топов'},
-    'coins_20_stars': {'name': '💎 1,200,000 Ня-коинов', 'coins': 1200000, 'stars': 22, 'desc': 'Миллионный фонд для абсолютного богатства'}
+    'coins_1_star': {'name': '💰 35,000 Ня-коинов', 'coins': 35000, 'stars': 1, 'desc': 'Стартовый мешочек коинов — всего 1 ⭐️'},
+    'coins_3_stars': {'name': '💵 100,000 Ня-коинов', 'coins': 100000, 'stars': 3, 'desc': 'Народный пак: 100к коинов всего за 3 ⭐️!'},
+    'coins_5_stars': {'name': '💳 200,000 Ня-коинов', 'coins': 200000, 'stars': 5, 'desc': 'Крупный капитал для предприятий и бизнеса'},
+    'coins_10_stars': {'name': '🏦 500,000 Ня-коинов', 'coins': 500000, 'stars': 10, 'desc': 'Капитал магната для покорения биржи и топов'},
+    'coins_20_stars': {'name': '💎 1,200,000 Ня-коинов', 'coins': 1200000, 'stars': 20, 'desc': 'Миллионный фонд для абсолютного богатства'}
 }
 
 STARS_VIP_PASS = {
-    'pass_7_days': {'name': '⭐️ VIP Nya Pass (7 дней)', 'days': 7, 'stars': 3, 'desc': '-30% ко всем кулдаунам, 2x /bonus, 100% защита от ограблений'},
-    'pass_30_days': {'name': '⭐️ VIP Nya Pass (30 дней)', 'days': 30, 'stars': 5, 'desc': 'Месяц полного VIP комфорта и удвоенных наград'},
-    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 20, 'desc': 'Пожизненный VIP статус и все привилегии навсегда!'}
+    'pass_7_days': {'name': '⭐️ VIP Nya Pass (7 дней)', 'days': 7, 'stars': 3, 'desc': '-35% кулдаунов, 2.25x /bonus, +10% к работе и бизнесу, +25% EXP, защита от ограблений'},
+    'pass_30_days': {'name': '⭐️ VIP Nya Pass (30 дней)', 'days': 30, 'stars': 5, 'desc': 'Месяц VIP: -35% кулдаунов, 2.25x /bonus, +10% работа/бизнес, +25% EXP'},
+    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 20, 'desc': 'Пожизненный VIP: -35% кулдаунов, 2.25x /bonus, +10% работа/бизнес, +25% EXP, защита навсегда'}
 }
 
 VIP_BADGES = {
@@ -411,6 +534,9 @@ VIP_BADGES = {
 STARS_COSMETICS = {
     'bp_premium': {'name': '🎃 Премиум Хеллоуинский Pass', 'stars': 4, 'type': 'bp_premium', 'desc': 'Открывает премиум-ветку наград, Тыквокота и Тёмную тему!'},
     'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 4, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
+    'title_donor_sponsor': {'name': '💎 Титул: Золотой Спонсор', 'stars': 4, 'type': 'donor_title', 'title_id': 'donor_sponsor', 'desc': '+10% к работе, +10% к /bonus, +5% к прибыли бизнесов'},
+    'title_donor_diamond': {'name': '💠 Титул: Алмазный Спонсор', 'stars': 6, 'type': 'donor_title', 'title_id': 'donor_diamond', 'desc': '+15% к работе, +15% к /bonus, +10% к прибыли бизнесов'},
+    'title_donor_emperor': {'name': '👑 Титул: Император Доната', 'stars': 8, 'type': 'donor_title', 'title_id': 'donor_emperor', 'desc': '+20% к работе, +20% к /bonus, +15% к прибыли бизнесов'},
     'pet_griffin': {'name': '👑 Питомец: Королевский Грифон', 'stars': 5, 'type': 'pet', 'pet_id': 'vip_griffin', 'desc': 'Эксклюзивный питомец (+150% к удаче)'},
     'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
     'theme_anime': {'name': '🎀 Тема: Аниме Люкс VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_anime', 'desc': 'Премиальный аниме стиль профиля'},
@@ -1223,6 +1349,32 @@ def get_account_level(exp):
     bar = "█" * filled + "░" * (8 - filled)
     return lvl, exp, next_tier_exp, bar
 
+def is_vip_active(econ):
+    return bool(econ and (econ.get('vip_forever') or econ.get('vip_until', 0) > time.time()))
+
+def get_donor_title_buffs(econ):
+    if not econ or not isinstance(econ, dict):
+        return {}
+    active_t = econ.get('active_title')
+    if active_t in TITLES:
+        return TITLES[active_t].get('donor_buffs', {}) or {}
+    return {}
+
+def get_title_work_bonus(econ):
+    return float(get_donor_title_buffs(econ).get('work_bonus', 0.0))
+
+def get_title_bonus_multiplier(econ):
+    return float(get_donor_title_buffs(econ).get('bonus_mult', 0.0))
+
+def get_title_business_bonus(econ):
+    return float(get_donor_title_buffs(econ).get('business_bonus', 0.0))
+
+def get_vip_work_bonus(econ):
+    return 0.10 if is_vip_active(econ) else 0.0
+
+def get_vip_business_bonus(econ):
+    return 0.10 if is_vip_active(econ) else 0.0
+
 def get_user_cd_reduction(econ):
     if not econ or not isinstance(econ, dict):
         return 0.0
@@ -1237,8 +1389,8 @@ def get_user_cd_reduction(econ):
         if t_info.get('buff') == 'cd_reduction':
             reduction += (t_info.get('val', 0) / 100.0)
 
-    if econ.get('vip_forever') or (econ.get('vip_until', 0) > time.time()):
-        reduction += 0.30
+    if is_vip_active(econ):
+        reduction += 0.35
 
     return min(0.75, max(0.0, reduction))
 
@@ -1506,6 +1658,9 @@ def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
     bonus = 1.0
     if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'exp_bonus':
         bonus += (TITLES[active_t]['val'] / 100.0)
+    # Улучшенный VIP: +25% к получаемому опыту профиля.
+    if is_vip_active(econ):
+        bonus += 0.25
 
     econ['account_exp'] = econ.get('account_exp', 0) + int(exp_amount * bonus)
     mark_dirty()
@@ -4782,6 +4937,12 @@ def cmd_collect(message):
         bonus_t = int(base_profit * (TITLES[active_t]['val'] / 100.0))
         base_profit += bonus_t
         event_text += f"\n👑 Бонус титула: <b>+{bonus_t} 🪙</b>"
+    donor_biz = get_title_business_bonus(econ)
+    vip_biz = get_vip_business_bonus(econ)
+    if donor_biz or vip_biz:
+        bonus_biz = int(base_profit * (donor_biz + vip_biz))
+        base_profit += bonus_biz
+        event_text += f"\n💎 VIP/донат-бонус бизнеса: <b>+{bonus_biz} 🪙</b>"
 
     in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(message.chat.id), {}), user_id=user_id, user_name=user_name)
     if in_rest:
@@ -5331,7 +5492,7 @@ def stars_item_is_one_time(item):
     if not item:
         return False
     item_type = item.get('type')
-    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'bp_premium'}
+    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium'}
 
 def stars_item_owned(econ, kind, item_key):
     if kind == 'vippass':
@@ -5345,6 +5506,8 @@ def stars_item_owned(econ, kind, item_key):
             return bool(econ.get('bp_premium'))
         if t == 'title_cert':
             return bool(econ.get('has_custom_title_cert'))
+        if t == 'donor_title':
+            return item_key in econ.get('paid_stars_items', [])
         if t == 'theme':
             return item.get('theme_id') in econ.get('purchased_themes', ['default'])
         if t == 'badge':
@@ -5389,7 +5552,7 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
             "<b>Выберите категорию:</b>"
         ]
         markup.add(
-            InlineKeyboardButton("💰 Пакеты Ня-коинов (3 ⭐️ = 100к)", callback_data=f"stars_cat_coins:{user_id}"),
+            InlineKeyboardButton("💰 Пакеты Ня-коинов (от 1 ⭐️)", callback_data=f"stars_cat_coins:{user_id}"),
             InlineKeyboardButton("👑 VIP Nya Pass (Подписка)", callback_data=f"stars_cat_pass:{user_id}"),
             InlineKeyboardButton("✨ Эксклюзивный визуал и статус", callback_data=f"stars_cat_cosm:{user_id}"),
             InlineKeyboardButton("🔙 Обычный магазин коинов", callback_data=f"shop_main:{user_id}")
@@ -5411,10 +5574,12 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
             "👑 <b>VIP NYA PASS (ПРИВИЛЕГИИ)</b> 😺",
             "──────────────────────",
             "<b>Что даёт VIP Nya Pass:</b>\n"
-            "• ⚡️ <b>-30% ко всем таймерам</b> (работа, рыбалка, охота, замеры)\n"
-            "• 🎁 <b>УДВОЕНИЕ часового бонуса /bonus (2x)!</b>\n"
+            "• ⚡️ <b>-35% ко всем таймерам</b> (работа, рыбалка, охота, замеры)\n"
+            "• 🎁 <b>2.25x часового бонуса /bonus!</b>\n"
             "• 🛡 <b>100% иммунитет</b> к карманным кражам (вас нельзя ограбить!)\n"
             "• ⭐️ Эксклюзивная отметка VIP в карточке профиля (/profile)\n"
+            "• 💼 <b>+10% к зарплате и прибыли бизнесов</b>\n"
+            "• ⭐️ <b>+25% к опыту профиля</b>\n"
             "• 😻 Особое уважение и статус в чате!\n"
         ]
         for pass_k, pass_v in STARS_VIP_PASS.items():
@@ -7979,11 +8144,14 @@ def handle_messages(message):
                 base_reward += TITLES[active_t]['val']
             if econ.get('pet') and econ['pet'].get('id') == 'panda':
                 base_reward = int(base_reward * 1.35)
+            donor_bonus = get_title_bonus_multiplier(econ)
+            if donor_bonus:
+                base_reward = int(base_reward * (1.0 + donor_bonus))
 
             final_reward = int(base_reward * streak_mult)
             is_vip = econ.get('vip_forever') or (econ.get('vip_until', 0) > now_ts)
             if is_vip:
-                final_reward = int(final_reward * 2.0)
+                final_reward = int(final_reward * 2.25)
 
             econ['balance'] += final_reward
             econ['last_hourly'] = now_ts
@@ -7992,7 +8160,7 @@ def handle_messages(message):
             check_achievements(user_id, user_name, 'bonuses', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'bonus', 1, chat_id, username=user_username)
 
-            vip_bonus_text = "\n⭐️ <b>VIP NYA PASS: Бонус удвоен (x2.0)!</b>" if is_vip else ""
+            vip_bonus_text = "\n⭐️ <b>VIP NYA PASS: Бонус увеличен (x2.25)!</b>" if is_vip else ""
             streak_note = f"\n🔥 <b>Стрик: {streak} дн.</b> (Множитель x{streak_mult:.2f})!{vip_bonus_text}"
             bot.reply_to(message, f"🎲 Вы собрали часовой бонус: <b>+{final_reward} Ня-коинов 🪙</b>!{streak_note}\nБаланс: <b>{econ['balance']} 💸</b> 😸", parse_mode='HTML')
             for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
@@ -8433,7 +8601,7 @@ def callback_inline(call):
             if not pb or not workers: return
             if time.time()-pb.get('last_salary',0)<3*86400:
                 left=cooldown_text(pb.get('last_salary',0),3*86400,econ); bot.answer_callback_query(call.id,f'⏳ Следующая выплата через {left}.',show_alert=True); return
-            total=0; bonus=1+pet_bonus(econ,'business_bonus')
+            total=0; bonus=1+pet_bonus(econ,'business_bonus')+get_title_business_bonus(econ)+get_vip_business_bonus(econ)
             for w in workers:
                 we=get_user_econ(w.get('id'),w.get('name')); salary=int(pb.get('salary_per_worker',100)*bonus); we['balance']+=salary; total+=salary
                 es=we.get('employer_salary') or {}; es['next_due']=time.time()+3*86400; we['employer_salary']=es
@@ -9951,6 +10119,9 @@ def callback_inline(call):
 
             in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(chat_id), {}), user_id=user_id, user_name=user_name)
             total_profit = base_profit
+            biz_bonus = get_title_business_bonus(econ) + get_vip_business_bonus(econ)
+            if biz_bonus:
+                total_profit += int(base_profit * biz_bonus)
             if in_rest: total_profit += int(base_profit * 0.20)
 
             econ['balance'] += total_profit
@@ -10145,7 +10316,7 @@ def callback_inline(call):
                 econ['last_work_time'] = now
                 if random.randint(1, 100) <= job['chance']:
                     pay = random.randint(job['min_pay'], job['max_pay'])
-                    pay = int(pay * (1 + pet_bonus(econ, 'work_bonus')))
+                    pay = int(pay * (1 + pet_bonus(econ, 'work_bonus') + get_title_work_bonus(econ) + get_vip_work_bonus(econ)))
                     econ['balance'] += pay
                     econ['work_exp'] = econ.get('work_exp', 0) + job['exp_gain']
                     add_account_exp(user_id, user_name, job['exp_gain'], username=user_username)
@@ -10476,7 +10647,7 @@ def callback_inline(call):
         elif action_data.startswith('shop_cat_titles_'):
             page = int(action_data.replace('shop_cat_titles_', ''))
             items_per_page = 5
-            items = list(TITLES.items())
+            items = [(k, v) for k, v in TITLES.items() if not v.get('donor_only')]
             total_pages = (len(items) + items_per_page - 1) // items_per_page
             
             start_idx = page * items_per_page
@@ -10565,6 +10736,9 @@ def callback_inline(call):
             title_key = action_data.replace('buy_title_', '')
             if title_key in TITLES:
                 item = TITLES[title_key]
+                if item.get('donor_only'):
+                    bot.answer_callback_query(call.id, '💎 Этот титул доступен только за Telegram Stars в /stars.', show_alert=True)
+                    return
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 if title_key in econ.get('titles', []):
                     bot.answer_callback_query(call.id, '❌ Титул уже куплен! 😾', show_alert=True)
@@ -10906,6 +11080,17 @@ def process_stars_successful_payment(message):
                 c_type = cosm.get('type')
                 if c_type == 'title_cert':
                     target_econ['has_custom_title_cert'] = True
+                elif c_type == 'donor_title':
+                    title_id = cosm.get('title_id')
+                    if title_id in TITLES and TITLES[title_id].get('donor_only'):
+                        target_econ.setdefault('paid_stars_items', [])
+                        if actual_prod not in target_econ['paid_stars_items']:
+                            target_econ['paid_stars_items'].append(actual_prod)
+                        target_econ.setdefault('titles', [])
+                        if title_id not in target_econ['titles']:
+                            target_econ['titles'].append(title_id)
+                        target_econ['active_title'] = title_id
+                        target_econ['custom_title'] = None
                 elif c_type == 'theme':
                     theme_id = cosm.get('theme_id')
                     purchased = target_econ.setdefault('purchased_themes', ['default'])
@@ -11011,9 +11196,11 @@ def process_stars_successful_payment(message):
                     f"👤 Владелец: {user_link}\n"
                     f"⏳ Срок действия: <b>{dur_str}</b>\n"
                     f"⭐️ Ваши привилегии:\n"
-                    f"• ⚡️ -30% ко всем кулдаунам бота\n"
-                    f"• 🎁 Удвоение часового бонуса /bonus (x2.0)\n"
+                    f"• ⚡️ -35% ко всем кулдаунам бота\n"
+                    f"• 🎁 2.25x часового бонуса /bonus\n"
                     f"• 🛡 100% защита от карманных краж и ограблений\n"
+                    f"• 💼 +10% к зарплате и прибыли бизнесов\n"
+                    f"• ⭐️ +25% к опыту профиля\n"
                     f"• 🌟 VIP отметка в профиле\n"
                     f"──────────────────────\n"
                     f"<i>Приятной игры с максимальным комфортом!</i> 😸"
@@ -11057,6 +11244,23 @@ def process_stars_successful_payment(message):
                         f"Проверьте свой новый визуал командой: <code>/profile</code> 😸",
                         parse_mode='HTML'
                     )
+                    return
+                elif c_type == 'donor_title':
+                    title_id = cosm.get('title_id')
+                    if title_id not in TITLES or not TITLES[title_id].get('donor_only'):
+                        bot.reply_to(message, '❌ Некорректный донатный титул.', parse_mode='HTML')
+                        return
+                    econ.setdefault('paid_stars_items', [])
+                    if cosm_id not in econ['paid_stars_items']:
+                        econ['paid_stars_items'].append(cosm_id)
+                    econ.setdefault('titles', [])
+                    if title_id not in econ['titles']:
+                        econ['titles'].append(title_id)
+                    econ['active_title'] = title_id
+                    econ['custom_title'] = None
+                    mark_dirty()
+                    log_event('STARS ТИТУЛ', f'Игрок {user_link} активировал донатный титул {TITLES[title_id]["name"]} за {stars_amount} ⭐️!')
+                    bot.reply_to(message, f"👑 <b>ДОНАТНЫЙ ТИТУЛ АКТИВИРОВАН!</b> 😻\n──────────────────────\n<b>{TITLES[title_id]['text']}</b>\n{TITLES[title_id]['desc']}\n\nТитул сразу надет в профиль. 😸", parse_mode='HTML')
                     return
                 elif c_type == 'badge':
                     badge_emoji = cosm['emoji']
