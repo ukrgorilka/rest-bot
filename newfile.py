@@ -254,41 +254,41 @@ THEMES = {
 # ЭКОНОМИКА TELEGRAM STARS (ЗВЁЗДЫ) & VIP PASS
 # ---------------------------------------------------------
 STARS_COIN_PACKS = {
-    'coins_1_star': {'name': '💰 35,000 Ня-коинов', 'coins': 35000, 'stars': 1, 'desc': 'Стартовый мешочек коинов (выгодный курс)'},
-    'coins_3_stars': {'name': '💵 100,000 Ня-коинов', 'coins': 100000, 'stars': 3, 'desc': 'Народный пак: 100к коинов всего за 3 ⭐️!'},
-    'coins_5_stars': {'name': '💳 200,000 Ня-коинов', 'coins': 200000, 'stars': 5, 'desc': 'Крупный капитал для предприятий и бизнеса'},
-    'coins_10_stars': {'name': '🏦 500,000 Ня-коинов', 'coins': 500000, 'stars': 10, 'desc': 'Капитал магната для покорения биржи и топов'},
-    'coins_20_stars': {'name': '💎 1,200,000 Ня-коинов', 'coins': 1200000, 'stars': 20, 'desc': 'Миллионный фонд для абсолютного богатства'}
+    'coins_1_star': {'name': '💰 35,000 Ня-коинов', 'coins': 35000, 'stars': 3, 'desc': 'Стартовый мешочек коинов (выгодный курс)'},
+    'coins_3_stars': {'name': '💵 100,000 Ня-коинов', 'coins': 100000, 'stars': 5, 'desc': 'Народный пак: 100к коинов всего за 3 ⭐️!'},
+    'coins_5_stars': {'name': '💳 200,000 Ня-коинов', 'coins': 200000, 'stars': 7, 'desc': 'Крупный капитал для предприятий и бизнеса'},
+    'coins_10_stars': {'name': '🏦 500,000 Ня-коинов', 'coins': 500000, 'stars': 12, 'desc': 'Капитал магната для покорения биржи и топов'},
+    'coins_20_stars': {'name': '💎 1,200,000 Ня-коинов', 'coins': 1200000, 'stars': 22, 'desc': 'Миллионный фонд для абсолютного богатства'}
 }
 
 STARS_VIP_PASS = {
-    'pass_7_days': {'name': '⭐️ VIP Nya Pass (7 дней)', 'days': 7, 'stars': 1, 'desc': '-30% ко всем кулдаунам, 2x /bonus, 100% защита от ограблений'},
-    'pass_30_days': {'name': '⭐️ VIP Nya Pass (30 дней)', 'days': 30, 'stars': 3, 'desc': 'Месяц полного VIP комфорта и удвоенных наград'},
-    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 25, 'desc': 'Пожизненный VIP статус и все привилегии навсегда!'}
+    'pass_7_days': {'name': '⭐️ VIP Nya Pass (7 дней)', 'days': 7, 'stars': 3, 'desc': '-30% ко всем кулдаунам, 2x /bonus, 100% защита от ограблений'},
+    'pass_30_days': {'name': '⭐️ VIP Nya Pass (30 дней)', 'days': 30, 'stars': 5, 'desc': 'Месяц полного VIP комфорта и удвоенных наград'},
+    'pass_forever': {'name': '👑 VIP Nya Pass НАВСЕГДА', 'days': -1, 'stars': 20, 'desc': 'Пожизненный VIP статус и все привилегии навсегда!'}
 }
 
 VIP_BADGES = {
-    'vip_badge_crown': {'name': 'Корона VIP', 'emoji': '👑', 'stars': 1, 'desc': 'Символ элиты чата'},
-    'vip_badge_star': {'name': 'Звезда Покровителя', 'emoji': '⭐️', 'stars': 1, 'desc': 'Знак поддержки бота'},
-    'vip_badge_gem': {'name': 'Сияющий Алмаз', 'emoji': '💎', 'stars': 1, 'desc': 'Драгоценный статус'},
-    'vip_badge_angel': {'name': 'Крылья Ангела', 'emoji': '🪽', 'stars': 2, 'desc': 'Светлый хранитель'},
-    'vip_badge_galaxy': {'name': 'Космос', 'emoji': '🌌', 'stars': 2, 'desc': 'Межгалактический покровитель'},
-    'vip_badge_dragon': {'name': 'Дракон Империи', 'emoji': '🐲', 'stars': 2, 'desc': 'Мощь древнего дракона'}
+    'vip_badge_crown': {'name': 'Корона VIP', 'emoji': '👑', 'stars': 4, 'desc': 'Символ элиты чата'},
+    'vip_badge_star': {'name': 'Звезда Покровителя', 'emoji': '⭐️', 'stars': 4, 'desc': 'Знак поддержки бота'},
+    'vip_badge_gem': {'name': 'Сияющий Алмаз', 'emoji': '💎', 'stars': 4, 'desc': 'Драгоценный статус'},
+    'vip_badge_angel': {'name': 'Крылья Ангела', 'emoji': '🪽', 'stars': 5, 'desc': 'Светлый хранитель'},
+    'vip_badge_galaxy': {'name': 'Космос', 'emoji': '🌌', 'stars': 5, 'desc': 'Межгалактический покровитель'},
+    'vip_badge_dragon': {'name': 'Дракон Империи', 'emoji': '🐲', 'stars': 5, 'desc': 'Мощь древнего дракона'}
 }
 
 STARS_COSMETICS = {
-    'bp_premium': {'name': '🎃 Премиум Хеллоуинский Pass', 'stars': 2, 'type': 'bp_premium', 'desc': 'Открывает премиум-ветку наград, Тыквокота и Тёмную тему!'},
-    'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 2, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
-    'pet_griffin': {'name': '👑 Питомец: Королевский Грифон', 'stars': 3, 'type': 'pet', 'pet_id': 'vip_griffin', 'desc': 'Эксклюзивный питомец (+150% к удаче)'},
-    'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 1, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
-    'theme_anime': {'name': '🎀 Тема: Аниме Люкс VIP', 'stars': 1, 'type': 'theme', 'theme_id': 'stars_anime', 'desc': 'Премиальный аниме стиль профиля'},
-    'theme_galaxy': {'name': '🌌 Тема: Бездна Сингулярности VIP', 'stars': 2, 'type': 'theme', 'theme_id': 'stars_galaxy', 'desc': 'Космическая стилистика сингулярности'},
-    'badge_crown': {'name': '👑 Значок: Корона VIP', 'stars': 1, 'type': 'badge', 'emoji': '👑', 'desc': 'VIP значок рядом с ником'},
-    'badge_star': {'name': '⭐️ Значок: Звезда Покровителя', 'stars': 1, 'type': 'badge', 'emoji': '⭐️', 'desc': 'Значок спонсора бота'},
-    'badge_gem': {'name': '💎 Значок: Сияющий Алмаз', 'stars': 1, 'type': 'badge', 'emoji': '💎', 'desc': 'Драгоценный значок'},
-    'badge_angel': {'name': '🪽 Значок: Крылья Ангела', 'stars': 2, 'type': 'badge', 'emoji': '🪽', 'desc': 'Ангельские крылья в чате'},
-    'badge_galaxy': {'name': '🌌 Значок: Космос', 'stars': 2, 'type': 'badge', 'emoji': '🌌', 'desc': 'Галактический значок'},
-    'badge_dragon': {'name': '🐲 Значок: Дракон Империи', 'stars': 2, 'type': 'badge', 'emoji': '🐲', 'desc': 'Значок дракона'}
+    'bp_premium': {'name': '🎃 Премиум Хеллоуинский Pass', 'stars': 4, 'type': 'bp_premium', 'desc': 'Открывает премиум-ветку наград, Тыквокота и Тёмную тему!'},
+    'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 4, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
+    'pet_griffin': {'name': '👑 Питомец: Королевский Грифон', 'stars': 5, 'type': 'pet', 'pet_id': 'vip_griffin', 'desc': 'Эксклюзивный питомец (+150% к удаче)'},
+    'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
+    'theme_anime': {'name': '🎀 Тема: Аниме Люкс VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_anime', 'desc': 'Премиальный аниме стиль профиля'},
+    'theme_galaxy': {'name': '🌌 Тема: Бездна Сингулярности VIP', 'stars': 4, 'type': 'theme', 'theme_id': 'stars_galaxy', 'desc': 'Космическая стилистика сингулярности'},
+    'badge_crown': {'name': '👑 Значок: Корона VIP', 'stars': 3, 'type': 'badge', 'emoji': '👑', 'desc': 'VIP значок рядом с ником'},
+    'badge_star': {'name': '⭐️ Значок: Звезда Покровителя', 'stars': 3, 'type': 'badge', 'emoji': '⭐️', 'desc': 'Значок спонсора бота'},
+    'badge_gem': {'name': '💎 Значок: Сияющий Алмаз', 'stars': 3, 'type': 'badge', 'emoji': '💎', 'desc': 'Драгоценный значок'},
+    'badge_angel': {'name': '🪽 Значок: Крылья Ангела', 'stars': 4, 'type': 'badge', 'emoji': '🪽', 'desc': 'Ангельские крылья в чате'},
+    'badge_galaxy': {'name': '🌌 Значок: Космос', 'stars': 4, 'type': 'badge', 'emoji': '🌌', 'desc': 'Галактический значок'},
+    'badge_dragon': {'name': '🐲 Значок: Дракон Империи', 'stars': 4, 'type': 'badge', 'emoji': '🐲', 'desc': 'Значок дракона'}
 }
 
 
@@ -997,6 +997,7 @@ def get_chat_settings(chat_id):
             'max_days': None,  # лимит реста отключён
             'rp_enabled': True,
             'flood_protection': False,
+            'flood_admins': False,
             'auto_reactions': True,
             'welcome_enabled': True,
             'timezone_offset': 3,
@@ -1007,6 +1008,7 @@ def get_chat_settings(chat_id):
         sett = db['settings'][str_chat]
         sett.setdefault('rp_enabled', True)
         sett.setdefault('flood_protection', False)
+        sett.setdefault('flood_admins', False)
         sett.setdefault('auto_reactions', True)
         sett.setdefault('welcome_enabled', True)
         # Раньше стоял жёсткий лимит 30/60 дней — теперь ограничения нет.
@@ -1527,6 +1529,54 @@ def can_process_user_message(message):
     if not bot_is_active and not is_super_admin:
         return False
 
+    # АНТИФЛУД КОМАНД: проверяем здесь, чтобы лимит работал и для
+    # отдельных command-handler'ов, которые завершаются до общего обработчика.
+    # Настройка действует только в конкретной группе/супергруппе.
+    is_private_chat = getattr(message.chat, 'type', '') == 'private'
+    text = str(getattr(message, 'text', '') or '').strip()
+    if not is_private_chat and text.startswith('/') and not is_super_admin:
+        chat_settings = get_chat_settings(message.chat.id)
+        is_owner = is_chat_owner(message.chat.id, user_id)
+        is_admin_user = is_admin(message.chat.id, user_id)
+        admins_allowed = chat_settings.get('flood_admins', False)
+        # Владелец (creator) всегда освобождён от антифлуда.
+        # Обычные админы попадают под антифлуд только если это включено в настройках.
+        flood_applies = (not is_owner) and (not is_admin_user or admins_allowed)
+        if flood_applies and chat_settings.get('flood_protection', False):
+            flood_key = f"{message.chat.id}:{user_id}"
+            now_ts = time.time()
+            cmd_hist = [t for t in command_rate_history.get(flood_key, []) if now_ts - t < 3600]
+
+            if len(cmd_hist) >= 5:
+                command_rate_history[flood_key] = cmd_hist
+                remaining = max(1, int(3600 - (now_ts - cmd_hist[0])))
+                mins = max(1, (remaining + 59) // 60)
+                try:
+                    u_link = make_link(message.chat.id, user_name, user_id, ping=True)
+                    bot.send_message(
+                        message.chat.id,
+                        f"🛡 {u_link}, <b>антифлуд сработал.</b>\n"
+                        f"Лимит — <b>5 команд в час</b>. Следующая команда будет доступна примерно через <b>{mins} мин.</b> 😾",
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    print(f"[FLOOD WARN ERROR] {e}")
+                return False
+
+            cmd_hist.append(now_ts)
+            command_rate_history[flood_key] = cmd_hist
+            count = len(cmd_hist)
+            if count in (4, 5):
+                try:
+                    u_link = make_link(message.chat.id, user_name, user_id, ping=True)
+                    if count == 4:
+                        warn = f"⚠️ {u_link}, предупреждение антифлуда: использовано <b>4/5 команд</b> за последний час."
+                    else:
+                        warn = f"⚠️ {u_link}, использовано <b>5/5 команд</b>. Следующая команда будет заблокирована до окончания лимита."
+                    bot.send_message(message.chat.id, warn, parse_mode='HTML')
+                except Exception as e:
+                    print(f"[FLOOD WARN ERROR] {e}")
+
     return True
 
 def log_event(event_type, message_text):
@@ -1712,6 +1762,21 @@ def is_admin(chat_id, user_id):
     try:
         member = bot.get_chat_member(chat_id, user_id)
         return member.status in ['administrator', 'creator']
+    except Exception:
+        return False
+
+def is_chat_owner(chat_id, user_id):
+    """True only for the Telegram owner/creator of this chat."""
+    try:
+        chat_id = int(chat_id)
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    if chat_id > 0:
+        return False
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        return member.status == 'creator'
     except Exception:
         return False
 
@@ -4592,6 +4657,7 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
     sett = get_chat_settings(chat_id)
     rp_status = "✅ Включено" if sett.get('rp_enabled', True) else "❌ Выключено"
     flood_status = "✅ Включён" if sett.get('flood_protection', False) else "❌ Выключен"
+    flood_admin_status = "✅ Да" if sett.get('flood_admins', False) else "❌ Нет"
     react_status = "✅ Включены" if sett.get('auto_reactions', True) else "❌ Выключены"
     welcome_status = "✅ Включено" if sett.get('welcome_enabled', True) else "❌ Выключено"
 
@@ -4599,6 +4665,7 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp{uid_tag}"))
     markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"👮 Антифлуд для админов: {flood_admin_status}", callback_data=f"toggle_flood_admins{uid_tag}"))
     markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions{uid_tag}"))
     markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome{uid_tag}"))
     markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
@@ -4609,6 +4676,7 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
         f"🌴 Максимальный срок реста: <b>без ограничений</b>\n"
         f"🎭 РП-команды: <b>{rp_status}</b>\n"
         f"🛡 Антифлуд: <b>{flood_status}</b> — 5 команд/час\n"
+        f"👮 Антифлуд для админов: <b>{flood_admin_status}</b> (владелец чата всегда исключён)\n"
         f"✨ Авто-реакции: <b>{react_status}</b>\n"
         f"👋 Приветствия: <b>{welcome_status}</b>\n"
         f"🔔 Напоминание: за <b>{sett.get('remind_minutes', 60)} мин.</b>\n"
@@ -6664,16 +6732,28 @@ def cmd_gift_stars(message):
 
     t_link = make_link(chat_id, target_user, target_user_id, ping=False)
     markup = InlineKeyboardMarkup(row_width=1)
-    # Новый формат callback: gift2|тип|товар|получатель|плательщик.
-    # Никакого split по '_' — названия товаров могут содержать подчёркивания.
-    markup.add(
-        InlineKeyboardButton("💰 Подарить 100к коинов (3 ⭐️)", callback_data=f"gift2|coins|coins_3_stars|{target_user_id}|{user_id}"),
-        InlineKeyboardButton("💳 Подарить 500к коинов (10 ⭐️)", callback_data=f"gift2|coins|coins_10_stars|{target_user_id}|{user_id}"),
-        InlineKeyboardButton("👑 Подарить VIP Pass на месяц (3 ⭐️)", callback_data=f"gift2|pass|pass_30_days|{target_user_id}|{user_id}"),
-        InlineKeyboardButton("🎃 Подарить Хеллоуин Pass (2 ⭐️)", callback_data=f"gift2|cosm|bp_premium|{target_user_id}|{user_id}"),
-        InlineKeyboardButton("🌟 Подарить Кастомный Титул (2 ⭐️)", callback_data=f"gift2|cosm|custom_title|{target_user_id}|{user_id}"),
-        InlineKeyboardButton("🐱 Подарить Королевского Грифона (3 ⭐️)", callback_data=f"gift2|cosm|pet_griffin|{target_user_id}|{user_id}")
-    )
+    # Все платные товары Stars можно подарить. Callback хранит тип + ID товара + получателя + плательщика.
+    for item_key, item in STARS_COIN_PACKS.items():
+        stars = int(item.get('stars', 0))
+        if stars >= 1:
+            markup.add(InlineKeyboardButton(
+                f"🎁 {item['name']} — {stars} ⭐️",
+                callback_data=f"gift2|coins|{item_key}|{target_user_id}|{user_id}"
+            ))
+    for item_key, item in STARS_VIP_PASS.items():
+        stars = int(item.get('stars', 0))
+        if stars >= 1:
+            markup.add(InlineKeyboardButton(
+                f"🎁 {item['name']} — {stars} ⭐️",
+                callback_data=f"gift2|pass|{item_key}|{target_user_id}|{user_id}"
+            ))
+    for item_key, item in STARS_COSMETICS.items():
+        stars = int(item.get('stars', 0))
+        if stars >= 1:
+            markup.add(InlineKeyboardButton(
+                f"🎁 {item['name']} — {stars} ⭐️",
+                callback_data=f"gift2|cosm|{item_key}|{target_user_id}|{user_id}"
+            ))
 
     bot.reply_to(
         message,
@@ -6904,30 +6984,6 @@ def handle_messages(message):
         else: del user_flood_muted[user_id]
 
     chat_settings = get_chat_settings(chat_id)
-
-    # АНТИФЛУД: настройка действует ТОЛЬКО в том чате, где её включил администратор.
-    # ЛС боту и другие чаты никогда не попадают под лимит этого чата.
-    # Лимит: 5 команд в час на пользователя именно в этом чате.
-    is_private_chat = getattr(message.chat, 'type', '') == 'private'
-    if (not is_private_chat and chat_settings.get('flood_protection', False)
-            and text_lower.startswith('/')):
-        flood_key = f"{chat_id}:{user_id}"
-        cmd_hist = [t for t in command_rate_history.get(flood_key, []) if now_ts - t < 3600]
-        if len(cmd_hist) >= 5:
-            command_rate_history[flood_key] = cmd_hist
-            remaining = max(1, int(3600 - (now_ts - cmd_hist[0])))
-            mins = max(1, (remaining + 59) // 60)
-            u_link = make_link(chat_id, user_name, user_id, ping=True)
-            bot.send_message(chat_id, f"🛡 {u_link}, <b>антифлуд сработал.</b> Лимит — 5 команд в час. Попробуй снова примерно через {mins} мин. 😾", parse_mode='HTML')
-            return
-        cmd_hist.append(now_ts)
-        command_rate_history[flood_key] = cmd_hist
-        if len(cmd_hist) == 4:
-            u_link = make_link(chat_id, user_name, user_id, ping=True)
-            bot.send_message(chat_id, f"⚠️ {u_link}, предупреждение антифлуда: использовано <b>4/5 команд</b> за последний час.", parse_mode='HTML')
-        elif len(cmd_hist) == 5:
-            u_link = make_link(chat_id, user_name, user_id, ping=True)
-            bot.send_message(chat_id, f"⚠️ {u_link}, <b>5/5 команд</b> использовано. Следующая команда будет заблокирована до окончания часового лимита.", parse_mode='HTML')
 
     # Старый короткий антиспам оставляем только для одинаковых экономических команд.
 
@@ -7881,7 +7937,11 @@ def callback_inline(call):
                 owner_id = int(parts[1])
 
         if owner_id and owner_id != user_id:
-            if action_data in ['set_max_days', 'set_remind_time', 'toggle_rp', 'toggle_flood', 'toggle_reactions', 'toggle_welcome']:
+            if action_data == 'toggle_flood_admins':
+                if not is_chat_owner(chat_id, user_id):
+                    bot.answer_callback_query(call.id, "❌ Лимит антифлуда для админов может менять только владелец чата!", show_alert=True)
+                    return
+            elif action_data in ['set_max_days', 'set_remind_time', 'toggle_rp', 'toggle_flood', 'toggle_reactions', 'toggle_welcome']:
                 if not is_admin(chat_id, user_id):
                     bot.answer_callback_query(call.id, "❌ Настройки доступны только администраторам!", show_alert=True)
                     return
@@ -8171,11 +8231,11 @@ def callback_inline(call):
             item = catalogs.get(gift_kind, {}).get(item_key)
             # Спец-подарки, которые могут существовать вне STARS_COSMETICS.
             if gift_kind == 'cosm' and item is None and item_key == 'bp_premium':
-                item = {'name': '🎃 Премиум Хеллоуин Pass', 'stars': 2}
+                item = {'name': '🎃 Премиум Хеллоуин Pass', 'stars': 3}
             if gift_kind == 'cosm' and item is None and item_key == 'custom_title':
-                item = {'name': '🌟 Сертификат Кастомного Титула', 'stars': 2}
+                item = {'name': '🌟 Сертификат Кастомного Титула', 'stars': 4}
             if gift_kind == 'cosm' and item is None and item_key == 'pet_griffin':
-                item = {'name': '🐱 Королевский Грифон', 'stars': 3}
+                item = {'name': '🐱 Королевский Грифон', 'stars': 5}
             if not item:
                 bot.answer_callback_query(call.id, "❌ Товар подарка не найден!", show_alert=True)
                 return
@@ -9862,6 +9922,16 @@ def callback_inline(call):
             sett['flood_protection'] = not sett.get('flood_protection', False)
             mark_dirty()
             bot.answer_callback_query(call.id, f"🛡 Антифлуд {'включён' if sett['flood_protection'] else 'выключен'}!")
+            render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
+
+        elif action_data == 'toggle_flood_admins':
+            if not is_chat_owner(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Эту настройку может менять только владелец чата!", show_alert=True)
+                return
+            sett = get_chat_settings(chat_id)
+            sett['flood_admins'] = not sett.get('flood_admins', False)
+            mark_dirty()
+            bot.answer_callback_query(call.id, f"👮 Антифлуд для админов {'включён' if sett['flood_admins'] else 'выключен'}!")
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_reactions':
