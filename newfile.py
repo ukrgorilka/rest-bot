@@ -1124,6 +1124,7 @@ user_flood_muted = {}
 # Лимит команд: отдельная история, чтобы старый антиспам не очищал её.
 command_rate_history = {}
 last_chat_activity = {}
+BOT_STARTED_AT = time.time()
 # ---------------------------------------------------------
 # БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ
 # ---------------------------------------------------------
@@ -1146,7 +1147,8 @@ def _default_data():
         'daily_memes': [],
         'processed_stars_charges': [],
         'meme_winners': [],
-        'chest_claims': {}
+        'chest_claims': {},
+        'bot_chats': {}
     }
 
 def _normalize_loaded_data(data):
@@ -1173,6 +1175,8 @@ def _normalize_loaded_data(data):
         base['meme_winners'] = []
     if 'chest_claims' not in base:
         base['chest_claims'] = {}
+    if not isinstance(base.get('bot_chats'), dict):
+        base['bot_chats'] = {}
     return base
 
 def _pg_connect():
@@ -1341,6 +1345,109 @@ def periodic_backup_worker():
 
 db = load_data()
 
+# ---------------------------------------------------------
+# МОНИТОРИНГ ГРУПП, ГДЕ НАХОДИТСЯ БОТ
+# ---------------------------------------------------------
+def _chat_type_label(chat_type):
+    return {'group': 'Группа', 'supergroup': 'Супергруппа', 'channel': 'Канал', 'private': 'Личка'}.get(chat_type, str(chat_type or 'Неизвестно'))
+
+def track_bot_chat(chat, status='active', touch_activity=True):
+    """Сохраняет актуальную информацию о группах без удаления старых записей."""
+    if not chat or getattr(chat, 'type', '') not in ('group', 'supergroup'):
+        return None
+    try:
+        chat_id = str(int(chat.id))
+    except Exception:
+        return None
+    now_ts = time.time()
+    chats = db.setdefault('bot_chats', {})
+    item = chats.setdefault(chat_id, {
+        'chat_id': int(chat.id), 'title': getattr(chat, 'title', None) or 'Без названия',
+        'username': getattr(chat, 'username', None), 'type': getattr(chat, 'type', 'group'),
+        'first_seen': now_ts, 'last_seen': now_ts, 'last_activity': now_ts, 'status': 'active',
+        'join_notified_at': 0
+    })
+    changed = False
+    for field, value in [('title', getattr(chat, 'title', None) or 'Без названия'), ('username', getattr(chat, 'username', None)), ('type', getattr(chat, 'type', 'group')), ('status', status)]:
+        if item.get(field) != value:
+            item[field] = value; changed = True
+    if item.get('last_seen') != now_ts:
+        item['last_seen'] = now_ts; changed = True
+    if touch_activity:
+        item['last_activity'] = now_ts
+        last_chat_activity[int(chat.id)] = now_ts
+        changed = True
+    if changed:
+        mark_dirty()
+    return item
+
+def group_info_refresh_worker():
+    """Периодически обновляет число участников сохранённых активных групп.
+    Названия, username, статус и последняя активность обновляются по входящим
+    событиям, а количество участников — отдельным редким запросом Telegram.
+    """
+    while True:
+        time.sleep(1800)  # раз в 30 минут, чтобы не создавать лишнюю нагрузку на API
+        try:
+            changed = False
+            for item in list(db.get('bot_chats', {}).values()):
+                if not isinstance(item, dict) or item.get('status') != 'active':
+                    continue
+                cid = item.get('chat_id')
+                if not cid:
+                    continue
+                try:
+                    members = bot.get_chat_member_count(int(cid))
+                    if item.get('member_count') != members:
+                        item['member_count'] = members
+                        item['member_count_updated_at'] = time.time()
+                        changed = True
+                except Exception as e:
+                    # Группа могла быть удалена/бот мог потерять доступ — не падаем всем воркером.
+                    print(f'[GROUP INFO REFRESH] {cid}: {e}')
+            if changed:
+                mark_dirty()
+                save_data()
+        except Exception as e:
+            print(f'[GROUP INFO WORKER ERROR] {e}')
+
+def _fmt_duration(seconds):
+    seconds = max(0, int(seconds))
+    days, seconds = divmod(seconds, 86400); hours, seconds = divmod(seconds, 3600); minutes, seconds = divmod(seconds, 60)
+    parts = []
+    if days: parts.append(f'{days}д')
+    if hours or days: parts.append(f'{hours}ч')
+    if minutes or hours or days: parts.append(f'{minutes}м')
+    parts.append(f'{seconds}с')
+    return ' '.join(parts)
+
+def _fmt_seen(ts):
+    if not ts: return 'нет данных'
+    try: return datetime.fromtimestamp(float(ts), tz=now_msk().tzinfo).strftime('%d.%m.%Y %H:%M')
+    except Exception: return 'нет данных'
+
+def _bot_chat_items(active_only=False):
+    items = []
+    for item in db.get('bot_chats', {}).values():
+        if isinstance(item, dict) and (not active_only or item.get('status') == 'active'):
+            items.append(item)
+    return sorted(items, key=lambda x: x.get('last_activity', x.get('last_seen', 0)), reverse=True)
+
+def _owner_only(message):
+    if not message or not getattr(message, 'from_user', None) or message.from_user.id != ADMIN_ID:
+        try: bot.reply_to(message, '❌ Эта команда доступна только владельцу бота.')
+        except Exception: pass
+        return False
+    return True
+
+def _global_message_stats():
+    total = users = 0
+    for econ in db.get('economy', {}).values():
+        if not isinstance(econ, dict): continue
+        count = int(econ.get('msg_stats', {}).get('total_count', 0) or 0)
+        if count: users += 1; total += count
+    return total, users
+
 def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
@@ -1402,7 +1509,10 @@ def setup_bot_commands():
         BotCommand('pass', '🎃 Хеллоуинский Боевой Пропуск'),
         BotCommand('pharmacy', '💊 Аптека и лечение мемных болезней'),
         BotCommand('gift_stars', '🎁 Подарить Stars товар другу'),
-        BotCommand('settings', '⚙️ Настройки бота в чате')
+        BotCommand('settings', '⚙️ Настройки бота в чате'),
+        BotCommand('groups', '📋 Группы, где находится бот'),
+        BotCommand('dashboard', '📊 Панель мониторинга владельца'),
+        BotCommand('groupinfo', '🔎 Информация о текущей группе')
     ]
     try:
         bot.set_my_commands(commands)
@@ -1964,6 +2074,11 @@ def can_process_user_message(message):
 
     if not message or not getattr(message, 'from_user', None):
         return False
+
+    try:
+        track_bot_chat(message.chat, status='active', touch_activity=True)
+    except Exception as e:
+        print(f'[GROUP TRACK ERROR] {e}')
 
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
@@ -2934,6 +3049,7 @@ def start_background_threads():
     threading.Thread(target=market_news_worker, daemon=True).start()
     threading.Thread(target=chat_quiz_worker, daemon=True).start()
     threading.Thread(target=chat_silence_worker, daemon=True).start()
+    threading.Thread(target=group_info_refresh_worker, daemon=True).start()
     threading.Thread(target=periodic_backup_worker, daemon=True).start()
     threading.Thread(target=auto_save_worker, daemon=True).start()
     threading.Thread(target=rest_manager_worker, daemon=True).start()
@@ -2942,6 +3058,27 @@ def start_background_threads():
 # ---------------------------------------------------------
 # ПРИВЕТСТВИЕ И ПРОЩАНИЕ
 # ---------------------------------------------------------
+@bot.my_chat_member_handler()
+def handle_bot_chat_membership(update):
+    try:
+        chat = getattr(update, 'chat', None)
+        if not chat or getattr(chat, 'type', '') not in ('group', 'supergroup'):
+            return
+        member = getattr(update, 'new_chat_member', None)
+        status = getattr(member, 'status', '') if member else ''
+        active = status in ('member', 'administrator')
+        item = track_bot_chat(chat, status='active' if active else 'inactive', touch_activity=active)
+        title = getattr(chat, 'title', None) or 'Без названия'; cid = getattr(chat, 'id', 0)
+        if active and item and not item.get('join_notified_at'):
+            item['join_notified_at'] = time.time(); mark_dirty()
+            try: bot.send_message(ADMIN_ID, f"🟢 <b>Бот добавлен в группу!</b>\n📌 {html.escape(title)}\n🆔 <code>{cid}</code>\n📡 Тип: <b>{_chat_type_label(getattr(chat, 'type', 'group'))}</b>", parse_mode='HTML')
+            except Exception as e: print(f'[GROUP JOIN NOTIFY ERROR] {e}')
+        elif status in ('left', 'kicked'):
+            try: bot.send_message(ADMIN_ID, f"🔴 <b>Бот покинул группу!</b>\n📌 {html.escape(title)}\n🆔 <code>{cid}</code>\n📡 Статус: <b>{'удалён/заблокирован' if status == 'kicked' else 'вышел'}</b>", parse_mode='HTML')
+            except Exception as e: print(f'[GROUP LEAVE NOTIFY ERROR] {e}')
+    except Exception as e:
+        print(f'[MY CHAT MEMBER ERROR] {e}')
+
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_members(message):
     if not can_process_user_message(message):
@@ -7527,6 +7664,91 @@ def _admin_grant(message):
     bot.reply_to(message, f"✅ <b>Выдача выполнена</b>\n👤 {html.escape(str(target_name or target_id))}\n🎁 {html.escape(', '.join(changed))}", parse_mode='HTML')
     return True
 
+@bot.message_handler(commands=['groups', 'группы'])
+def cmd_groups(message):
+    if not _owner_only(message): return
+    items = _bot_chat_items(False); active = [x for x in items if x.get('status') == 'active']; inactive = [x for x in items if x.get('status') != 'active']
+    if not items:
+        bot.reply_to(message, '📋 <b>Группы</b>\n\nПока ни одной группы не обнаружено.', parse_mode='HTML'); return
+
+    # /groups или /groups 2 — страницы по 10 групп, чтобы список не упирался в лимит Telegram.
+    try:
+        page = max(1, int((message.text or '').split(maxsplit=1)[1]))
+    except (ValueError, IndexError, TypeError):
+        page = 1
+    per_page = 10
+    total_pages = max(1, (len(items) + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    page_items = items[(page - 1) * per_page: page * per_page]
+
+    lines=[f'📋 <b>ГРУППЫ БОТА</b> · стр. <b>{page}/{total_pages}</b>',
+           '──────────────────────',
+           f'🟢 Активных: <b>{len(active)}</b>',
+           f'🔴 Неактивных: <b>{len(inactive)}</b>',
+           f'📊 Всего: <b>{len(items)}</b>','']
+    start_index = (page - 1) * per_page
+    for i,x in enumerate(page_items, start_index + 1):
+        st='🟢' if x.get('status')=='active' else '🔴'
+        title=html.escape(str(x.get('title') or 'Без названия'))
+        uname=f" @{html.escape(str(x['username']))}" if x.get('username') else ''
+        members = x.get('member_count')
+        member_line = f"\n   👥 Участников: <b>{members}</b>" if members is not None else ''
+        lines.append(f"{st} <b>{i}. {title}</b>{uname}\n   🆔 <code>{x.get('chat_id')}</code> · {_chat_type_label(x.get('type'))}{member_line}\n   🕐 Последнее обновление: {html.escape(_fmt_seen(x.get('last_seen')))}")
+    lines.append('')
+    if page < total_pages:
+        lines.append(f'➡️ Следующая страница: <code>/groups {page + 1}</code>')
+    if page > 1:
+        lines.append(f'⬅️ Предыдущая страница: <code>/groups {page - 1}</code>')
+    bot.send_message(message.chat.id,'\n'.join(lines),parse_mode='HTML')
+
+@bot.message_handler(commands=['activity', 'активность'])
+def cmd_activity(message):
+    if not _owner_only(message): return
+    items=_bot_chat_items(True)[:20]
+    lines=['📈 <b>ПОСЛЕДНЯЯ АКТИВНОСТЬ ГРУПП</b>','──────────────────────']
+    for i,x in enumerate(items,1):
+        last=x.get('last_activity',x.get('last_seen',0)); ago=_fmt_duration(time.time()-last) if last else 'нет данных'
+        lines.append(f"{i}. 🟢 <b>{html.escape(str(x.get('title') or 'Без названия'))}</b>\n   🕐 {ago} назад · 🆔 <code>{x.get('chat_id')}</code>")
+    bot.reply_to(message,'\n'.join(lines) if items else '📈 <b>Активность</b>\n\nАктивных групп пока нет.',parse_mode='HTML')
+
+@bot.message_handler(commands=['stats', 'статистика'])
+def cmd_global_stats(message):
+    if not _owner_only(message): return
+    total,users=_global_message_stats(); active=len(_bot_chat_items(True)); all_groups=len(db.get('bot_chats',{})); profiles=len(db.get('economy',{}))
+    bot.reply_to(message,f"📊 <b>ОБЩАЯ СТАТИСТИКА БОТА</b>\n──────────────────────\n🟢 Активных групп: <b>{active}</b>\n📋 Сохранённых групп: <b>{all_groups}</b>\n👤 Профилей: <b>{profiles}</b>\n💬 Сообщений в учёте: <b>{total:,}</b>\n👥 Пользователей с активностью: <b>{users}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
+
+@bot.message_handler(commands=['status', 'статус'])
+def cmd_bot_status(message):
+    if not _owner_only(message): return
+    bot_state='🟢 работает' if db.get('bot_active',True) else '🔴 спящий режим'; neon='🟢 подключена' if DATABASE_URL else '🟡 локальный fallback'
+    bot.reply_to(message,f"🟢 <b>СТАТУС БОТА</b>\n──────────────────────\n🤖 Состояние: <b>{bot_state}</b>\n📡 Активных групп: <b>{len(_bot_chat_items(True))}</b>\n💾 Neon: <b>{neon}</b>\n💾 Несохранённых изменений: <b>{'да' if db_dirty else 'нет'}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
+
+@bot.message_handler(commands=['dashboard', 'панель'])
+def cmd_dashboard(message):
+    if not _owner_only(message): return
+    total,_=_global_message_stats(); active=len(_bot_chat_items(True)); all_groups=len(db.get('bot_chats',{}))
+    bot.reply_to(message,f"📊 <b>ПАНЕЛЬ МОНИТОРИНГА</b>\n──────────────────────\n🟢 Групп сейчас: <b>{active}</b>\n📋 Записей групп: <b>{all_groups}</b>\n💬 Сообщений: <b>{total:,}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>\n\n📋 /groups — все группы\n📈 /activity — активность\n📊 /stats — статистика\n🟢 /status — состояние\n🔎 /groupinfo — текущая группа",parse_mode='HTML')
+
+@bot.message_handler(commands=['groupinfo', 'инфогруппы'])
+def cmd_group_info(message):
+    if not _owner_only(message): return
+    chat=message.chat
+    if getattr(chat,'type','') not in ('group','supergroup'):
+        bot.reply_to(message,'❌ Эту команду нужно использовать внутри группы.'); return
+    item=track_bot_chat(chat,'active',True) or {}; title=html.escape(str(getattr(chat,'title',None) or 'Без названия')); username=getattr(chat,'username',None) or item.get('username')
+    try:
+        members=bot.get_chat_member_count(chat.id)
+        item['member_count']=members
+        item['member_count_updated_at']=time.time()
+        mark_dirty()
+    except Exception:
+        members=item.get('member_count')
+    uname=f"🔗 @{html.escape(str(username))}" if username else '🔗 публичного username нет'; mem=f"👥 Участников: <b>{members}</b>" if members is not None else '👥 Участники: недоступно'
+    settings=get_chat_settings(chat.id)
+    flood='🟢 включён' if settings.get('flood_protection',False) else '🔴 выключен'
+    welcome='🟢 включены' if settings.get('welcome_enabled',True) else '🔴 выключены'
+    bot.reply_to(message,f"🔎 <b>ИНФОРМАЦИЯ О ГРУППЕ</b>\n──────────────────────\n📌 <b>{title}</b>\n🆔 <code>{chat.id}</code>\n{uname}\n{mem}\n📡 Тип: <b>{_chat_type_label(getattr(chat,'type','group'))}</b>\n🟢 Бот: <b>активен</b>\n🛡 Антифлуд: <b>{flood}</b>\n👋 Приветствия: <b>{welcome}</b>\n🕐 Последняя активность: <b>{_fmt_seen(item.get('last_activity'))}</b>",parse_mode='HTML')
+
 @bot.message_handler(commands=['give', 'выдать', 'grant'])
 def admin_give_command(message):
     _admin_grant(message)
@@ -7535,6 +7757,11 @@ def admin_give_command(message):
 def handle_messages(message):
     if not message or not getattr(message, 'from_user', None):
         return
+
+    try:
+        track_bot_chat(message.chat, status='active', touch_activity=True)
+    except Exception as e:
+        print(f'[GROUP TRACK ERROR] {e}')
 
     chat_id = message.chat.id
     if is_chat_banned(chat_id):
