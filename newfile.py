@@ -12,7 +12,7 @@ import time
 import telebot
 import psycopg2
 from psycopg2.extras import Json
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation
 from flask import Flask
 
 # ---------------------------------------------------------
@@ -5847,34 +5847,42 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
 
     if message_id_to_edit:
-        # Если это уже animation, Telegram позволяет менять её caption.
+        # Если GIF активен, сама карточка должна быть animation-сообщением.
+        # Сначала пытаемся изменить media (если старое сообщение уже GIF),
+        # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
         if gif_info:
             try:
-                bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
+                media = InputMediaAnimation(gif_info['url'], caption=text, parse_mode='HTML')
+                bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup)
                 return
+            except Exception as media_error:
+                print(f"[PROFILE GIF MEDIA EDIT] {media_error}")
+            try:
+                bot.delete_message(chat_id, message_id_to_edit)
             except Exception:
                 pass
+            try:
+                bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
+                return
+            except Exception as gif_error:
+                print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
+
+        # GIF выключен: обычная текстовая карточка. Если старое сообщение было
+        # animation, edit_message_text не сработает — тогда заменяем его текстом.
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
             return
         except Exception as profile_edit_error:
             print(f"[PROFILE EDIT ERROR] {profile_edit_error}")
-            # Текстовое сообщение нельзя превратить в animation через edit_message.
-            # Создаём новую карточку с GIF и удаляем старую только если GIF должен быть активен.
-            if gif_info:
-                try:
-                    bot.delete_message(chat_id, message_id_to_edit)
-                except Exception:
-                    pass
-                try:
-                    bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
-                    return
-                except Exception as gif_error:
-                    print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
             try:
-                bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
+                bot.delete_message(chat_id, message_id_to_edit)
+            except Exception:
+                pass
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 return
-            except Exception as e: print(f"[PROFILE EDIT CAPTION ERROR] {e}")
+            except Exception as text_error:
+                print(f"[PROFILE TEXT REPLACE ERROR] {text_error}")
 
     if gif_info:
         try:
@@ -8084,6 +8092,40 @@ def admin_give_gif_command(message):
 def admin_give_command(message):
     _admin_grant(message)
 
+@bot.message_handler(commands=['resources', 'ресурсы', 'collection', 'коллекция'])
+def cmd_resources_command(message):
+    command_token = (message.text or '').split()[0].lower() if message.text else ''
+    if command_token in ('/collection', '/коллекция'):
+        cmd_collection(message)
+    else:
+        if not can_process_user_message(message): return
+        uid = message.from_user.id
+        name = (f'{message.from_user.first_name or ""} {message.from_user.last_name or ""}').strip() or message.from_user.username or 'Игрок'
+        render_resources_view(message.chat.id, uid, name)
+
+@bot.message_handler(commands=['guild', 'гильдия', 'клан'])
+def cmd_guild_command(message):
+    cmd_guild(message)
+
+@bot.message_handler(commands=['pmarket', 'рынок_игроков'])
+def cmd_player_market_command(message):
+    cmd_player_market(message)
+
+@bot.message_handler(commands=['raid', 'рейд'])
+def cmd_raid_command(message):
+    cmd_raid(message)
+
+@bot.message_handler(commands=['season', 'сезон', 'рейтинг_сезона'])
+def cmd_season_command(message):
+    cmd_season(message)
+
+@bot.message_handler(commands=['world', 'мир', 'карта'])
+def cmd_world_command(message):
+    cmd_world(message)
+
+# ---------------------------------------------------------
+# ОБРАБОТКА CALLBACK КНОПОК
+# ---------------------------------------------------------
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     if not message or not getattr(message, 'from_user', None):
@@ -8100,6 +8142,13 @@ def handle_messages(message):
 
     text = message.text.strip() if message.text else ''
     str_chat = str(chat_id)
+
+    # Все зарегистрированные slash-команды обрабатываются отдельными handlers выше.
+    # Если Telegram прислал неизвестную slash-команду, не запускаем её как обычный текст.
+    if text.startswith('/'):
+        command_token = text.split()[0].split('@')[0].lower()
+        if command_token not in {'/calc'}:
+            return
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
@@ -9501,40 +9550,7 @@ def cmd_world(message):
     markup.add(InlineKeyboardButton('🏹 Лес', callback_data=f'world_hunt:{message.from_user.id}'), InlineKeyboardButton('🐉 Рейд', callback_data=f'world_raid:{message.from_user.id}'))
     bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
-@bot.message_handler(commands=['resources', 'ресурсы', 'collection', 'коллекция'])
-def cmd_resources_command(message):
-    command_token = (message.text or '').split()[0].lower() if message.text else ''
-    if command_token in ('/collection', '/коллекция'):
-        cmd_collection(message)
-    else:
-        if not can_process_user_message(message): return
-        uid = message.from_user.id
-        name = (f'{message.from_user.first_name or ""} {message.from_user.last_name or ""}').strip() or message.from_user.username or 'Игрок'
-        render_resources_view(message.chat.id, uid, name)
 
-@bot.message_handler(commands=['guild', 'гильдия', 'клан'])
-def cmd_guild_command(message):
-    cmd_guild(message)
-
-@bot.message_handler(commands=['pmarket', 'рынок_игроков'])
-def cmd_player_market_command(message):
-    cmd_player_market(message)
-
-@bot.message_handler(commands=['raid', 'рейд'])
-def cmd_raid_command(message):
-    cmd_raid(message)
-
-@bot.message_handler(commands=['season', 'сезон', 'рейтинг_сезона'])
-def cmd_season_command(message):
-    cmd_season(message)
-
-@bot.message_handler(commands=['world', 'мир', 'карта'])
-def cmd_world_command(message):
-    cmd_world(message)
-
-# ---------------------------------------------------------
-# ОБРАБОТКА CALLBACK КНОПОК
-# ---------------------------------------------------------
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
     try:
