@@ -5788,6 +5788,12 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
     except Exception:
         pass
 
+# Stars-only товары НИКОГДА не показываются и не выдаются через обычный магазин.
+# Это отдельно защищено и на уровне кнопок, чтобы нельзя было купить их старым callback-ом.
+STARS_ONLY_THEME_IDS = {'stars_gold', 'stars_anime', 'stars_galaxy'}
+STARS_ONLY_PET_IDS = {'vip_griffin'}
+
+
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -9893,11 +9899,12 @@ def callback_inline(call):
                 "🎨 <b>КАТАЛОГ ТЕМ ОФОРМЛЕНИЯ ПРОФИЛЯ</b> 😺", "──────────────────────",
                 "<i>Тема полностью меняет графический стиль и рамки команды /profile!</i> 😸\n"
             ]
-            for t_k, t_v in THEMES.items():
-                if t_k != 'default': lines.append(f"• <b>{t_v['name']}</b> — <code>{t_v['price']} 🪙</code>")
+            coin_themes = [(t_k, t_v) for t_k, t_v in THEMES.items() if t_k != 'default' and t_k not in STARS_ONLY_THEME_IDS]
+            for t_k, t_v in coin_themes:
+                lines.append(f"• <b>{t_v['name']}</b> — <code>{t_v['price']} 🪙</code>")
             lines.append("──────────────────────")
             markup = InlineKeyboardMarkup(row_width=2)
-            btns = [InlineKeyboardButton(f"{t_v['name']} • {t_v['price']} 🪙", callback_data=f"buy_theme_{t_k}:{user_id}") for t_k, t_v in THEMES.items() if t_k != 'default']
+            btns = [InlineKeyboardButton(f"{t_v['name']} • {t_v['price']} 🪙", callback_data=f"buy_theme_{t_k}:{user_id}") for t_k, t_v in coin_themes]
             for i in range(0, len(btns), 2):
                 markup.add(*btns[i:i+2])
             markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
@@ -9907,6 +9914,9 @@ def callback_inline(call):
         elif action_data.startswith('buy_theme_'):
             t_key = action_data.replace('buy_theme_', '')
             if t_key in THEMES:
+                if t_key in STARS_ONLY_THEME_IDS:
+                    bot.answer_callback_query(call.id, '⭐️ Эта тема доступна только в /stars. В обычном магазине её купить нельзя.', show_alert=True)
+                    return
                 theme = THEMES[t_key]
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 purchased = econ.setdefault('purchased_themes', ['default'])
@@ -10834,9 +10844,8 @@ def callback_inline(call):
             for t_key, t_info in current_items:
                 markup.add(InlineKeyboardButton(f"{t_info['text']} • {t_info['price']} 🪙", callback_data=f"buy_title_{t_key}:{user_id}"))
             
-            if page == 0:
-                markup.add(InlineKeyboardButton('🌟 Сертификат Своего Титула (15к 🪙)', callback_data=f'buy_cert_custom_title:{user_id}'))
-                
+            # Сертификат кастомного титула теперь продаётся только за Telegram Stars в /stars.
+
             nav_row = []
             if page > 0: nav_row.append(InlineKeyboardButton('⬅️ Назад', callback_data=f'shop_cat_titles_{page-1}:{user_id}'))
             if page < total_pages - 1: nav_row.append(InlineKeyboardButton('Вперед ➡️', callback_data=f'shop_cat_titles_{page+1}:{user_id}'))
@@ -10849,7 +10858,7 @@ def callback_inline(call):
         elif action_data.startswith('shop_cat_pets_'):
             page = int(action_data.replace('shop_cat_pets_', ''))
             items_per_page = 4
-            items = list(PETS_DATA.items())
+            items = [(p_k, p_v) for p_k, p_v in PETS_DATA.items() if p_k not in STARS_ONLY_PET_IDS]
             total_pages = (len(items) + items_per_page - 1) // items_per_page
             
             start_idx = page * items_per_page
@@ -10877,6 +10886,8 @@ def callback_inline(call):
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data == 'buy_cert_custom_title':
+            bot.answer_callback_query(call.id, '⭐️ Сертификат кастомного титула теперь доступен только в /stars.', show_alert=True)
+            return
             econ = get_user_econ(user_id, user_name, username=user_username)
             if econ.get('has_custom_title_cert', False):
                 bot.answer_callback_query(call.id, '❌ Сертификат уже куплен! Введите /custom_title', show_alert=True)
@@ -10944,6 +10955,9 @@ def callback_inline(call):
         elif action_data.startswith('buy_pet_'):
             pet_id = action_data.replace('buy_pet_', '')
             if pet_id in PETS_DATA:
+                if pet_id in STARS_ONLY_PET_IDS:
+                    bot.answer_callback_query(call.id, '⭐️ Этот питомец доступен только в /stars. В обычном магазине его купить нельзя.', show_alert=True)
+                    return
                 p_data = PETS_DATA[pet_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 if pet_id == 'vip_griffin':
