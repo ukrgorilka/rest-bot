@@ -879,7 +879,7 @@ PETS_DATA = {
     'dragon': {'name': '🐉 Маленький Дракон', 'short': '🐉 Дракончик', 'price': 12000, 'luck_bonus': 85, 'desc': '+85% к удаче во всем'},
     'capybara': {'name': '🦦 Капибара Чила', 'short': '🦦 Капибара', 'price': 15000, 'luck_bonus': 90, 'desc': '+90% к удаче, максимальный чилл'},
     'unicorn': {'name': '🦄 Радужный Единорог', 'short': '🦄 Единорог', 'price': 25000, 'luck_bonus': 110, 'desc': '+110% ко всем доходам'},
-    'vip_griffin': {'name': '👑 Королевский Грифон', 'short': '👑 Грифон', 'price': 0, 'luck_bonus': 150, 'desc': '+150% ко всей удаче, благословение небес (VIP Питомец за 3 ⭐️)'}
+    'vip_griffin': {'name': '👑 Королевский Грифон', 'short': '👑 Грифон', 'price': 0, 'luck_bonus': 150, 'desc': '+150% ко всей удаче, благословение небес (VIP Питомец за 5 ⭐️)'}
 }
 
 ACHIEVEMENTS = {
@@ -1436,8 +1436,10 @@ def get_chat_settings(chat_id):
         sett.setdefault('auto_reactions', True)
         sett.setdefault('welcome_enabled', True)
         # Раньше стоял жёсткий лимит 30/60 дней — теперь ограничения нет.
-        sett['max_days'] = None
-        mark_dirty()
+        # Не вызываем mark_dirty() при обычном чтении настроек.
+        if sett.get('max_days') is not None:
+            sett['max_days'] = None
+            mark_dirty()
     return db['settings'][str_chat]
 
 def get_market_data():
@@ -1965,6 +1967,7 @@ def can_process_user_message(message):
 
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
     is_super_admin = (user_id == ADMIN_ID)
 
     # Запоминаем чаты, где пользователь реально встречался. Это позволяет
@@ -5328,77 +5331,10 @@ def cmd_settings(message):
     render_settings_view(message.chat.id, message.from_user.id)
 
 # ---------------------------------------------------------
-# АВАТАРКА ПРОФИЛЯ
+# НАСТРОЙКИ ПРОФИЛЯ
+# Аватарки профиля отключены: старое поле pfp_file_id намеренно не трогаем
+# для совместимости со старыми данными, но больше нигде не используем.
 # ---------------------------------------------------------
-@bot.message_handler(commands=['set_pfp', 'аватарка'])
-def cmd_set_pfp(message):
-    if not can_process_user_message(message):
-        return
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-
-    photo_file_id = None
-    if message.photo: photo_file_id = message.photo[-1].file_id
-    elif message.reply_to_message and message.reply_to_message.photo: photo_file_id = message.reply_to_message.photo[-1].file_id
-
-    if not photo_file_id:
-        bot.reply_to(
-            message,
-            "📸 <b>КАК УСТАНОВИТЬ АВАТАРКУ В ПРОФИЛЬ:</b> 😺\n"
-            "──────────────────────\n"
-            "1. Отправьте в чат картинку и в подписи (caption) напишите <code>/set_pfp</code>\n"
-            "2. Либо ответьте командой <code>/set_pfp</code> на любое сообщение с фото!\n"
-            "──────────────────────",
-            parse_mode='HTML'
-        )
-        return
-
-    econ['pfp_file_id'] = photo_file_id
-    mark_dirty()
-    bot.reply_to(message, "✅ <b>Ваша аватарка профиля успешно установлена!</b> 😻\nПосмотреть: <code>/profile</code>", parse_mode='HTML')
-
-@bot.message_handler(commands=['del_pfp', 'удалить_аватарку'])
-def cmd_del_pfp(message):
-    if not can_process_user_message(message):
-        return
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-    econ['pfp_file_id'] = None
-    mark_dirty()
-    bot.reply_to(message, "🗑 <b>Аватарка профиля успешно удалена!</b> 😿", parse_mode='HTML')
-
-# ---------------------------------------------------------
-# ПРОФИЛЬ, НАСТРОЙКИ ТЕМ И ШРИФТОВ
-# ---------------------------------------------------------
-@bot.message_handler(commands=['custom_title', 'set_title'])
-def cmd_custom_title(message):
-    if not can_process_user_message(message):
-        return
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-
-    if not econ.get('has_custom_title_cert', False):
-        bot.reply_to(message, "❌ У вас нет <b>Сертификата на кастомный титул</b>! 😿\nКупите его в <code>/shop</code> за 15,000 🪙.", parse_mode='HTML')
-        return
-
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        bot.reply_to(message, "❌ Укажите желаемый титул! 😾\nПример: <code>/custom_title 👑 Главный Кот</code>", parse_mode='HTML')
-        return
-
-    raw_title = parts[1].strip()[:32]
-    clean_title = re.sub(r'<[^>]*>', '', raw_title).strip()
-    if not clean_title:
-        bot.reply_to(message, "❌ Недопустимый титул (содержит только теги)!", parse_mode='HTML')
-        return
-    econ['custom_title'] = clean_title
-    econ['active_title'] = None
-    mark_dirty()
-    bot.reply_to(message, f"🎉 Ваш кастомный титул успешно установлен: <b>[{html.escape(clean_title)}]</b>! 😻", parse_mode='HTML')
-
 def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     cur_theme = econ.get('profile_theme', 'default')
@@ -5416,7 +5352,6 @@ def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
         InlineKeyboardButton("👑 Титулы", callback_data=f"ps_titles:{user_id}")
     )
     markup.add(
-        InlineKeyboardButton("📸 Сменить Аватарку", callback_data=f"ps_pfp:{user_id}"),
         InlineKeyboardButton("🔙 В Профиль", callback_data=f"ps_back_profile:{user_id}")
     )
 
@@ -5582,45 +5517,33 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
                 return
             except Exception as e: print(f"[PROFILE EDIT CAPTION ERROR] {e}")
 
-    pfp_id = econ.get('pfp_file_id')
-    if pfp_id:
-        # Telegram has a much smaller limit for photo captions than for normal
-        # messages. The full profile can be longer, so never put the whole
-        # profile into a photo caption. Send the picture separately and the
-        # full profile as a normal HTML message.
-        try:
-            if message_to_reply:
-                bot.send_photo(
-                    chat_id,
-                    pfp_id,
-                    caption=f"{premium_emoji('profile', '🐱')} <b>ПРОФИЛЬ</b>",
-                    reply_to_message_id=message_to_reply.message_id,
-                    parse_mode='HTML'
-                )
-            else:
-                bot.send_photo(
-                    chat_id,
-                    pfp_id,
-                    caption=f"{premium_emoji('profile', '🐱')} <b>ПРОФИЛЬ</b>",
-                    parse_mode='HTML'
-                )
-
-            if message_to_reply:
-                bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
-            else:
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-            return
-        except Exception as e:
-            print(f"[PROFILE PHOTO ERROR] {e}")
-            # If the saved avatar itself is invalid/deleted, still show the
-            # complete profile instead of failing silently.
-
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
+
+
+def get_durak_rank(wins):
+    """Возвращает ранг по победам в Дураке. Не ломает старые профили."""
+    try:
+        wins = max(0, int(wins or 0))
+    except (TypeError, ValueError):
+        wins = 0
+    if wins >= 500:
+        return "👑 Император Дурака"
+    if wins >= 250:
+        return "💎 Мастер Дурака"
+    if wins >= 100:
+        return "🔥 Ветеран Дурака"
+    if wins >= 50:
+        return "⭐ Опытный игрок"
+    if wins >= 20:
+        return "🎲 Игрок"
+    if wins >= 5:
+        return "🌱 Новичок"
+    return "🪶 Ученик"
 
 
 def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
@@ -7308,7 +7231,7 @@ def render_halloween_bp_view(chat_id, user_id, user_name, message_id=None):
 
     lvl, in_exp, req_exp, bar = get_user_bp_level(bp_exp)
 
-    prem_status = "👑 Премиум Ветка АКТИВНА" if is_prem else "🔒 Бесплатная Ветка (Премиум за 2 ⭐️)"
+    prem_status = "👑 Премиум Ветка АКТИВНА" if is_prem else "🔒 Бесплатная Ветка (Премиум за 4 ⭐️)"
 
     lines = [
         "🎃 <b>ХЕЛЛОУИНСКИЙ СЕЗОН: BATTLE PASS</b> 🦇 😺",
@@ -7329,7 +7252,7 @@ def render_halloween_bp_view(chat_id, user_id, user_name, message_id=None):
     markup.add(InlineKeyboardButton("🎁 Забрать доступные награды", callback_data=f"claim_bp_rewards:{user_id}"))
 
     if not is_prem:
-        markup.add(InlineKeyboardButton("⭐️ Купить Премиум Pass (2 ⭐️ Stars)", callback_data=f"buy_bp_prem_stars:{user_id}"))
+        markup.add(InlineKeyboardButton("⭐️ Купить Премиум Pass (4 ⭐️ Stars)", callback_data=f"buy_bp_prem_stars:{user_id}"))
 
     text = "\n".join(lines)
     if message_id:
@@ -8934,9 +8857,9 @@ def callback_inline(call):
                     invoice_payload=f"bpprem_self:{user_id}:{int(time.time())}",
                     provider_token="",
                     currency="XTR",
-                    prices=[LabeledPrice(label="Хеллоуин Pass", amount=2)]
+                    prices=[LabeledPrice(label="Хеллоуин Pass", amount=STARS_COSMETICS['bp_premium']['stars'])]
                 )
-                bot.answer_callback_query(call.id, "⭐️ Счёт на 2 ⭐️ выставлен!")
+                bot.answer_callback_query(call.id, "⭐️ Счёт на 4 ⭐️ выставлен!")
             except Exception as e:
                 bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
             return
@@ -9029,16 +8952,12 @@ def callback_inline(call):
                 if title_key in TITLES and title_key != active:
                     markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}:{user_id}"))
             if active or econ.get('custom_title'):
-                markup.add(InlineKeyboardButton("❌ Снять текущий титул", callback_data=f"confirm_remove_title:{user_id}"))
+                markup.add(InlineKeyboardButton("❌ Снять текущий титул", callback_data=f"remove_title:{user_id}"))
             markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
             text = "👑 <b>НАСТРОЙКА ТИТУЛА ПРОФИЛЯ</b>\n──────────────────────\nВыберите купленный титул или снимите текущий."
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             bot.answer_callback_query(call.id); return
-
-        elif action_data == 'ps_pfp':
-            bot.answer_callback_query(call.id, "📸 Аватарка профиля настраивается командой /set_pfp.", show_alert=True)
-            return
 
         # МАГАЗИН: ГЛАВНОЕ МЕНЮ
                 # КАТЕГОРИИ МАГАЗИНА STARS
@@ -10996,7 +10915,7 @@ def callback_inline(call):
                 if pet_id == 'vip_griffin':
                     # Грифон — Stars-only. Нулевой price в каталоге никогда не означает бесплатную выдачу.
                     if 'pet_griffin' not in econ.setdefault('paid_stars_items', []):
-                        bot.answer_callback_query(call.id, "❌ Королевский Грифон доступен только после успешной оплаты 3 ⭐️ в Stars-магазине.", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Королевский Грифон доступен только после успешной оплаты 5 ⭐️ в Stars-магазине.", show_alert=True)
                         return
                 else:
                     if econ['balance'] < p_data['price']:
@@ -11062,10 +10981,6 @@ def validate_stars_payload(payload, amount, buyer_id):
             _, gift_kind, item_key, target_raw, payload_buyer_raw = g
             catalogs = {'coins': STARS_COIN_PACKS, 'pass': STARS_VIP_PASS, 'cosm': STARS_COSMETICS}
             item = catalogs.get(gift_kind, {}).get(item_key)
-            if gift_kind == 'cosm' and item is None:
-                special = {'bp_premium': ('🎃 Премиум Хеллоуин Pass', 2), 'custom_title': ('🌟 Сертификат Кастомного Титула', 2), 'pet_griffin': ('🐱 Королевский Грифон', 3)}
-                if item_key in special:
-                    n, st = special[item_key]; item = {'name': n, 'stars': st}
             if not item:
                 return False, 'Товар подарка не найден.'
             if int(amount) != int(item['stars']):
@@ -11108,27 +11023,13 @@ def validate_stars_payload(payload, amount, buyer_id):
             expected = item.get('stars') if item else None
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
         elif key.startswith('bpprem_'):
-            expected = 2
+            expected = STARS_COSMETICS.get('bp_premium', {}).get('stars')
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
             # Не разрешаем даже выставлять новый счёт за вечный Pass, если он уже есть.
             if payload_buyer is not None:
                 buyer_econ = get_user_econ(user_id=payload_buyer)
                 if buyer_econ.get('bp_premium'):
                     return False, 'Премиум Pass уже куплен.'
-        elif key.startswith('gift2:'):
-            g = key.split(':')
-            if len(g) != 5:
-                return False, 'Некорректный подарочный payload.'
-            _, gift_kind, item_key, target_raw, buyer_raw = g
-            catalogs = {'coins': STARS_COIN_PACKS, 'pass': STARS_VIP_PASS, 'cosm': STARS_COSMETICS}
-            item = catalogs.get(gift_kind, {}).get(item_key)
-            if gift_kind == 'cosm' and item is None:
-                special = {'bp_premium': ('🎃 Премиум Хеллоуин Pass', 2), 'custom_title': ('🌟 Сертификат Кастомного Титула', 2), 'pet_griffin': ('🐱 Королевский Грифон', 3)}
-                if item_key in special:
-                    n, st = special[item_key]; item = {'name': n, 'stars': st}
-            expected = item.get('stars') if item else None
-            target_id = int(target_raw) if target_raw.isdigit() else None
-            payload_buyer = int(buyer_raw) if buyer_raw.isdigit() else None
         else:
             return False, 'Неизвестный товар.'
         if expected is None or int(amount) != int(expected):
@@ -11148,21 +11049,6 @@ def validate_stars_payload(payload, amount, buyer_id):
             err = stars_purchase_error(buyer_econ, 'cosm', item_key)
             if err:
                 return False, err.replace('❌ ', '')
-        elif key.startswith('gift2:') and target_id:
-            # Для подарков проверяем владение именно получателя.
-            target_econ = get_user_econ(user_id=target_id)
-            if actual.startswith('pass_'):
-                item_key = actual.replace('pass_', '', 1)
-                err = stars_purchase_error(target_econ, 'vippass', item_key)
-                if err:
-                    return False, 'Получатель уже владеет этим вечным VIP.'
-            elif actual == 'bp_premium':
-                if target_econ.get('bp_premium'):
-                    return False, 'Получатель уже владеет Премиум Pass.'
-            elif actual in STARS_COSMETICS:
-                err = stars_purchase_error(target_econ, 'cosm', actual)
-                if err:
-                    return False, 'Получатель уже владеет этим вечным Stars-предметом.'
         return True, ''
     except Exception:
         return False, 'Некорректный платёжный payload.'
@@ -11176,6 +11062,18 @@ def process_stars_pre_checkout(pre_checkout_query):
         print(f"[PRE-CHECKOUT ERROR] {e}")
         try: bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message='Платёж не прошёл проверку.')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
+
+def mark_stars_charge_processed(charge_id):
+    if not charge_id:
+        return
+    processed = db.setdefault('processed_stars_charges', [])
+    if charge_id in processed:
+        return
+    processed.append(charge_id)
+    if len(processed) > 10000:
+        del processed[:-10000]
+    mark_dirty()
+
 
 @bot.message_handler(content_types=['successful_payment'])
 def process_stars_successful_payment(message):
@@ -11195,13 +11093,8 @@ def process_stars_successful_payment(message):
         processed = db.setdefault('processed_stars_charges', [])
         if charge_id and charge_id in processed:
             print(f"[STARS] duplicate payment ignored: {charge_id}")
+            mark_stars_charge_processed(charge_id)
             return
-        if charge_id:
-            processed.append(charge_id)
-            mark_dirty()
-            # Keep the persistent list bounded.
-            if len(processed) > 10000:
-                del processed[:-10000]
         chat_id = message.chat.id
         
         parts = payload.split(':')
@@ -11210,6 +11103,7 @@ def process_stars_successful_payment(message):
             gift_parts = payload.split('|')
             if len(gift_parts) != 5:
                 print(f'[STARS SECURITY] malformed gift2 payload: {payload!r}')
+                mark_stars_charge_processed(charge_id)
                 return
             buyer_id = int(gift_parts[4])
         elif prod_type_key.startswith('gift_'):
@@ -11230,15 +11124,18 @@ def process_stars_successful_payment(message):
             _err = stars_purchase_error(econ, 'vippass', _pk)
             if _err:
                 print(f"[STARS SECURITY] permanent VIP replay blocked: {_pk} buyer={buyer_id}")
+                mark_stars_charge_processed(charge_id)
                 return
         elif prod_type_key.startswith('cosm_'):
             _ck = prod_type_key.replace('cosm_', '', 1)
             _err = stars_purchase_error(econ, 'cosm', _ck)
             if _err:
                 print(f"[STARS SECURITY] permanent cosmetic replay blocked: {_ck} buyer={buyer_id}")
+                mark_stars_charge_processed(charge_id)
                 return
         elif prod_type_key.startswith('bpprem_') and econ.get('bp_premium'):
             print(f"[STARS SECURITY] premium pass replay blocked: buyer={buyer_id}")
+            mark_stars_charge_processed(charge_id)
             return
 
         # Только после успешной проверки товара учитываем Stars в статистике поддержки.
@@ -11276,6 +11173,7 @@ def process_stars_successful_payment(message):
             elif actual_prod == 'bp_premium':
                 if target_econ.get('bp_premium'):
                     print(f"[STARS SECURITY] duplicate gifted premium pass blocked: target={target_id}")
+                    mark_stars_charge_processed(charge_id)
                     return
                 target_econ['bp_premium'] = True
                 target_econ.setdefault('paid_stars_items', [])
@@ -11349,6 +11247,7 @@ def process_stars_successful_payment(message):
                 f"<i>Огромное спасибо за поддержку сервера и доброту!</i> 😸",
                 parse_mode='HTML'
             )
+            mark_stars_charge_processed(charge_id)
             return
 
         # Покупка bp_premium себе
@@ -11360,6 +11259,7 @@ def process_stars_successful_payment(message):
             mark_dirty()
             log_event('STARS BP PREM', f'{user_link} активировал Премиум Хеллоуин Pass!')
             bot.reply_to(message, f"🎃 <b>ПРЕМИУМ ХЕЛЛОУИН PASS АКТИВИРОВАН!</b> 😻\nТеперь вам доступны все премиум-награды, Тыквокот и Тёмная тема в <code>/pass</code>!", parse_mode='HTML')
+            mark_stars_charge_processed(charge_id)
             return
 
         # 1. Покупка пакета коинов
@@ -11384,6 +11284,7 @@ def process_stars_successful_payment(message):
                     f"<i>Огромное спасибо за поддержку сервера и бота!</i> 😸"
                 )
                 bot.reply_to(message, success_msg, parse_mode='HTML')
+                mark_stars_charge_processed(charge_id)
                 return
 
         # 2. Покупка VIP Nya Pass
@@ -11423,6 +11324,7 @@ def process_stars_successful_payment(message):
                     f"<i>Приятной игры с максимальным комфортом!</i> 😸"
                 )
                 bot.reply_to(message, success_msg, parse_mode='HTML')
+                mark_stars_charge_processed(charge_id)
                 return
 
         # 3. Покупка эксклюзивной косметики
@@ -11444,6 +11346,7 @@ def process_stars_successful_payment(message):
                         f"<code>/custom_title Ваш Титул</code> 😸",
                         parse_mode='HTML'
                     )
+                    mark_stars_charge_processed(charge_id)
                     return
                 elif c_type == 'theme':
                     theme_id = cosm['theme_id']
@@ -11461,11 +11364,13 @@ def process_stars_successful_payment(message):
                         f"Проверьте свой новый визуал командой: <code>/profile</code> 😸",
                         parse_mode='HTML'
                     )
+                    mark_stars_charge_processed(charge_id)
                     return
                 elif c_type == 'donor_title':
                     title_id = cosm.get('title_id')
                     if title_id not in TITLES or not TITLES[title_id].get('donor_only'):
                         bot.reply_to(message, '❌ Некорректный донатный титул.', parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id)
                         return
                     econ.setdefault('paid_stars_items', [])
                     if cosm_id not in econ['paid_stars_items']:
@@ -11478,6 +11383,7 @@ def process_stars_successful_payment(message):
                     mark_dirty()
                     log_event('STARS ТИТУЛ', f'Игрок {user_link} активировал донатный титул {TITLES[title_id]["name"]} за {stars_amount} ⭐️!')
                     bot.reply_to(message, f"👑 <b>ДОНАТНЫЙ ТИТУЛ АКТИВИРОВАН!</b> 😻\n──────────────────────\n<b>{TITLES[title_id]['text']}</b>\n{TITLES[title_id]['desc']}\n\nТитул сразу надет в профиль. 😸", parse_mode='HTML')
+                    mark_stars_charge_processed(charge_id)
                     return
                 elif c_type == 'badge':
                     badge_emoji = cosm['emoji']
@@ -11494,6 +11400,7 @@ def process_stars_successful_payment(message):
                         f"Значок <b>{badge_emoji} ({cosm['name']})</b> теперь красуется в вашем профиле и в чате! 😸",
                         parse_mode='HTML'
                     )
+                    mark_stars_charge_processed(charge_id)
                     return
                 elif c_type == 'pet':
                     pet_id = cosm['pet_id']
@@ -11520,16 +11427,17 @@ def process_stars_successful_payment(message):
                         f"Бонус удачи: <b>+{p_info['luck_bonus']}%</b> ко всем играм, рыбалке и охоте! 😸",
                         parse_mode='HTML'
                     )
+                    mark_stars_charge_processed(charge_id)
                     return
 
         # Дефолтная благодарность если что-то иное
         econ['balance'] += stars_amount * 35000
         mark_dirty()
         bot.reply_to(message, f"🎉 Спасибо за поддержку в размере <b>{stars_amount} ⭐️</b>! Начислено <b>+{stars_amount * 35000:,} Ня-коинов 🪙</b>! 😻", parse_mode='HTML')
+        mark_stars_charge_processed(charge_id)
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
-
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ---------------------------------------------------------
