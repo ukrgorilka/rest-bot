@@ -1333,20 +1333,7 @@ def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
     if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'exp_bonus':
         bonus += (TITLES[active_t]['val'] / 100.0)
 
-    gained = int(exp_amount * bonus)
-    econ['account_exp'] = econ.get('account_exp', 0) + gained
-    # Новая система прогресса: дневные задания + сезонный прогресс.
-    today = now_msk().strftime('%Y-%m-%d')
-    daily = econ.setdefault('daily_progress', {})
-    if daily.get('date') != today:
-        daily.clear()
-        daily['date'] = today
-    daily['xp'] = daily.get('xp', 0) + max(0, gained)
-    season_key = now_msk().strftime('%Y-%m')
-    if econ.get('season_key') != season_key:
-        econ['season_key'] = season_key
-        econ['season_points'] = 0
-    econ['season_points'] = econ.get('season_points', 0) + max(0, gained)
+    econ['account_exp'] = econ.get('account_exp', 0) + int(exp_amount * bonus)
     mark_dirty()
 
 def add_message_stat(user_id, user_tag, username=None):
@@ -1956,7 +1943,7 @@ def parse_target_and_args(message, cmd_prefix):
 
 def parse_transfer_command(message):
     text = message.text.strip() if message.text else ''
-    body = re.sub(r'^(?:/pay|перевод|передать)\s*', '', text, flags=re.IGNORECASE).strip()
+    body = re.sub(r'^(?:/pay|перевод|передать|отправить|скинуть)\s*', '', text, flags=re.IGNORECASE).strip()
 
     if message.reply_to_message:
         u = message.reply_to_message.from_user
@@ -2453,9 +2440,34 @@ def goodbye_left_member(message):
 def send_welcome(message):
     if not can_process_user_message(message):
         return
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
-    render_new_main_menu(message.chat.id, user_id, user_name)
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("📚 ЧИТАТЬ ПОЛНЫЙ ГАЙД В TELETYPE 🌐", url="https://teletype.in/@ukrgorilka/Nya")
+    )
+    
+    welcome_text = (
+        "🤖 <b>ГЛАВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
+        "──────────────────────\n"
+        "Добро пожаловать! Все команды, механики экономики, рестов, бизнесов и игр собраны в официальном руководстве: 😻\n\n"
+        "📖 <b>Официальный Teletype гайд:</b>\n"
+        "👉 https://teletype.in/@ukrgorilka/Nya\n\n"
+        "🎁 <b>Активируйте промокод:</b> <code>/promo FIX</code> на <b>5,000 🪙</b>!\n"
+        "\n💰 <b>БЫСТРЫЕ РУССКИЕ КОМАНДЫ</b>\n"
+        "• <code>баланс</code> / <code>профиль</code> / <code>магазин</code>\n"
+        "• <code>передать 10000</code> — ответом на сообщение\n"
+        "• <code>передать @username 10000</code> — перевод игроку\n"
+        "• <code>банк</code> / <code>банк положить 5000</code> / <code>банк снять 5000</code>\n"
+        "• <code>кредит 5000</code> / <code>погасить</code> / <code>кейс</code> / <code>задания</code>\n"
+        "• <code>работа</code> / <code>бизнес</code> / <code>прибыль</code> / <code>сад</code>\n"
+        "• <code>топ</code> / <code>ачивки</code> / <code>инвентарь</code>\n"
+        "\n💡 <i>Есть крутые идеи или нашли баг? Напишите создателю:</i> @ukrgorilka ✨\n"
+        "──────────────────────\n"
+        "👇 <i>Нажмите кнопку ниже, чтобы открыть статью:</i> 😸"
+    )
+    try:
+        bot.reply_to(message, welcome_text, reply_markup=markup, parse_mode='HTML')
+    except Exception:
+        pass
 
 # ---------------------------------------------------------
 # ОБРАБОТЧИК ФАКТОВ VIOLENCE DISTRICT
@@ -7359,6 +7371,76 @@ def handle_messages(message):
         else: bot.reply_to(message, "❌ Ответьте этой командой на сообщение человека! 😾")
         return
 
+    # РУССКИЙ ЭКОНОМИЧЕСКИЙ РОУТЕР — команды можно писать без /
+    # Примеры: «передать 10000» (ответом на сообщение), «банк положить 5000».
+    if text_lower.startswith(('передать ', 'перевод ', 'отправить ', 'скинуть ', '/pay ')):
+        target_id, target_u, amount = parse_transfer_command(message)
+        if amount <= 0 or not target_u:
+            bot.reply_to(message, "❌ Формат: <code>передать @username 10000</code> или ответом на сообщение: <code>передать 10000</code>. 😾", parse_mode='HTML')
+            return
+        if target_id == user_id:
+            bot.reply_to(message, "❌ Нельзя переводить коины самому себе! 🙀")
+            return
+        sender_econ = get_user_econ(user_id, user_name, username=user_username)
+        if sender_econ['balance'] < amount:
+            bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
+            return
+        tax = max(1, int(amount * 0.03))
+        receive_amount = amount - tax
+        sender_econ['balance'] -= amount
+        sender_econ['daily_transferred'] = sender_econ.get('daily_transferred', 0) + amount
+        add_coins(user_id=target_id, user_tag=target_u, amount=receive_amount)
+        mark_dirty()
+        target_link = make_link(chat_id, target_u, target_id, ping=True)
+        bot.reply_to(message, f"💸 <b>Перевод выполнен!</b>\n\n👤 Получатель: {target_link}\n💰 Отправлено: <b>{amount:,} 🪙</b>\n🧾 Комиссия 3%: <b>{tax:,} 🪙</b>\n📥 Получит: <b>{receive_amount:,} 🪙</b>\n💳 Остаток: <b>{sender_econ['balance']:,} 🪙</b> 😸".replace(',', ' '), parse_mode='HTML')
+        return
+
+    # БАНК: пополнение/снятие прямо текстом, без кнопок.
+    m_bank = re.match(r'^(?:банк|депозит|сч[её]т)\\s+(положить|внести|пополнить|снять|вывести)\\s+(\\d+)$', text_lower)
+    if m_bank:
+        action, amount_raw = m_bank.groups()
+        amount = int(amount_raw)
+        if amount <= 0:
+            bot.reply_to(message, "❌ Сумма должна быть больше нуля.")
+            return
+        econ = get_user_econ(user_id, user_name, username=user_username)
+        update_bank_interest(econ)
+        if action in ('положить', 'внести', 'пополнить'):
+            if econ.get('balance', 0) < amount:
+                bot.reply_to(message, f"❌ В кошельке только <b>{econ.get('balance', 0)} 🪙</b>.", parse_mode='HTML')
+                return
+            econ['balance'] -= amount
+            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amount
+            action_text = f"📥 На счёт внесено <b>{amount:,} 🪙</b>".replace(',', ' ')
+        else:
+            if econ.get('bank_deposit', 0) < amount:
+                bot.reply_to(message, f"❌ На депозите только <b>{econ.get('bank_deposit', 0)} 🪙</b>.", parse_mode='HTML')
+                return
+            econ['bank_deposit'] -= amount
+            econ['balance'] += amount
+            action_text = f"📤 Со счёта снято <b>{amount:,} 🪙</b>".replace(',', ' ')
+        mark_dirty()
+        bot.reply_to(message, f"🏦 <b>НЯ-БАНК</b>\n{action_text}\n💳 В банке: <b>{econ.get('bank_deposit', 0):,} 🪙</b>\n💵 В кошельке: <b>{econ.get('balance', 0):,} 🪙</b>".replace(',', ' '), parse_mode='HTML')
+        return
+
+    # Удобные русские названия существующих разделов.
+    simple_aliases = {
+        'кошелек': cmd_balance, 'кошелёк': cmd_balance, 'счёт': cmd_balance,
+        'магазин': cmd_shop, 'шоп': cmd_shop, 'инв': cmd_inventory, 'рюкзак': cmd_backpack,
+        'задания': cmd_tasks, 'квесты': cmd_tasks, 'достижения': cmd_achievements, 'ачивки': cmd_achievements,
+        'профиль': cmd_profile, 'банк': cmd_bank, 'депозит': cmd_bank,
+        'кейс': cmd_case, 'сундук': cmd_case, 'лотерея': cmd_lottery,
+        'кредит': cmd_loan, 'погасить кредит': cmd_repay, 'погасить': cmd_repay,
+        'работа': cmd_work, 'бизнес': cmd_business, 'бизнесы': cmd_business,
+        'прибыль': cmd_collect, 'собрать прибыль': cmd_collect,
+        'сад': cmd_garden,
+        'топ': cmd_top, 'топ дня': cmd_top_daily, 'топ недели': cmd_top_weekly,
+        'рулетка': cmd_wheel, 'мины': cmd_mines, 'дурак': cmd_durak,
+    }
+    if text_lower in simple_aliases:
+        simple_aliases[text_lower](message)
+        return
+
     # ТЕКСТОВЫЕ КОМАНДЫ
     if text_lower in ['хромосомы', 'хромосома', 'замер хромосом']: cmd_chromosomes(message); return
     elif text_lower in ['айкью', 'iq', 'iqи', 'айкю']: cmd_iq(message); return
@@ -7639,11 +7721,11 @@ def handle_messages(message):
         return
 
     # ПЕРЕВОД КОИНОВ
-    elif text_lower.startswith(('перевод', 'передать', '/pay')):
+    elif text_lower.startswith(('перевод', 'передать', 'отправить', 'скинуть', '/pay')):
         target_id, target_u, amount = parse_transfer_command(message)
 
         if amount <= 0 or not target_u:
-            bot.reply_to(message, "❌ Формат: <code>передать @username 100</code> или ответом на сообщение: <code>передать 100</code>. 😾", parse_mode='HTML')
+            bot.reply_to(message, "❌ Формат: <code>передать @username 10000</code> или ответом на сообщение: <code>передать 10000</code>. 😾", parse_mode='HTML')
             return
 
         if target_id == user_id:
@@ -7732,7 +7814,7 @@ def handle_messages(message):
 # ---------------------------------------------------------
 # ОБРАБОТКА CALLBACK КНОПОК
 # ---------------------------------------------------------
-@bot.callback_query_handler(func=lambda call: not (call.data or "").startswith('ui_'))
+@bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
     try:
         if not call or not getattr(call, 'from_user', None) or not getattr(call, 'message', None):
@@ -10421,258 +10503,6 @@ def process_stars_successful_payment(message):
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
-
-# ---------------------------------------------------------
-# НОВЫЙ UI + ДНЕВНЫЕ ЗАДАНИЯ + СЕЗОНЫ + ЭКОНОМИЧЕСКИЙ АУДИТ
-# ---------------------------------------------------------
-DAILY_TASKS = [
-    {'id': 'messages', 'name': '💬 Общение', 'desc': 'Напишите 5 сообщений', 'goal': 5, 'reward': 900},
-    {'id': 'xp', 'name': '✨ Опыт', 'desc': 'Получите 100 XP за любые активности', 'goal': 100, 'reward': 1400},
-    {'id': 'daily', 'name': '🎁 Ежедневный бонус', 'desc': 'Заберите ежедневную награду', 'goal': 1, 'reward': 700},
-]
-
-SEASON_REWARDS = [
-    (1, 0, 1500), (2, 250, 2500), (3, 600, 4000), (4, 1000, 6500),
-    (5, 1600, 9000), (6, 2400, 12000), (7, 3500, 18000), (8, 5000, 25000),
-]
-
-def _season_key():
-    return now_msk().strftime('%Y-%m')
-
-def _season_state(econ):
-    key = _season_key()
-    if econ.get('season_key') != key:
-        econ['season_key'] = key
-        econ['season_points'] = 0
-        econ['season_claimed'] = []
-        mark_dirty()
-    econ.setdefault('season_points', 0)
-    econ.setdefault('season_claimed', [])
-    return econ
-
-def _daily_state(econ):
-    today = now_msk().strftime('%Y-%m-%d')
-    d = econ.setdefault('daily_progress', {})
-    if d.get('date') != today:
-        d.clear()
-        d.update({'date': today, 'messages': 0, 'xp': 0, 'daily': 0, 'claimed': []})
-        mark_dirty()
-    for k in ('messages', 'xp', 'daily'):
-        d.setdefault(k, 0)
-    d.setdefault('claimed', [])
-    return d
-
-def _daily_level(econ):
-    points = int(_season_state(econ).get('season_points', 0))
-    level = 1
-    for lvl, need, _ in SEASON_REWARDS:
-        if points >= need:
-            level = lvl
-    return level
-
-def render_new_main_menu(chat_id, user_id, user_name, message_id=None):
-    econ = get_user_econ(user_id, user_name)
-    season = _season_state(econ)
-    balance = int(econ.get('balance', 0))
-    lvl = _daily_level(econ)
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton('👤 Профиль', callback_data=f'ui_profile:{user_id}'),
-        InlineKeyboardButton('🎒 Магазин', callback_data=f'ui_shop:{user_id}')
-    )
-    markup.add(
-        InlineKeyboardButton('🎯 Задания', callback_data=f'ui_daily:{user_id}'),
-        InlineKeyboardButton('🏆 Сезон', callback_data=f'ui_season:{user_id}')
-    )
-    markup.add(
-        InlineKeyboardButton('💰 Баланс', callback_data=f'ui_balance:{user_id}'),
-        InlineKeyboardButton('📖 Гайд', url='https://teletype.in/@ukrgorilka/Nya')
-    )
-    text = (
-        '🌌 <b>NYA HUB</b> · обновлённый интерфейс\n'
-        '━━━━━━━━━━━━━━━━━━━━\n'
-        f'👋 <b>{html.escape(user_name)}</b>\n'
-        f'🪙 Баланс: <b>{balance:,}</b>\n'
-        f'🏆 Сезонный уровень: <b>{lvl}</b> · {season.get("season_points", 0)} XP\n\n'
-        '⚡ Быстрый доступ к профилю, заданиям, сезону и магазину.\n'
-        '━━━━━━━━━━━━━━━━━━━━\n'
-        '💡 <i>Нажимай кнопки — меньше команд, больше игры.</i>'
-    )
-    try:
-        if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception:
-        pass
-
-def claim_daily_bonus(econ):
-    d = _daily_state(econ)
-    if d.get('bonus_claimed'):
-        return False, 0
-    streak = int(econ.get('daily_streak', 0))
-    yesterday = (now_msk() - timedelta(days=1)).strftime('%Y-%m-%d')
-    if econ.get('last_daily_date') == yesterday:
-        streak += 1
-    else:
-        streak = 1
-    reward = min(500 + (streak - 1) * 100, 2000)
-    econ['daily_streak'] = streak
-    econ['last_daily_date'] = d['date']
-    d['bonus_claimed'] = True
-    d['daily'] = 1
-    econ['balance'] = int(econ.get('balance', 0)) + reward
-    # Маленький сезонный бонус за вход.
-    _season_state(econ)
-    econ['season_points'] = int(econ.get('season_points', 0)) + 25
-    mark_dirty()
-    return True, reward
-
-def render_daily(chat_id, user_id, user_name, message_id=None):
-    econ = get_user_econ(user_id, user_name)
-    d = _daily_state(econ)
-    lines = ['🎯 <b>ДНЕВНЫЕ ЗАДАНИЯ</b>', '━━━━━━━━━━━━━━━━━━━━']
-    markup = InlineKeyboardMarkup(row_width=1)
-    if not d.get('bonus_claimed'):
-        markup.add(InlineKeyboardButton('🎁 Забрать ежедневный бонус', callback_data=f'ui_daily_bonus:{user_id}'))
-    else:
-        lines.append(f'🎁 Серия входов: <b>{int(econ.get("daily_streak", 0))}</b> дн.')
-    for task in DAILY_TASKS:
-        progress = min(task['goal'], int(d.get(task['id'], 0)))
-        done = progress >= task['goal']
-        claimed = task['id'] in d['claimed']
-        icon = '✅' if claimed else ('🟢' if done else '▫️')
-        lines.append(f"{icon} <b>{task['name']}</b> — {progress}/{task['goal']}\n   {task['desc']} · +{task['reward']:,} 🪙")
-        if done and not claimed:
-            markup.add(InlineKeyboardButton(f"🎁 Забрать: {task['name']}", callback_data=f'ui_claim_daily:{task["id"]}:{user_id}'))
-    lines.append('━━━━━━━━━━━━━━━━━━━━')
-    lines.append('⏰ Задания обновляются каждый день по МСК.')
-    markup.add(InlineKeyboardButton('🔙 В NYA HUB', callback_data=f'ui_home:{user_id}'))
-    text = '\n'.join(lines)
-    try:
-        if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception:
-        pass
-
-def render_season(chat_id, user_id, user_name, message_id=None):
-    econ = get_user_econ(user_id, user_name)
-    _season_state(econ)
-    points = int(econ.get('season_points', 0))
-    level = _daily_level(econ)
-    lines = [f'🏆 <b>СЕЗОН {_season_key()}</b>', '━━━━━━━━━━━━━━━━━━━━', f'✨ Сезонный XP: <b>{points:,}</b>', f'🎖 Уровень: <b>{level}</b>', '']
-    for lvl, need, reward in SEASON_REWARDS:
-        status = '🔓' if points >= need else '🔒'
-        lines.append(f'{status} Ур. {lvl}: {need:,} XP → +{reward:,} 🪙')
-    lines += ['━━━━━━━━━━━━━━━━━━━━', '♻️ Прогресс сезона обновляется в начале нового месяца.']
-    markup = InlineKeyboardMarkup()
-    claimed = set(econ.get('season_claimed', []))
-    for lvl, need, reward in SEASON_REWARDS:
-        if points >= need and lvl not in claimed:
-            markup.add(InlineKeyboardButton(f'🎁 Забрать ур. {lvl} (+{reward:,})', callback_data=f'ui_claim_season:{lvl}:{user_id}'))
-    markup.add(InlineKeyboardButton('🎯 Дневные задания', callback_data=f'ui_daily:{user_id}'))
-    markup.add(InlineKeyboardButton('🔙 В NYA HUB', callback_data=f'ui_home:{user_id}'))
-    text = '\n'.join(lines)
-    try:
-        if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception:
-        pass
-
-@bot.message_handler(commands=['daily', 'задания'])
-def cmd_daily(message):
-    if not can_process_user_message(message): return
-    name = (f'{message.from_user.first_name or ""} {message.from_user.last_name or ""}').strip() or message.from_user.username or 'Пользователь'
-    econ = get_user_econ(message.from_user.id, name, username=message.from_user.username)
-    ok, reward = claim_daily_bonus(econ)
-    if ok:
-        bot.reply_to(message, f'🎁 <b>Ежедневный бонус получен!</b> +{reward:,} 🪙 · серия: <b>{econ.get("daily_streak", 1)}</b> дн. 😺', parse_mode='HTML')
-    render_daily(message.chat.id, message.from_user.id, name)
-
-@bot.message_handler(commands=['season', 'сезон'])
-def cmd_season(message):
-    if not can_process_user_message(message): return
-    name = (f'{message.from_user.first_name or ""} {message.from_user.last_name or ""}').strip() or message.from_user.username or 'Пользователь'
-    render_season(message.chat.id, message.from_user.id, name)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('ui_'))
-def handle_new_ui(call):
-    try:
-        parts = call.data.split(':')
-        action = parts[0]
-        owner_id = int(parts[-1])
-        if call.from_user.id != owner_id:
-            bot.answer_callback_query(call.id, 'Это меню другого игрока 😺', show_alert=True)
-            return
-        name = (f'{call.from_user.first_name or ""} {call.from_user.last_name or ""}').strip() or call.from_user.username or 'Пользователь'
-        if action == 'ui_home': render_new_main_menu(call.message.chat.id, owner_id, name, call.message.message_id)
-        elif action == 'ui_daily': render_daily(call.message.chat.id, owner_id, name, call.message.message_id)
-        elif action == 'ui_season': render_season(call.message.chat.id, owner_id, name, call.message.message_id)
-        elif action == 'ui_profile': send_user_profile(call.message.chat.id, name, owner_id, message_id_to_edit=call.message.message_id, username=call.from_user.username)
-        elif action == 'ui_shop': send_shop_menu(call.message.chat.id, owner_id, name, message_id=call.message.message_id)
-        elif action == 'ui_balance':
-            econ = get_user_econ(owner_id, name, username=call.from_user.username)
-            bot.edit_message_text(f'💰 <b>БАЛАНС</b>\n━━━━━━━━━━━━━━━━━━━━\n🪙 <b>{int(econ.get("balance",0)):,}</b> Ня-коинов\n✨ XP: <b>{int(econ.get("account_exp",0)):,}</b>', call.message.chat.id, call.message.message_id, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('🔙 Назад', callback_data=f'ui_home:{owner_id}')]]), parse_mode='HTML')
-        elif action == 'ui_daily_bonus':
-            econ = get_user_econ(owner_id, name, username=call.from_user.username)
-            ok, reward = claim_daily_bonus(econ)
-            if ok:
-                bot.answer_callback_query(call.id, f'+{reward:,} 🪙', show_alert=False)
-            else:
-                bot.answer_callback_query(call.id, 'Бонус уже получен сегодня 😺', show_alert=True)
-            render_daily(call.message.chat.id, owner_id, name, call.message.message_id)
-        elif action == 'ui_claim_season':
-            lvl = int(parts[1])
-            econ = get_user_econ(owner_id, name, username=call.from_user.username)
-            _season_state(econ)
-            row = next((x for x in SEASON_REWARDS if x[0] == lvl), None)
-            if not row:
-                bot.answer_callback_query(call.id, 'Уровень не найден 😿', show_alert=True); return
-            _, need, reward = row
-            claimed = econ.setdefault('season_claimed', [])
-            if int(econ.get('season_points', 0)) < need:
-                bot.answer_callback_query(call.id, 'Уровень ещё не открыт 😿', show_alert=True); return
-            if lvl in claimed:
-                bot.answer_callback_query(call.id, 'Награда уже получена 😺', show_alert=True); return
-            econ['balance'] = int(econ.get('balance', 0)) + reward
-            claimed.append(lvl)
-            mark_dirty()
-            bot.answer_callback_query(call.id, f'+{reward:,} 🪙', show_alert=False)
-            render_season(call.message.chat.id, owner_id, name, call.message.message_id)
-        elif action == 'ui_claim_daily':
-            task_id = parts[1]
-            econ = get_user_econ(owner_id, name, username=call.from_user.username)
-            d = _daily_state(econ)
-            task = next((x for x in DAILY_TASKS if x['id'] == task_id), None)
-            if not task or task_id in d['claimed']:
-                bot.answer_callback_query(call.id, 'Награда уже получена 😺', show_alert=True)
-                return
-            if int(d.get(task_id, 0)) < task['goal']:
-                bot.answer_callback_query(call.id, 'Задание ещё не выполнено 😿', show_alert=True)
-                return
-            econ['balance'] = int(econ.get('balance', 0)) + task['reward']
-            d['claimed'].append(task_id)
-            mark_dirty()
-            bot.answer_callback_query(call.id, f'+{task["reward"]:,} 🪙', show_alert=False)
-            render_daily(call.message.chat.id, owner_id, name, call.message.message_id)
-    except Exception as e:
-        print(f'[NEW UI ERROR] {e}')
-
-# Подключаем прогресс сообщений к дневным заданиям через существующую статистику.
-_old_add_message_stat = add_message_stat
-def add_message_stat(user_id, user_tag, username=None):
-    _old_add_message_stat(user_id, user_tag, username)
-    try:
-        econ = get_user_econ(user_id, user_tag, username)
-        d = _daily_state(econ)
-        d['messages'] = d.get('messages', 0) + 1
-        mark_dirty()
-    except Exception:
-        pass
 
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
