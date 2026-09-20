@@ -165,6 +165,27 @@ PREMIUM_EMOJI_IDS = {
     "set4_10": "5409373243293313689",  # 🥺 / умоляющий
     "set4_11": "5393103288700784485",  # 😏 / ухмылка
     "set4_12": "5316891134142729373",  # 🐱 / хитрый кот
+
+    # Набор 5 — новые эмодзи со скриншотов пользователя
+    "set5_01": "5211052776213198370",  # 😵‍💫 / головокружение
+    "set5_02": "5316736601219425876",  # 🤍 / белое сердце
+    "set5_03": "5316785439292547859",  # 🖤 / чёрное сердце
+    "set5_04": "5449468596952507859",  # 💜 / фиолетовое сердце
+    "set5_05": "5449759615346548186",  # 💙 / синее сердце
+    "set5_06": "5222325171284622461",  # 🩷 / розовое сердце
+    "set5_07": "5215211631700622222",  # 🐭 / головокружение
+    "set5_08": "5348466539702001502",  # 🌈 / радуга
+    "set5_09": "5465173398273413127",  # 🦄 / единорог
+    "set5_10": "5470088387048266598",  # 🐉 / дракон
+    "set5_11": "5445096582238181549",  # 🦋 / бабочка
+    "set5_12": "5276289730256842699",  # 🐺 / волк
+    "set5_13": "5373250605533896134",  # 🐈‍⬛ / чёрный кот
+    "set5_14": "5280947338821524402",  # 🌹 / роза
+    "set5_15": "5280496526169235279",  # 🔮 / хрустальный шар
+    "set5_16": "5224257782013769471",  # 💰 / мешок денег
+    "set5_17": "5379600444098093058",  # 🪙 / монета
+    "set5_18": "5474419165781597383",  # 🏆 / трофей
+    "set5_19": "54295027628722231956", # 🏅 / медаль
 }
 
 # Удобные алиасы. Потом можно менять ID в одном месте.
@@ -185,6 +206,12 @@ PREMIUM_EMOJI_ALIASES = {
     "devil": "set4_04", "evil_devil": "set4_05", "clown": "set4_06",
     "frozen": "set4_07", "brain_explosion": "set4_08", "crying": "set4_09",
     "pleading": "set4_10", "smirk": "set4_11", "clever_cat": "set4_12",
+    "dizzy": "set5_01", "white_heart": "set5_02", "black_heart": "set5_03",
+    "purple_heart": "set5_04", "blue_heart": "set5_05", "pink_heart": "set5_06",
+    "headspin": "set5_07", "rainbow": "set5_08", "unicorn": "set5_09",
+    "dragon": "set5_10", "butterfly": "set5_11", "wolf": "set5_12",
+    "black_cat": "set5_13", "rose": "set5_14", "crystal_ball": "set5_15",
+    "money_bag": "set5_16", "coin": "set5_17", "trophy": "set5_18", "medal": "set5_19",
 }
 
 
@@ -210,6 +237,16 @@ PREMIUM_EMOJI_ALTS = {
     "5472201313389389629": "🥶", "5357256503805885182": "🤯",
     "5292134882519046652": "😭", "5409373243293313689": "🥺",
     "5393103288700784485": "😏", "5316891134142729373": "🐱",
+    "5211052776213198370": "😵‍💫", "5316736601219425876": "🤍",
+    "5316785439292547859": "🖤", "5449468596952507859": "💜",
+    "5449759615346548186": "💙", "5222325171284622461": "🩷",
+    "5215211631700622222": "😵‍💫", "5348466539702001502": "🌈",
+    "5465173398273413127": "🦄", "5470088387048266598": "🐉",
+    "5445096582238181549": "🦋", "5276289730256842699": "🐺",
+    "5373250605533896134": "🐈‍⬛", "5280947338821524402": "🌹",
+    "5280496526169235279": "🔮", "5224257782013769471": "💰",
+    "5379600444098093058": "🪙", "5474419165781597383": "🏆",
+    "54295027628722231956": "🏅",
 }
 PREMIUM_EMOJI_METADATA_LOADED = False
 PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
@@ -262,6 +299,13 @@ GLOBAL_PREMIUM_EMOJI_MAP = {
     "🗓️": "ui_20", "🌙": "ui_21", "☁️": "ui_22", "🌞": "ui_23", "👑": "ui_24",
     "✨": "ui_25", "⭐": "ui_26", "💎": "ui_27", "🛡️": "ui_30", "🛡": "ui_30",
     "🔥": "ui_31", "🔔": "ui_32",
+
+    # Набор 5 — новые эмодзи из последних скриншотов пользователя.
+    "😵‍💫": "set5_01", "🤍": "set5_02", "🖤": "set5_03", "💜": "set5_04",
+    "💙": "set5_05", "🩷": "set5_06", "🌈": "set5_08",
+    "🦄": "set5_09", "🐉": "set5_10", "🦋": "set5_11", "🐺": "set5_12",
+    "🐈‍⬛": "set5_13", "🌹": "set5_14", "🔮": "set5_15", "💰": "set5_16",
+    "🪙": "set5_17", "🏆": "set5_18", "🏅": "set5_19",
 }
 
 
@@ -667,6 +711,37 @@ THEMES = {
     'stars_anime': {'name': '🎀 Аниме Люкс VIP', 'price': 0, 'border': '✨══════ 🎀 ══════✨', 'header': '🎀 <b>ANIME LUXURY SUPREME ID</b> 💖', 'icon': '💫'},
     'stars_galaxy': {'name': '🌌 Бездна Сингулярности VIP', 'price': 0, 'border': '🪐══════ 🌀 ══════🌌', 'header': '🌌 <b>БЕЗДНА КОСМИЧЕСКОЙ СИНГУЛЯРНОСТИ</b> 🛸', 'icon': '🪐'}
 }
+
+# ---------------------------------------------------------
+# GIF ДЛЯ ПРОФИЛЯ (обычный магазин за Ня-коины)
+# Ссылки ведут на прямые GIF-файлы Tenor. После покупки GIF автоматически экипируется.
+PROFILE_GIFS = {
+    'gulya': {
+        'name': '🌸 Гуль',
+        'price': 4,
+        'url': 'https://media1.tenor.com/m/glvYPm3HLN0AAAAd/flower.gif',
+        'source_url': 'https://tenor.com/ll3KWzRLUOn.gif',
+    },
+    'sakura_gif': {
+        'name': '🌸 Сакура',
+        'price': 3,
+        'url': 'https://media1.tenor.com/m/pJ2ItvfaQlQAAAAd/trapxgen.gif',
+        'source_url': 'https://tenor.com/oipg5GrIYEi.gif',
+    },
+    'mogger': {
+        'name': '😎 Могер',
+        'price': 10,
+        'url': 'https://media1.tenor.com/m/sFC5l-YzoQAAAAAd/nikitas-venizelos.gif',
+        'source_url': 'https://tenor.com/piGyaE6af6a.gif',
+    },
+    'cat': {
+        'name': '🐈 Кот',
+        'price': 2,
+        'url': 'https://media1.tenor.com/m/gY02kH2GWL4AAAAd/cat-city.gif',
+        'source_url': 'https://tenor.com/lhLnkKMfDNG.gif',
+    },
+}
+
 # ---------------------------------------------------------
 # ЭКОНОМИКА TELEGRAM STARS (ЗВЁЗДЫ) & VIP PASS
 # ---------------------------------------------------------
@@ -1872,7 +1947,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     for field, default in [
         ('username', clean_u), ('pfp_file_id', None), ('inventory', []), ('account_exp', 0),
         ('smeh', 0), ('iq', 100), ('fat', 20), ('foot_size', 25), ('dick_size', 15),
-        ('last_dick_time', 0), ('fap_count', 0), ('fap_date', ''), ('last_fap_time', 0),
+        ('last_dick_time', 0), ('fap_count', 0), ('fap_date', ''), ('last_fap_time', 0), ('mog_count', 0),
         ('chromosomes', 46), ('last_chromosomes_time', 0), ('last_wheel_time', 0),
         ('last_pet_walk', 0), ('last_pet_care', 0), ('rest_rewards_count', 0),
         ('titles', []), ('active_title', None), ('custom_title', None),
@@ -1889,6 +1964,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_case_time', 0), ('last_rob_time', 0), ('last_trash_time', 0),
         ('profile_theme', 'default'), ('purchased_themes', ['default']),
         ('profile_font', 'default'), ('purchased_fonts', ['default']),
+        ('profile_gifs', []), ('profile_gif', None),
         ('premium_emoji_theme', 'nya'), ('premium_emoji_enabled', True),
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
@@ -4146,12 +4222,21 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     bp = econ.setdefault('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0})
 
-    markup = InlineKeyboardMarkup()
-    if bp.get('energy_drink', 0) > 0: markup.add(InlineKeyboardButton(f"⚡️ Выпить Энергетик ({bp['energy_drink']} шт.)", callback_data=f"use_item_energy_drink:{user_id}"))
-    if bp.get('luck_clover', 0) > 0: markup.add(InlineKeyboardButton(f"🍀 Активировать Клевер ({bp['luck_clover']} шт.)", callback_data=f"use_item_luck_clover:{user_id}"))
-    if bp.get('invis_mask', 0) > 0: markup.add(InlineKeyboardButton(f"🥷 Надеть Невидимку ({bp['invis_mask']} шт.)", callback_data=f"use_item_invis_mask:{user_id}"))
-    if bp.get('garden_fertilizer', 0) > 0: markup.add(InlineKeyboardButton(f"🧪 Удобрить Сад ({bp['garden_fertilizer']} шт.)", callback_data=f"fertilize_plant:{user_id}"))
+    markup = InlineKeyboardMarkup(row_width=1)
+    # Кнопки использования появляются для предметов, которые есть у пользователя.
+    # В callback передаём user_id; общий обработчик теперь корректно пропускает такие callback.
+    if bp.get('energy_drink', 0) > 0:
+        markup.add(InlineKeyboardButton(f"⚡️ Выпить Энергетик ({bp['energy_drink']} шт.)", callback_data=f"use_item_energy_drink:{user_id}"))
+    if bp.get('luck_clover', 0) > 0:
+        markup.add(InlineKeyboardButton(f"🍀 Активировать Клевер ({bp['luck_clover']} шт.)", callback_data=f"use_item_luck_clover:{user_id}"))
+    if bp.get('invis_mask', 0) > 0:
+        markup.add(InlineKeyboardButton(f"🥷 Надеть Невидимку ({bp['invis_mask']} шт.)", callback_data=f"use_item_invis_mask:{user_id}"))
+    if bp.get('garden_fertilizer', 0) > 0:
+        markup.add(InlineKeyboardButton(f"🧪 Удобрить Сад ({bp['garden_fertilizer']} шт.)", callback_data=f"fertilize_plant:{user_id}"))
+    if bp.get('alarm_system', 0) > 0:
+        markup.add(InlineKeyboardButton(f"🛡️ Сигнализация ({bp['alarm_system']} шт.) — авто-защита", callback_data=f"backpack_alarm:{user_id}"))
     markup.add(InlineKeyboardButton("🏪 Купить расходники в Магазине", callback_data=f"shop_cat_buffs:{user_id}"))
+    markup.add(InlineKeyboardButton("👤 Профиль", callback_data=f"profile_self:{user_id}"))
 
     clover_status = "✅ Активен" if econ.get('luck_clover_until', 0) > time.time() else "❌ Не активен"
     invis_status = "✅ Включена" if econ.get('invis_until', 0) > time.time() else "❌ Выключена"
@@ -5658,6 +5743,7 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
         f"• 🥩 Жир: <b>{econ.get('fat', 20)}%</b> | 🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
         f"{border}\n"
         f"📊 <b>Активность сообщений:</b>\n{msg_stats_str}\n"
+        f"😎 <b>Могнул:</b> {econ.get('mog_count', 0)} раз(а)\n"
         f"📈 <b>Крипто-портфель:</b> {portfolio_str}\n"
         f"🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n"
         f"🎒 Значки: {inv_str}\n"
@@ -5666,6 +5752,17 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     )
 
     text = apply_font(raw_text, font_key)
+
+    # GIF профиля показывается отдельным сообщением над карточкой. При редактировании
+    # существующей карточки новое GIF-сообщение не создаём, чтобы не спамить чат.
+    if message_id_to_edit is None:
+        gif_key = econ.get('profile_gif')
+        gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
+        if gif_info:
+            try:
+                bot.send_animation(chat_id, gif_info['url'], caption=f"🎞 <b>{html.escape(gif_info['name'])}</b>", parse_mode='HTML')
+            except Exception as gif_error:
+                print(f"[PROFILE GIF ERROR] {gif_error}")
 
     if message_id_to_edit:
         try:
@@ -5896,6 +5993,7 @@ def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
         InlineKeyboardButton('🪴 Семена Сада', callback_data=f'shop_cat_garden:{user_id}')
     )
     markup.add(InlineKeyboardButton('🎙 Студия Стримера', callback_data=f'shop_cat_stream:{user_id}'))
+    markup.add(InlineKeyboardButton('🎞 GIF для профиля', callback_data=f'shop_cat_gifs:{user_id}'))
 
     text = (
         "🏪 <b>ГЛОБАЛЬНЫЙ МАГАЗИН НЯ-БОТА</b> 😺\n"
@@ -7622,6 +7720,16 @@ def _admin_grant(message):
         changed.append(f'VIP +{days} дн.')
     elif item in ('vip_forever', 'vip_forever_25', 'вечный_vip'):
         econ['vip_forever'] = True; changed.append('VIP навсегда')
+    elif item in ('gif', 'profile_gif', 'гив'):
+        gif_id = (amount or '').lower()
+        if gif_id not in PROFILE_GIFS:
+            bot.reply_to(message, "❌ GIF не найден. Доступны: <code>gulya</code>, <code>sakura_gif</code>, <code>mogger</code>, <code>cat</code>.", parse_mode='HTML')
+            return True
+        owned = econ.setdefault('profile_gifs', [])
+        if gif_id not in owned:
+            owned.append(gif_id)
+        econ['profile_gif'] = gif_id
+        changed.append(f"GIF: {PROFILE_GIFS[gif_id]['name']}")
     elif item in ('all', 'everything', 'донаты', 'donates'):
         _grant_all_donations(econ); changed.append('все Stars-донаты')
     elif item in STARS_COSMETICS:
@@ -7825,6 +7933,36 @@ def cmd_group_info(message):
     welcome='🟢 включены' if settings.get('welcome_enabled',True) else '🔴 выключены'
     bot.reply_to(message,f"🔎 <b>ИНФОРМАЦИЯ О ГРУППЕ</b>\n──────────────────────\n📌 <b>{title}</b>\n🆔 <code>{chat.id}</code>\n{uname}\n{mem}\n📡 Тип: <b>{_chat_type_label(getattr(chat,'type','group'))}</b>\n🟢 Бот: <b>активен</b>\n🛡 Антифлуд: <b>{flood}</b>\n👋 Приветствия: <b>{welcome}</b>\n🕐 Последняя активность: <b>{_fmt_seen(item.get('last_activity'))}</b>",parse_mode='HTML')
 
+@bot.message_handler(commands=['give_gif', 'выдать_gif'])
+def admin_give_gif_command(message):
+    if not _is_owner_admin(message):
+        return
+    parts = (message.text or '').strip().split()
+    if len(parts) < 3:
+        bot.reply_to(message, "❌ Формат: <code>/give_gif @username gulya</code>\n\nДоступные GIF: <code>gulya</code>, <code>sakura_gif</code>, <code>mogger</code>, <code>cat</code>.", parse_mode='HTML')
+        return
+    target_raw, gif_id = parts[1], parts[2].lower()
+    if gif_id not in PROFILE_GIFS:
+        bot.reply_to(message, "❌ Такой GIF не найден. Используй: <code>gulya</code>, <code>sakura_gif</code>, <code>mogger</code>, <code>cat</code>.", parse_mode='HTML')
+        return
+    if message.reply_to_message and target_raw.lower() in ('reply', '.', '-', '@reply', 'this'):
+        target = message.reply_to_message.from_user
+        target_id = target.id
+        target_name = target.username or target.first_name or f'ID:{target_id}'
+    else:
+        target_id, target_name = resolve_user_from_string(message.chat.id, target_raw)
+    if not target_id:
+        bot.reply_to(message, "❌ Не удалось найти пользователя. Укажи @username, ID или используй ответ на сообщение.")
+        return
+    econ = get_user_econ(target_id, target_name)
+    owned = econ.setdefault('profile_gifs', [])
+    if gif_id not in owned:
+        owned.append(gif_id)
+    econ['profile_gif'] = gif_id
+    mark_dirty()
+    gif = PROFILE_GIFS[gif_id]
+    bot.reply_to(message, f"✅ Выдан GIF <b>{html.escape(gif['name'])}</b> пользователю <b>{html.escape(str(target_name))}</b>.\n🎞 GIF сразу установлен в профиль.", parse_mode='HTML')
+
 @bot.message_handler(commands=['give', 'выдать', 'grant'])
 def admin_give_command(message):
     _admin_grant(message)
@@ -7920,6 +8058,13 @@ def handle_messages(message):
             bot.set_message_reaction(chat_id, message.message_id, [ReactionTypeEmoji(chosen_rx)])
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
+    # СИМУЛЯТОР МОГЕРА
+    if re.fullmatch(r'(?:мог|могнуть)', text_lower):
+        econ['mog_count'] = int(econ.get('mog_count', 0) or 0) + 1
+        mark_dirty()
+        bot.reply_to(message, f"😎 {make_link(chat_id, user_name, user_id, ping=False)} могнул!\n📊 Всего могнул: <b>{econ['mog_count']}</b> раз(а)", parse_mode='HTML')
+        return
+
     # КАЛЬКУЛЯТОР
     m_calc_cmd = re.match(r'^(?:/calc|посчитай|вычисли|реши|сколько\s+будет)\s+([\d\s\+\-\*\/\%\(\)\.\:×÷]+)$', text, re.IGNORECASE)
     if m_calc_cmd:
@@ -7954,6 +8099,8 @@ def handle_messages(message):
                 "• <code>/set_karma @user 100</code> — изменить карму\n"
                 "• <code>/force_divorce @user</code> — принудительный развод\n"
                 "• <code>/give_item @user item_name</code> — выдать предмет\n"
+                "• <code>/give_gif @user gulya</code> — выдать GIF профиля\n"
+                "• <code>/give @user gif gulya</code> — выдать GIF через /give\n"
                 "• <code>/wipe @user</code> — обнулить профиль\n"
                 "──────────────────────"
             )
@@ -8862,7 +9009,7 @@ def callback_inline(call):
 
 
         # МЕМЫ: ГОЛОСОВАНИЕ
-        elif action_data.startswith('meme_l_') or action_data.startswith('meme_d_'):
+        if action_data.startswith('meme_l_') or action_data.startswith('meme_d_'):
             meme_id = action_data[7:]
             meme = active_memes.get(meme_id)
             if not meme:
@@ -10006,6 +10153,21 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, "🥷 Маска надета! Ваши замеры скрыты из топов на 24 часа! 😼", show_alert=True)
             render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
 
+        elif action_data == 'backpack_alarm':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            bp = econ.setdefault('backpack', {})
+            if bp.get('alarm_system', 0) <= 0:
+                bot.answer_callback_query(call.id, "❌ У вас нет сигнализации!", show_alert=True)
+                return
+            bot.answer_callback_query(call.id, "🛡️ Сигнализация работает автоматически и не требует активации! 😺", show_alert=True)
+            render_backpack_view(chat_id, user_id, user_name, call.message.message_id)
+
+        elif action_data == 'profile_self':
+            try:
+                send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
+            except Exception as e:
+                print(f"[NONFATAL ERROR] {e}")
+
         # СТУДИЯ СТРИМЕРА
         elif action_data == 'shop_cat_stream':
             econ = get_user_econ(user_id, user_name)
@@ -11048,6 +11210,95 @@ def callback_inline(call):
             mark_dirty()
             bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин! 😸')
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
+
+        # GIF ДЛЯ ПРОФИЛЯ
+        elif action_data == 'shop_cat_gifs':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            owned = set(econ.get('profile_gifs', []))
+            current = econ.get('profile_gif')
+
+            lines = [
+                '🎞 <b>GIF ДЛЯ ПРОФИЛЯ</b> 😺',
+                '──────────────────────',
+                'Купленные GIF можно использовать в профиле. После покупки GIF автоматически становится активным. 😻',
+                ''
+            ]
+            markup = InlineKeyboardMarkup(row_width=1)
+            for gif_id, gif in PROFILE_GIFS.items():
+                status = ' ✅ КУПЛЕНО' if gif_id in owned else ''
+                active = ' 👑 АКТИВЕН' if current == gif_id else ''
+                lines.append(f"• <b>{html.escape(gif['name'])}</b> — <code>{gif['price']} 🪙</code>{status}{active}")
+                if gif_id in owned:
+                    markup.add(InlineKeyboardButton(f"{gif['name']} — уже куплено", callback_data=f'profile_gif_noop:{user_id}'))
+                else:
+                    markup.add(InlineKeyboardButton(f"Купить {gif['name']} — {gif['price']} 🪙", callback_data=f'buy_profile_gif_{gif_id}:{user_id}'))
+
+            lines.append('──────────────────────')
+            markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
+            try:
+                bot.edit_message_text('\n'.join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                print(f'[NONFATAL ERROR] {e}')
+            bot.answer_callback_query(call.id)
+            return
+
+        elif action_data == 'profile_gif_noop':
+            bot.answer_callback_query(call.id, '🎞 Этот GIF уже есть у вас! 😸')
+            return
+
+        elif action_data.startswith('buy_profile_gif_'):
+            gif_id = action_data.replace('buy_profile_gif_', '', 1)
+            gif = PROFILE_GIFS.get(gif_id)
+            if not gif:
+                bot.answer_callback_query(call.id, '❌ GIF не найден!', show_alert=True)
+                return
+
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            owned = econ.setdefault('profile_gifs', [])
+            if gif_id in owned:
+                econ['profile_gif'] = gif_id
+                mark_dirty()
+                bot.answer_callback_query(call.id, f"🎞 {gif['name']} уже куплен и теперь активен!", show_alert=True)
+                return
+
+            price = int(gif.get('price', 0))
+            if int(econ.get('balance', 0)) < price:
+                bot.answer_callback_query(call.id, f"❌ Нужно {price} 🪙! У вас {int(econ.get('balance', 0))} 🪙.", show_alert=True)
+                return
+
+            econ['balance'] = int(econ.get('balance', 0)) - price
+            owned.append(gif_id)
+            econ['profile_gif'] = gif_id
+            mark_dirty()
+            bot.answer_callback_query(call.id, f"🎉 Куплено: {gif['name']} за {price} 🪙! GIF установлен в профиль. 😻", show_alert=True)
+
+            # Перерисовываем каталог, чтобы сразу показать статус покупки.
+            try:
+                bot.edit_message_text(
+                    '🎞 <b>GIF ДЛЯ ПРОФИЛЯ</b> 😺\n──────────────────────\n' +
+                    '\n'.join(
+                        f"• <b>{html.escape(v['name'])}</b> — <code>{v['price']} 🪙</code>{' ✅ КУПЛЕНО' if k in set(owned) else ''}{' 👑 АКТИВЕН' if current == k else ''}"
+                        for k, v in PROFILE_GIFS.items()
+                    ) +
+                    '\n──────────────────────',
+                    chat_id=chat_id, message_id=call.message.message_id, reply_markup=InlineKeyboardMarkup(row_width=1), parse_mode='HTML'
+                )
+            except Exception:
+                pass
+            # Перерисовываем каталог с актуальными кнопками.
+            markup = InlineKeyboardMarkup(row_width=1)
+            for k, v in PROFILE_GIFS.items():
+                if k in owned:
+                    label = f"{v['name']} — куплено" + (' 👑' if econ.get('profile_gif') == k else '')
+                    markup.add(InlineKeyboardButton(label, callback_data=f'profile_gif_noop:{user_id}'))
+                else:
+                    markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['price']} 🪙", callback_data=f'buy_profile_gif_{k}:{user_id}'))
+            markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
+            try:
+                bot.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
+            except Exception:
+                pass
+            return
 
         # ПАГИНАЦИЯ МАГАЗИНА
         elif action_data.startswith('shop_cat_badges_'):
