@@ -713,7 +713,7 @@ THEMES = {
 }
 
 # ---------------------------------------------------------
-# GIF ДЛЯ ПРОФИЛЯ (обычный магазин за Ня-коины)
+# GIF ДЛЯ ПРОФИЛЯ (покупка только за Telegram Stars)
 # Ссылки ведут на прямые GIF-файлы Tenor. После покупки GIF автоматически экипируется.
 PROFILE_GIFS = {
     'gulya': {
@@ -783,7 +783,12 @@ STARS_COSMETICS = {
     'badge_gem': {'name': '💎 Значок: Сияющий Алмаз', 'stars': 3, 'type': 'badge', 'emoji': '💎', 'desc': 'Драгоценный значок'},
     'badge_angel': {'name': '🪽 Значок: Крылья Ангела', 'stars': 4, 'type': 'badge', 'emoji': '🪽', 'desc': 'Ангельские крылья в чате'},
     'badge_galaxy': {'name': '🌌 Значок: Космос', 'stars': 4, 'type': 'badge', 'emoji': '🌌', 'desc': 'Галактический значок'},
-    'badge_dragon': {'name': '🐲 Значок: Дракон Империи', 'stars': 4, 'type': 'badge', 'emoji': '🐲', 'desc': 'Значок дракона'}
+    'badge_dragon': {'name': '🐲 Значок: Дракон Империи', 'stars': 4, 'type': 'badge', 'emoji': '🐲', 'desc': 'Значок дракона'},
+    # GIF-профили теперь покупаются только за Telegram Stars. Числа сохранены как цена в ⭐️.
+    'gif_gulya': {'name': '🌸 GIF профиля: Гуль', 'stars': 4, 'type': 'gif', 'gif_id': 'gulya', 'desc': 'Анимация, прикреплённая к карточке профиля'},
+    'gif_sakura': {'name': '🌸 GIF профиля: Сакура', 'stars': 3, 'type': 'gif', 'gif_id': 'sakura_gif', 'desc': 'Анимация, прикреплённая к карточке профиля'},
+    'gif_mogger': {'name': '😎 GIF профиля: Могер', 'stars': 10, 'type': 'gif', 'gif_id': 'mogger', 'desc': 'Анимация, прикреплённая к карточке профиля'},
+    'gif_cat': {'name': '🐈 GIF профиля: Кот', 'stars': 2, 'type': 'gif', 'gif_id': 'cat', 'desc': 'Анимация, прикреплённая к карточке профиля'}
 }
 
 
@@ -5677,6 +5682,9 @@ def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
         InlineKeyboardButton("👑 Титулы", callback_data=f"ps_titles:{user_id}")
     )
     markup.add(
+        InlineKeyboardButton("🎞 GIF профиля", callback_data=f"shop_cat_gifs:{user_id}")
+    )
+    markup.add(
         InlineKeyboardButton("🔙 В Профиль", callback_data=f"ps_back_profile:{user_id}")
     )
 
@@ -5833,27 +5841,50 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
 
     text = apply_font(raw_text, font_key)
 
-    # GIF профиля показывается отдельным сообщением над карточкой. При редактировании
-    # существующей карточки новое GIF-сообщение не создаём, чтобы не спамить чат.
-    if message_id_to_edit is None:
-        gif_key = econ.get('profile_gif')
-        gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
-        if gif_info:
-            try:
-                bot.send_animation(chat_id, gif_info['url'], caption=f"🎞 <b>{html.escape(gif_info['name'])}</b>", parse_mode='HTML')
-            except Exception as gif_error:
-                print(f"[PROFILE GIF ERROR] {gif_error}")
+    # GIF — это сама карточка профиля: анимация отправляется с текстом профиля в caption.
+    # Никакого отдельного сообщения с GIF больше не создаём.
+    gif_key = econ.get('profile_gif')
+    gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
 
     if message_id_to_edit:
+        # Если это уже animation, Telegram позволяет менять её caption.
+        if gif_info:
+            try:
+                bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
+                return
+            except Exception:
+                pass
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
             return
         except Exception as profile_edit_error:
             print(f"[PROFILE EDIT ERROR] {profile_edit_error}")
+            # Текстовое сообщение нельзя превратить в animation через edit_message.
+            # Создаём новую карточку с GIF и удаляем старую только если GIF должен быть активен.
+            if gif_info:
+                try:
+                    bot.delete_message(chat_id, message_id_to_edit)
+                except Exception:
+                    pass
+                try:
+                    bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
+                    return
+                except Exception as gif_error:
+                    print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
             try:
                 bot.edit_message_caption(chat_id=chat_id, message_id=message_id_to_edit, caption=text, reply_markup=markup, parse_mode='HTML')
                 return
             except Exception as e: print(f"[PROFILE EDIT CAPTION ERROR] {e}")
+
+    if gif_info:
+        try:
+            if message_to_reply:
+                bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML', reply_to_message_id=message_to_reply.message_id)
+            else:
+                bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception as gif_error:
+            print(f"[PROFILE GIF ERROR] {gif_error}")
 
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
@@ -5919,7 +5950,7 @@ def stars_item_is_one_time(item):
     if not item:
         return False
     item_type = item.get('type')
-    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium'}
+    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium', 'gif'}
 
 def stars_item_owned(econ, kind, item_key):
     if kind == 'vippass':
@@ -5941,6 +5972,9 @@ def stars_item_owned(econ, kind, item_key):
             return item.get('emoji') in econ.get('inventory', [])
         if t == 'pet':
             return item_key in econ.get('paid_stars_items', [])
+        if t == 'gif':
+            gif_id = item.get('gif_id')
+            return bool(gif_id) and gif_id in econ.get('profile_gifs', [])
     return False
 
 def stars_purchase_error(econ, kind, item_key):
@@ -11789,7 +11823,7 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин! 😸')
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
-        # GIF ДЛЯ ПРОФИЛЯ
+        # GIF ДЛЯ ПРОФИЛЯ — ТОЛЬКО TELEGRAM STARS
         elif action_data == 'shop_cat_gifs':
             econ = get_user_econ(user_id, user_name, username=user_username)
             owned = set(econ.get('profile_gifs', []))
@@ -11798,20 +11832,24 @@ def callback_inline(call):
             lines = [
                 '🎞 <b>GIF ДЛЯ ПРОФИЛЯ</b> 😺',
                 '──────────────────────',
-                'Купленные GIF можно использовать в профиле. После покупки GIF автоматически становится активным. 😻',
+                'GIF прикрепляется прямо к карточке профиля и покупается только за <b>Telegram Stars ⭐️</b>.',
                 ''
             ]
             markup = InlineKeyboardMarkup(row_width=1)
             for gif_id, gif in PROFILE_GIFS.items():
+                star_key = next((k for k, v in STARS_COSMETICS.items() if v.get('type') == 'gif' and v.get('gif_id') == gif_id), None)
+                star_item = STARS_COSMETICS.get(star_key, {}) if star_key else {}
+                stars_price = int(star_item.get('stars', 0))
                 status = ' ✅ КУПЛЕНО' if gif_id in owned else ''
                 active = ' 👑 АКТИВЕН' if current == gif_id else ''
-                lines.append(f"• <b>{html.escape(gif['name'])}</b> — <code>{gif['price']} 🪙</code>{status}{active}")
+                lines.append(f"• <b>{html.escape(gif['name'])}</b> — <code>{stars_price} ⭐️</code>{status}{active}")
                 if gif_id in owned:
                     markup.add(InlineKeyboardButton(f"{gif['name']} — уже куплено", callback_data=f'profile_gif_noop:{user_id}'))
-                else:
-                    markup.add(InlineKeyboardButton(f"Купить {gif['name']} — {gif['price']} 🪙", callback_data=f'buy_profile_gif_{gif_id}:{user_id}'))
+                elif star_key:
+                    markup.add(InlineKeyboardButton(f"Купить {gif['name']} — {stars_price} ⭐️", callback_data=f'star_buy_cosm_{star_key}:{user_id}'))
 
             lines.append('──────────────────────')
+            markup.add(InlineKeyboardButton('⭐️ Открыть весь Stars-магазин', callback_data=f'shop_cat_stars_main:{user_id}'))
             markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
             try:
                 bot.edit_message_text('\n'.join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -11821,61 +11859,7 @@ def callback_inline(call):
             return
 
         elif action_data == 'profile_gif_noop':
-            bot.answer_callback_query(call.id, '🎞 Этот GIF уже есть у вас! 😸')
-            return
-
-        elif action_data.startswith('buy_profile_gif_'):
-            gif_id = action_data.replace('buy_profile_gif_', '', 1)
-            gif = PROFILE_GIFS.get(gif_id)
-            if not gif:
-                bot.answer_callback_query(call.id, '❌ GIF не найден!', show_alert=True)
-                return
-
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            owned = econ.setdefault('profile_gifs', [])
-            if gif_id in owned:
-                econ['profile_gif'] = gif_id
-                mark_dirty()
-                bot.answer_callback_query(call.id, f"🎞 {gif['name']} уже куплен и теперь активен!", show_alert=True)
-                return
-
-            price = int(gif.get('price', 0))
-            if int(econ.get('balance', 0)) < price:
-                bot.answer_callback_query(call.id, f"❌ Нужно {price} 🪙! У вас {int(econ.get('balance', 0))} 🪙.", show_alert=True)
-                return
-
-            econ['balance'] = int(econ.get('balance', 0)) - price
-            owned.append(gif_id)
-            econ['profile_gif'] = gif_id
-            mark_dirty()
-            bot.answer_callback_query(call.id, f"🎉 Куплено: {gif['name']} за {price} 🪙! GIF установлен в профиль. 😻", show_alert=True)
-
-            # Перерисовываем каталог, чтобы сразу показать статус покупки.
-            try:
-                bot.edit_message_text(
-                    '🎞 <b>GIF ДЛЯ ПРОФИЛЯ</b> 😺\n──────────────────────\n' +
-                    '\n'.join(
-                        f"• <b>{html.escape(v['name'])}</b> — <code>{v['price']} 🪙</code>{' ✅ КУПЛЕНО' if k in set(owned) else ''}{' 👑 АКТИВЕН' if current == k else ''}"
-                        for k, v in PROFILE_GIFS.items()
-                    ) +
-                    '\n──────────────────────',
-                    chat_id=chat_id, message_id=call.message.message_id, reply_markup=InlineKeyboardMarkup(row_width=1), parse_mode='HTML'
-                )
-            except Exception:
-                pass
-            # Перерисовываем каталог с актуальными кнопками.
-            markup = InlineKeyboardMarkup(row_width=1)
-            for k, v in PROFILE_GIFS.items():
-                if k in owned:
-                    label = f"{v['name']} — куплено" + (' 👑' if econ.get('profile_gif') == k else '')
-                    markup.add(InlineKeyboardButton(label, callback_data=f'profile_gif_noop:{user_id}'))
-                else:
-                    markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['price']} 🪙", callback_data=f'buy_profile_gif_{k}:{user_id}'))
-            markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
-            try:
-                bot.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
-            except Exception:
-                pass
+            bot.answer_callback_query(call.id, '🎞 Этот GIF уже есть у вас! 😸', show_alert=False)
             return
 
         # ПАГИНАЦИЯ МАГАЗИНА
@@ -12258,6 +12242,7 @@ def validate_stars_payload(payload, amount, buyer_id):
             item = STARS_COSMETICS.get(key.replace('cosm_', ''))
             expected = item.get('stars') if item else None
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+            # GIF профиля также являются одноразовой Stars-косметикой и проверяются выше/ниже через stars_item_owned.
         elif key.startswith('bpprem_'):
             expected = STARS_COSMETICS.get('bp_premium', {}).get('stars')
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
@@ -12464,6 +12449,13 @@ def process_stars_successful_payment(message):
                             target_econ['paid_stars_items'].append(actual_prod)
                         p_info = PETS_DATA[pet_id]
                         target_econ['pet'] = {'id': pet_id, 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+                elif c_type == 'gif':
+                    gif_id = cosm.get('gif_id')
+                    if gif_id in PROFILE_GIFS:
+                        target_econ.setdefault('profile_gifs', [])
+                        if gif_id not in target_econ['profile_gifs']:
+                            target_econ['profile_gifs'].append(gif_id)
+                        target_econ['profile_gif'] = gif_id
                 prod_name = cosm.get('name', actual_prod)
             else:
                 # Never silently convert an unknown paid product into coins.
@@ -12661,6 +12653,28 @@ def process_stars_successful_payment(message):
                         f"──────────────────────\n"
                         f"Вы приручили мифического зверя <b>{p_info['name']}</b>!\n"
                         f"Бонус удачи: <b>+{p_info['luck_bonus']}%</b> ко всем играм, рыбалке и охоте! 😸",
+                        parse_mode='HTML'
+                    )
+                    mark_stars_charge_processed(charge_id)
+                    return
+                elif c_type == 'gif':
+                    gif_id = cosm.get('gif_id')
+                    if gif_id not in PROFILE_GIFS:
+                        bot.reply_to(message, '❌ GIF профиля не найден.', parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id)
+                        return
+                    econ.setdefault('profile_gifs', [])
+                    if gif_id not in econ['profile_gifs']:
+                        econ['profile_gifs'].append(gif_id)
+                    econ['profile_gif'] = gif_id
+                    mark_dirty()
+                    log_event('STARS GIF', f'Игрок {user_link} купил GIF профиля {PROFILE_GIFS[gif_id]["name"]} за {stars_amount} ⭐️!')
+                    bot.reply_to(
+                        message,
+                        f"🎞 <b>GIF ПРОФИЛЯ КУПЛЕН!</b> 😻\n"
+                        f"──────────────────────\n"
+                        f"{user_link}, установлен GIF: <b>{html.escape(PROFILE_GIFS[gif_id]['name'])}</b>.\n"
+                        f"Он будет прикреплён прямо к вашей карточке профиля. 😸",
                         parse_mode='HTML'
                     )
                     mark_stars_charge_processed(charge_id)
