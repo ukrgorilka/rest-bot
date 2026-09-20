@@ -687,6 +687,7 @@ active_crash = {}
 active_brick = {}
 active_c_mines = {}
 active_durak = {}
+active_clash = {}
 active_wanted = {}  # {(chat_id, user_id): wanted_data}
 active_pet_fights = {}
 active_memes = {}
@@ -926,6 +927,7 @@ def setup_bot_commands():
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
         BotCommand('trash', '🗑 Порыться в мусорке в поисках лута'),
         BotCommand('durak', '🃏 Карточная игра Дурак (36 карт)'),
+        BotCommand('clash', '👑 Clash Royale — арена 1v1'),
         BotCommand('promo', '🎁 Активировать промокод на коины'),
         BotCommand('stream', '🎥 Запустить трансляцию стримера'),
         BotCommand('garden', '🪴 Ваша личная оранжерея Бонсай'),
@@ -3847,12 +3849,14 @@ def render_durak_board(game_id, viewer_id=None):
     players = game['players']
     table = game['table']
 
+    attacker_name = players[game['attacker_idx']]['name'] if players and game.get('attacker_idx', 0) < len(players) else '—'
+    defender_name = players[game['defender_idx']]['name'] if players and game.get('defender_idx', 0) < len(players) else '—'
     lines = [
         f"🃏 <b>ДУРАК (36 КАРТ) | РЕЖИМ: {game['mode_name']}</b> 😺",
         "──────────────────────",
         f"👑 Козырь: <b>{trump}</b> | В колоде: <b>{deck_count} карт</b>",
-        f"⚔️ Атакует: <b>{players[game['attacker_idx']]['name']}</b>",
-        f"🛡 Защищается: <b>{players[game['defender_idx']]['name']}</b>\n",
+        f"⚔️ Атакует: <b>{attacker_name}</b>",
+        f"🛡 Защищается: <b>{defender_name}</b>\n",
         "<b>Игровой стол:</b>"
     ]
 
@@ -3945,7 +3949,199 @@ def cmd_durak(message):
         reply_markup=markup,
         parse_mode='HTML'
             )
-    # ---------------------------------------------------------
+    
+# ---------------------------------------------------------
+# CLASH ROYALE-LIKE: БОЙ 1v1 В TELEGRAM
+# ---------------------------------------------------------
+CLASH_CARDS = {
+    'knight': {'name': '⚔️ Рыцарь', 'cost': 3, 'damage': 220, 'hp': 900, 'tower_damage': 160},
+    'archers': {'name': '🏹 Лучницы', 'cost': 3, 'damage': 150, 'hp': 520, 'tower_damage': 120},
+    'giant': {'name': '🗿 Гигант', 'cost': 5, 'damage': 120, 'hp': 1800, 'tower_damage': 360},
+    'goblins': {'name': '👺 Гоблины', 'cost': 2, 'damage': 180, 'hp': 380, 'tower_damage': 150},
+    'mini_pekka': {'name': '🤖 Мини П.Е.К.К.А', 'cost': 4, 'damage': 420, 'hp': 950, 'tower_damage': 300},
+    'wizard': {'name': '🧙 Маг', 'cost': 5, 'damage': 300, 'hp': 700, 'tower_damage': 210},
+    'valkyrie': {'name': '🪓 Валькирия', 'cost': 4, 'damage': 260, 'hp': 1100, 'tower_damage': 190},
+    'fireball': {'name': '🔥 Огненный шар', 'cost': 4, 'damage': 0, 'hp': 1, 'tower_damage': 650},
+}
+CLASH_DECK = ['knight', 'archers', 'giant', 'goblins', 'mini_pekka', 'wizard', 'valkyrie', 'fireball']
+CLASH_TOWER_HP = 2800
+
+def clash_make_player(uid, name):
+    return {
+        'id': uid,
+        'name': name,
+        'deck': CLASH_DECK[:],
+        'hand': CLASH_DECK[:4],
+        'next_card': 4,
+        'elixir': 5,
+        'tower_left': CLASH_TOWER_HP,
+        'tower_right': CLASH_TOWER_HP,
+        'king': 4200,
+        'troops_left': [],
+        'troops_right': [],
+    }
+
+def clash_card_line(p):
+    parts = []
+    for idx, key in enumerate(p['hand']):
+        c = CLASH_CARDS[key]
+        parts.append(f"{idx+1}. {c['name']} [{c['cost']}⚡]")
+    return "\n".join(parts)
+
+def clash_render(game):
+    p1, p2 = game['players'][0], game['players'][1]
+    lines = [
+        "👑 <b>CLASH ROYALE: NYA ARENA</b>",
+        "──────────────────────",
+        f"🔴 <b>{html.escape(p1['name'])}</b>: 🏰 {max(0,p1['tower_left'])} | 🏰 {max(0,p1['tower_right'])} | 👑 {max(0,p1['king'])}",
+        f"🔵 <b>{html.escape(p2['name'])}</b>: 🏰 {max(0,p2['tower_left'])} | 🏰 {max(0,p2['tower_right'])} | 👑 {max(0,p2['king'])}",
+        "──────────────────────",
+        f"⚡️ {html.escape(p1['name'])}: <b>{p1['elixir']:.1f}/10</b>",
+        f"⚡️ {html.escape(p2['name'])}: <b>{p2['elixir']:.1f}/10</b>",
+    ]
+    if game.get('log'):
+        lines.append(f"\n📢 {html.escape(game['log'])}")
+    if not game.get('started'):
+        lines.append(f"\n⏳ Ожидание соперника: {len(game['players'])}/2")
+        return "\n".join(lines), InlineKeyboardMarkup().add(
+            InlineKeyboardButton("⚔️ Присоединиться к бою", callback_data=f"cr_join_{game['id']}")
+        )
+    turn_name = game['players'][game['turn_idx']]['name']
+    lines.append(f"\n🎯 Ход: <b>{html.escape(turn_name)}</b>")
+    lines.append("\n🎴 <b>Карты скрыты от соперника.</b> Выберите номер карты из своей руки (1–4).")
+    markup = InlineKeyboardMarkup(row_width=2)
+    for idx in range(4):
+        markup.add(
+            InlineKeyboardButton(
+                f"🎴 Карта {idx+1}",
+                callback_data=f"cr_card_{game['id']}_{idx}"
+            )
+        )
+    markup.add(
+        InlineKeyboardButton("⬅️ Левая башня", callback_data=f"cr_lane_{game['id']}_0:{p1['id']}"),
+        InlineKeyboardButton("➡️ Правая башня", callback_data=f"cr_lane_{game['id']}_1:{p1['id']}")
+    )
+    markup.add(InlineKeyboardButton("🏳️ Сдаться", callback_data=f"cr_surrender_{game['id']}:{p1['id']}"))
+    return "\n".join(lines), markup
+
+def clash_refresh_hand(p):
+    if len(p['hand']) >= 4:
+        return
+    while len(p['hand']) < 4:
+        p['hand'].append(p['deck'][p['next_card'] % len(p['deck'])])
+        p['next_card'] += 1
+
+def clash_apply_troops(p, enemy, lane):
+    """Resolve existing troops on a lane before the new card acts."""
+    key = 'troops_left' if lane == 0 else 'troops_right'
+    troops = p[key]
+    enemy_tower_key = 'tower_left' if lane == 0 else 'tower_right'
+    remaining = []
+    for troop in troops:
+        troop['hp'] -= 170
+        if troop['hp'] > 0:
+            enemy[enemy_tower_key] -= troop['tower_damage']
+            remaining.append(troop)
+    p[key] = remaining
+
+def clash_play_card(game, actor_idx, card_idx, lane):
+    actor = game['players'][actor_idx]
+    enemy = game['players'][1 - actor_idx]
+    if game.get('finished'):
+        return False, "Игра уже закончена."
+    if game['turn_idx'] != actor_idx:
+        return False, "Сейчас ход соперника!"
+    if card_idx < 0 or card_idx >= len(actor['hand']):
+        return False, "Карта уже ушла из руки."
+    if lane not in (0, 1):
+        return False, "Выберите линию."
+    key = actor['hand'][card_idx]
+    card = CLASH_CARDS[key]
+    if actor['elixir'] < card['cost']:
+        return False, f"Не хватает эликсира: нужно {card['cost']}⚡."
+    actor['elixir'] -= card['cost']
+    actor['hand'].pop(card_idx)
+    clash_refresh_hand(actor)
+
+    # Fireball damages the selected tower immediately.
+    if key == 'fireball':
+        tower_key = 'tower_left' if lane == 0 else 'tower_right'
+        enemy[tower_key] -= card['tower_damage']
+        game['log'] = f"{actor['name']} бросил(а) Огненный шар! -{card['tower_damage']} HP."
+    else:
+        troop = {
+            'hp': card['hp'],
+            'damage': card['damage'],
+            'tower_damage': card['tower_damage'],
+            'name': card['name']
+        }
+        key_t = 'troops_left' if lane == 0 else 'troops_right'
+        actor[key_t].append(troop)
+        clash_apply_troops(actor, enemy, lane)
+        game['log'] = f"{actor['name']} сыграл(а) {card['name']} на {'левой' if lane == 0 else 'правой'} линии."
+
+    # Elixir regeneration after each action keeps the Telegram version responsive.
+    for p in game['players']:
+        p['elixir'] = min(10.0, p['elixir'] + 1.0)
+    game['turn_idx'] = 1 - actor_idx
+
+    if enemy['king'] <= 0 or (enemy['tower_left'] <= 0 and enemy['tower_right'] <= 0):
+        game['finished'] = True
+        game['winner_idx'] = actor_idx
+        game['log'] += f" Победа {actor['name']}!"
+    elif actor['king'] <= 0 or (actor['tower_left'] <= 0 and actor['tower_right'] <= 0):
+        game['finished'] = True
+        game['winner_idx'] = 1 - actor_idx
+    return True, game['log']
+
+def clash_bot_turn(game):
+    if game.get('finished') or len(game.get('players', [])) != 2:
+        return
+    bot_idx = next((i for i,p in enumerate(game['players']) if p['id'] == 'bot'), None)
+    if bot_idx is None or game.get('turn_idx') != bot_idx:
+        return
+    bot_player = game['players'][bot_idx]
+    affordable = [i for i,k in enumerate(bot_player['hand']) if CLASH_CARDS[k]['cost'] <= bot_player['elixir']]
+    if not affordable:
+        bot_player['elixir'] = min(10.0, bot_player['elixir'] + 2.0)
+        affordable = [i for i,k in enumerate(bot_player['hand']) if CLASH_CARDS[k]['cost'] <= bot_player['elixir']]
+    if not affordable:
+        game['turn_idx'] = 1 - bot_idx
+        game['log'] = "🤖 Бот накопил эликсир."
+        return
+    idx = random.choice(affordable)
+    lane = random.randint(0, 1)
+    ok, msg = clash_play_card(game, bot_idx, idx, lane)
+    if ok:
+        game['log'] = "🤖 Ня-Бот сделал ход."
+
+@bot.message_handler(commands=['clash', 'clashroyale', 'royale'])
+def cmd_clash(message):
+    if not can_process_user_message(message):
+        return
+    uid = message.from_user.id
+    name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Игрок'
+    game_id = f"{uid}_{time.time_ns()}"
+    game = {
+        'id': game_id,
+        'chat_id': message.chat.id,
+        'msg_id': None,
+        'players': [clash_make_player(uid, name)],
+        'started': False,
+        'finished': False,
+        'turn_idx': 0,
+        'log': 'Лобби создано. Нажмите кнопку, чтобы позвать второго игрока.',
+        'created_at': time.time(),
+    }
+    active_clash[game_id] = game
+    text, markup = clash_render(game)
+    # В лобби добавляем отдельную кнопку быстрого боя с ботом.
+    markup.add(InlineKeyboardButton("🤖 Бой с Ня-Ботом", callback_data=f"cr_bot_{game_id}"))
+    sent = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+    game['msg_id'] = sent.message_id
+
+
+# ---------------------------------------------------------
 # МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
 # ---------------------------------------------------------
 @bot.message_handler(commands=['dick', 'писюн', 'замер'])
@@ -7570,6 +7766,7 @@ def handle_messages(message):
     elif text_lower in ['мемы']: cmd_memes(message); return
     elif text_lower.startswith(('промо', 'промокод')): cmd_promo(message); return
     elif text_lower.startswith(('дурак', '/durak')): cmd_durak(message); return
+    elif text_lower.startswith(('клеш рояль', 'clash royale', '/clash', '/clashroyale', '/royale')): cmd_clash(message); return
     elif text_lower in ['настройки профиля', 'настройка профиля']: cmd_profile_settings(message); return
     elif text_lower.startswith(('сейф', '/safe')): cmd_safe(message); return
     elif text_lower in ['дом', 'мой дом', 'семейный дом', '/house']: cmd_house(message); return
@@ -7949,6 +8146,129 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "❌ Это меню открыто другим пользователем!", show_alert=True)
                 return
 
+
+        # CLASH ROYALE
+        elif action_data.startswith('cr_bot_'):
+            game_id = action_data.replace('cr_bot_', '', 1)
+            game = active_clash.get(game_id)
+            if not game or game.get('finished') or game.get('started'):
+                bot.answer_callback_query(call.id, "❌ Лобби уже недоступно.", show_alert=True)
+                return
+            if game['players'][0]['id'] != user_id:
+                bot.answer_callback_query(call.id, "❌ Только создатель лобби может выбрать бой с ботом.", show_alert=True)
+                return
+            game['players'].append(clash_make_player('bot', '🤖 Ня-Бот'))
+            game['started'] = True
+            game['log'] = f"Бой начался! Ходит {game['players'][0]['name']}."
+            text, markup = clash_render(game)
+            try:
+                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], reply_markup=markup, parse_mode='HTML')
+            except Exception:
+                pass
+            bot.answer_callback_query(call.id, "🤖 Бот подключился!")
+            return
+
+        elif action_data.startswith('cr_join_'):
+            game_id = action_data.replace('cr_join_', '', 1)
+            game = active_clash.get(game_id)
+            if not game or game.get('finished'):
+                bot.answer_callback_query(call.id, "❌ Бой уже завершён!", show_alert=True)
+                return
+            if game.get('started'):
+                bot.answer_callback_query(call.id, "❌ Бой уже начался!", show_alert=True)
+                return
+            if any(p['id'] == user_id for p in game['players']):
+                bot.answer_callback_query(call.id, "Вы уже в этом бою!", show_alert=True)
+                return
+            game['players'].append(clash_make_player(user_id, user_name))
+            if len(game['players']) >= 2:
+                game['started'] = True
+                game['log'] = f"Бой начался! Ходит {game['players'][0]['name']}."
+            text, markup = clash_render(game)
+            try:
+                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], reply_markup=markup, parse_mode='HTML')
+            except Exception:
+                pass
+            bot.answer_callback_query(call.id, "⚔️ Вы вошли в бой!")
+            return
+
+        elif action_data.startswith('cr_card_'):
+            parts = action_data.split('_')
+            try:
+                # cr_card_GAMEID_CARDINDEX
+                game_id = "_".join(parts[2:-1])
+                card_idx = int(parts[-1])
+            except (ValueError, IndexError):
+                bot.answer_callback_query(call.id, "❌ Некорректная карта.", show_alert=True)
+                return
+            game = active_clash.get(game_id)
+            if not game:
+                bot.answer_callback_query(call.id, "❌ Бой не найден.", show_alert=True)
+                return
+            game['_pending_card'] = {'user_id': user_id, 'idx': card_idx}
+            bot.answer_callback_query(call.id, "Теперь выберите линию 👇")
+            return
+
+        elif action_data.startswith('cr_lane_'):
+            parts = action_data.split('_')
+            try:
+                # cr_lane_GAMEID_0/1
+                lane = int(parts[-1])
+                game_id = "_".join(parts[2:-1])
+            except (ValueError, IndexError):
+                bot.answer_callback_query(call.id, "❌ Некорректная линия.", show_alert=True)
+                return
+            game = active_clash.get(game_id)
+            if not game or not game.get('started') or game.get('finished'):
+                bot.answer_callback_query(call.id, "❌ Бой недоступен.", show_alert=True)
+                return
+            pending = game.get('_pending_card')
+            if not pending or pending.get('user_id') != user_id:
+                bot.answer_callback_query(call.id, "Сначала выберите карту.", show_alert=True)
+                return
+            ok, msg = clash_play_card(game, next(i for i,p in enumerate(game['players']) if p['id'] == user_id), pending['idx'], lane)
+            game.pop('_pending_card', None)
+            if not ok:
+                bot.answer_callback_query(call.id, msg, show_alert=True)
+                return
+            if not game.get('finished') and any(p['id'] == 'bot' for p in game['players']):
+                clash_bot_turn(game)
+            text, markup = clash_render(game)
+            if game.get('finished'):
+                winner = game['players'][game['winner_idx']]['name']
+                text += f"\n\n🏆 <b>Победитель: {html.escape(winner)}</b>"
+                active_clash.pop(game_id, None)
+                markup = None
+            try:
+                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], reply_markup=markup, parse_mode='HTML')
+            except Exception:
+                pass
+            bot.answer_callback_query(call.id, "⚔️ Ход сделан!")
+            return
+
+        elif action_data.startswith('cr_surrender_'):
+            game_id = action_data.replace('cr_surrender_', '', 1)
+            game = active_clash.get(game_id)
+            if not game or game.get('finished'):
+                bot.answer_callback_query(call.id, "❌ Бой уже завершён.", show_alert=True)
+                return
+            idx = next((i for i,p in enumerate(game['players']) if p['id'] == user_id), None)
+            if idx is None:
+                bot.answer_callback_query(call.id, "❌ Вы не участник.", show_alert=True)
+                return
+            game['finished'] = True
+            game['winner_idx'] = 1 - idx if len(game['players']) == 2 else None
+            if game['winner_idx'] is not None:
+                text = f"🏳️ {html.escape(game['players'][idx]['name'])} сдался.\n🏆 Победитель: <b>{html.escape(game['players'][game['winner_idx']]['name'])}</b>"
+            else:
+                text = "🏳️ Игрок сдался."
+            try:
+                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], parse_mode='HTML')
+            except Exception:
+                pass
+            active_clash.pop(game_id, None)
+            bot.answer_callback_query(call.id, "🏳️ Вы сдались.")
+            return
 
         # МЕМЫ: ГОЛОСОВАНИЕ
         elif action_data.startswith('meme_l_') or action_data.startswith('meme_d_'):
@@ -8476,7 +8796,10 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"❌ Недостаточно средств для ставки {bet} 🪙!", show_alert=True)
                 return
 
-            if bet > 0:
+            # Ставка списывается только для мультиплеера.
+            if mode_num == 1:
+                bet = 0
+            elif bet > 0:
                 econ['balance'] -= bet
                 mark_dirty()
 
@@ -8678,14 +9001,14 @@ def callback_inline(call):
 
                 game['status_text'] = win_text
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
-                try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
+                try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
                 return
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
@@ -8696,6 +9019,9 @@ def callback_inline(call):
             game = active_durak.get(game_id)
             if not game: return
             p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
+            if p_idx is None:
+                bot.answer_callback_query(call.id, "❌ Вы не участник этой партии!", show_alert=True)
+                return
             if p_idx != game['defender_idx']:
                 bot.answer_callback_query(call.id, "Только защищающийся может взять карты!", show_alert=True)
                 return
@@ -8716,7 +9042,7 @@ def callback_inline(call):
                 durak_bot_turn(game)
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
@@ -8725,7 +9051,15 @@ def callback_inline(call):
         elif action_data.startswith('durak_bito_'):
             game_id = action_data.replace('durak_bito_', '')
             game = active_durak.get(game_id)
-            if not game: return
+            if not game:
+                return
+            p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
+            if p_idx != game.get('attacker_idx'):
+                bot.answer_callback_query(call.id, "❌ Только атакующий может объявить «Бито».", show_alert=True)
+                return
+            if not game.get('table') or not all(pair.get('defend') for pair in game['table']):
+                bot.answer_callback_query(call.id, "❌ Не все карты отбиты!", show_alert=True)
+                return
 
             game['table'] = []
             durak_deal_cards(game)
@@ -8737,7 +9071,7 @@ def callback_inline(call):
                 durak_bot_turn(game)
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
