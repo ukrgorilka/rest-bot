@@ -151,6 +151,20 @@ PREMIUM_EMOJI_IDS = {
     "ui_30": "5251203410396458957",  # 🛡️
     "ui_31": "5424972470023104089",  # 🔥
     "ui_32": "5458603043203327669",  # 🔔
+
+    # Набор 4 — новые эмодзи со скрина пользователя
+    "set4_01": "5818825661170586424",  # 😎 / смайлик в очках
+    "set4_02": "5267281800857662529",  # 🤩 / звёздные глаза
+    "set4_03": "5866369239740320716",  # 🤑 / богатый
+    "set4_04": "5370710901177469084",  # 😈 / дьявол
+    "set4_05": "5384065397609747221",  # 👿 / злой дьявол
+    "set4_06": "5215674032174683314",  # 🤡 / клоун
+    "set4_07": "5472201313389389629",  # 🥶 / замерзший
+    "set4_08": "5357256503805885182",  # 🤯 / взрыв мозга
+    "set4_09": "5292134882519046652",  # 😭 / плач
+    "set4_10": "5409373243293313689",  # 🥺 / умоляющий
+    "set4_11": "5393103288700784485",  # 😏 / ухмылка
+    "set4_12": "5316891134142729373",  # 🐱 / хитрый кот
 }
 
 # Удобные алиасы. Потом можно менять ID в одном месте.
@@ -167,6 +181,10 @@ PREMIUM_EMOJI_ALIASES = {
     "star": "ui_26",       # ⭐
     "success": "ui_18",    # 🥇
     "sad": "face_11",
+    "glasses": "set4_01", "star_eyes": "set4_02", "rich": "set4_03",
+    "devil": "set4_04", "evil_devil": "set4_05", "clown": "set4_06",
+    "frozen": "set4_07", "brain_explosion": "set4_08", "crying": "set4_09",
+    "pleading": "set4_10", "smirk": "set4_11", "clever_cat": "set4_12",
 }
 
 
@@ -186,6 +204,12 @@ PREMIUM_EMOJI_ALTS = {
     "5438496463044752972": "⭐", "5427168083074628963": "💎",
     "5251203410396458957": "🛡️", "5424972470023104089": "🔥",
     "5458603043203327669": "🔔",
+    "5818825661170586424": "😎", "5267281800857662529": "🤩",
+    "5866369239740320716": "🤑", "5370710901177469084": "😈",
+    "5384065397609747221": "👿", "5215674032174683314": "🤡",
+    "5472201313389389629": "🥶", "5357256503805885182": "🤯",
+    "5292134882519046652": "😭", "5409373243293313689": "🥺",
+    "5393103288700784485": "😏", "5316891134142729373": "🐱",
 }
 PREMIUM_EMOJI_METADATA_LOADED = False
 PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
@@ -7701,6 +7725,25 @@ def cmd_groups(message):
         lines.append(f'⬅️ Предыдущая страница: <code>/groups {page - 1}</code>')
     bot.send_message(message.chat.id,'\n'.join(lines),parse_mode='HTML')
 
+@bot.message_handler(commands=['findgroup', 'найтигруппу'])
+def cmd_find_group(message):
+    if not _owner_only(message): return
+    parts = (message.text or '').split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, '🔎 <b>Поиск группы</b>\n\nИспользование: <code>/findgroup -1001234567890</code>', parse_mode='HTML'); return
+    raw = parts[1].strip().split()[0]
+    try: chat_id = int(raw)
+    except ValueError:
+        bot.reply_to(message, '❌ ID группы должен быть числом.', parse_mode='HTML'); return
+    item = db.get('bot_chats', {}).get(str(chat_id))
+    if not isinstance(item, dict):
+        bot.reply_to(message, f'❌ Группа <code>{chat_id}</code> не найдена в реестре бота.', parse_mode='HTML'); return
+    title=html.escape(str(item.get('title') or 'Без названия')); username=item.get('username')
+    uname=f'🔗 @{html.escape(str(username))}' if username else '🔗 username отсутствует'
+    members=item.get('member_count'); mem=f'👥 Участников: <b>{members}</b>' if members is not None else '👥 Участники: пока неизвестны'
+    status='🟢 активна' if item.get('status')=='active' else '🔴 неактивна'
+    bot.reply_to(message, f'🔎 <b>ГРУППА НАЙДЕНА</b>\n──────────────────────\n📌 <b>{title}</b>\n🆔 <code>{chat_id}</code>\n{uname}\n📡 Тип: <b>{_chat_type_label(item.get("type", "group"))}</b>\n{mem}\n🤖 Статус бота: <b>{status}</b>\n📅 Обнаружена: <b>{_fmt_seen(item.get("first_seen"))}</b>\n🕐 Последняя активность: <b>{_fmt_seen(item.get("last_activity", item.get("last_seen")))}</b>', parse_mode='HTML')
+
 @bot.message_handler(commands=['activity', 'активность'])
 def cmd_activity(message):
     if not _owner_only(message): return
@@ -7711,11 +7754,44 @@ def cmd_activity(message):
         lines.append(f"{i}. 🟢 <b>{html.escape(str(x.get('title') or 'Без названия'))}</b>\n   🕐 {ago} назад · 🆔 <code>{x.get('chat_id')}</code>")
     bot.reply_to(message,'\n'.join(lines) if items else '📈 <b>Активность</b>\n\nАктивных групп пока нет.',parse_mode='HTML')
 
+@bot.message_handler(commands=['user', 'юзер', 'пользователь'])
+def cmd_user_lookup(message):
+    if not _owner_only(message): return
+    parts=(message.text or '').split(maxsplit=1)
+    if len(parts)<2:
+        bot.reply_to(message,'🔎 <b>Поиск пользователя</b>\n\n<code>/user 123456789</code> или <code>/user @username</code>',parse_mode='HTML'); return
+    query=parts[1].strip().split()[0].lstrip('@').lower(); econ=None; found_id=None
+    if query.isdigit(): found_id=int(query); econ=db.get('economy',{}).get(str(found_id))
+    else:
+        for uid,data in db.get('economy',{}).items():
+            if isinstance(data,dict) and str(data.get('username','')).lower().lstrip('@')==query: found_id=uid; econ=data; break
+    if not isinstance(econ,dict): bot.reply_to(message,f'❌ Пользователь <code>{html.escape(query)}</code> не найден.',parse_mode='HTML'); return
+    name=html.escape(str(econ.get('name') or econ.get('user_name') or 'Без имени')); uname=econ.get('username'); uname=f'@{html.escape(str(uname))}' if uname else 'нет username'; stats=econ.get('stats',{}) if isinstance(econ.get('stats'),dict) else {}
+    bot.reply_to(message,f'🔎 <b>ПОЛЬЗОВАТЕЛЬ НАЙДЕН</b>\n──────────────────────\n👤 <b>{name}</b> · {uname}\n🆔 <code>{found_id}</code>\n🪙 Баланс: <b>{int(econ.get("balance",0) or 0):,}</b>\n🏦 Банк: <b>{int(econ.get("bank",0) or 0):,}</b>\n🎮 Игр: <b>{int(stats.get("games",0) or 0):,}</b>\n🏆 Достижений: <b>{len(econ.get("achievements",[]) or [])}</b>\n⭐ Донатов Stars: <b>{int(econ.get("stars_donated",0) or 0):,}</b>',parse_mode='HTML')
+
 @bot.message_handler(commands=['stats', 'статистика'])
 def cmd_global_stats(message):
     if not _owner_only(message): return
     total,users=_global_message_stats(); active=len(_bot_chat_items(True)); all_groups=len(db.get('bot_chats',{})); profiles=len(db.get('economy',{}))
     bot.reply_to(message,f"📊 <b>ОБЩАЯ СТАТИСТИКА БОТА</b>\n──────────────────────\n🟢 Активных групп: <b>{active}</b>\n📋 Сохранённых групп: <b>{all_groups}</b>\n👤 Профилей: <b>{profiles}</b>\n💬 Сообщений в учёте: <b>{total:,}</b>\n👥 Пользователей с активностью: <b>{users}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
+
+@bot.message_handler(commands=['economystats', 'экономика'])
+def cmd_economy_stats(message):
+    if not _owner_only(message): return
+    total_coins=total_bank=total_stars=0
+    for econ in db.get('economy',{}).values():
+        if isinstance(econ,dict): total_coins+=int(econ.get('balance',0) or 0); total_bank+=int(econ.get('bank',0) or 0); total_stars+=int(econ.get('stars_donated',0) or 0)
+    bot.reply_to(message,f'💰 <b>ЭКОНОМИКА БОТА</b>\n──────────────────────\n🪙 Монет на руках: <b>{total_coins:,}</b>\n🏦 Монет в банках: <b>{total_bank:,}</b>\n💎 Stars в статистике донатов: <b>{total_stars:,}</b>',parse_mode='HTML')
+
+@bot.message_handler(commands=['gamestats', 'игрыстат'])
+def cmd_game_stats(message):
+    if not _owner_only(message): return
+    totals={k:0 for k in ('games','wheel_spins','cases_opened','mines_wins','fish','hunt')}
+    for econ in db.get('economy',{}).values():
+        stats=econ.get('stats',{}) if isinstance(econ,dict) else {}
+        if isinstance(stats,dict):
+            for k in totals: totals[k]+=int(stats.get(k,0) or 0)
+    bot.reply_to(message,f'🎮 <b>СТАТИСТИКА ИГР</b>\n──────────────────────\n🎲 Всего игр: <b>{totals["games"]:,}</b>\n🎡 Колесо: <b>{totals["wheel_spins"]:,}</b>\n📦 Кейсов: <b>{totals["cases_opened"]:,}</b>\n💣 Побед в сапёре: <b>{totals["mines_wins"]:,}</b>\n🎣 Рыбалка: <b>{totals["fish"]:,}</b>\n🏹 Охота: <b>{totals["hunt"]:,}</b>',parse_mode='HTML')
 
 @bot.message_handler(commands=['status', 'статус'])
 def cmd_bot_status(message):
@@ -7727,7 +7803,7 @@ def cmd_bot_status(message):
 def cmd_dashboard(message):
     if not _owner_only(message): return
     total,_=_global_message_stats(); active=len(_bot_chat_items(True)); all_groups=len(db.get('bot_chats',{}))
-    bot.reply_to(message,f"📊 <b>ПАНЕЛЬ МОНИТОРИНГА</b>\n──────────────────────\n🟢 Групп сейчас: <b>{active}</b>\n📋 Записей групп: <b>{all_groups}</b>\n💬 Сообщений: <b>{total:,}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>\n\n📋 /groups — все группы\n📈 /activity — активность\n📊 /stats — статистика\n🟢 /status — состояние\n🔎 /groupinfo — текущая группа",parse_mode='HTML')
+    bot.reply_to(message,f"📊 <b>ПАНЕЛЬ МОНИТОРИНГА</b>\n──────────────────────\n🟢 Групп сейчас: <b>{active}</b>\n📋 Записей групп: <b>{all_groups}</b>\n💬 Сообщений: <b>{total:,}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>\n\n📋 /groups — все группы\n📈 /activity — активность\n📊 /stats — статистика\n🟢 /status — состояние\n🔎 /findgroup ID — найти группу\n👤 /user ID — найти пользователя\n💰 /economystats — экономика\n🎮 /gamestats — игры\n🔎 /groupinfo — текущая группа",parse_mode='HTML')
 
 @bot.message_handler(commands=['groupinfo', 'инфогруппы'])
 def cmd_group_info(message):
