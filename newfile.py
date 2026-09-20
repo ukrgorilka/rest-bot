@@ -117,59 +117,91 @@ PREMIUM_EMOJI_IDS = {
     "cat_27": "5190783369549474747",
     "cat_28": "5192740946923512242",
     "cat_29": "5190860489982243166",
+
+    # Набор 3 — интерфейс / предметы / значки (со скрина пользователя)
+    "ui_01": "5210956306952758910",  # 👀
+    "ui_02": "5260293700088511294",  # 🛑
+    "ui_03": "5240241223632954241",  # 🚫
+    "ui_04": "5274099962655816924",  # ❗
+    "ui_05": "5456140674028019486",  # ⚡
+    "ui_06": "5447644880824181073",  # ⚠️
+    "ui_07": "5443038326535759644",  # ⛄
+    "ui_08": "5467538555158943525",  # ☃️
+    "ui_09": "5461151367559141950",  # 🎉
+    "ui_10": "5460755126761312667",  # 🚩
+    "ui_11": "5416041192905265756",  # 🏠
+    "ui_12": "5395695537687123235",  # 🚨
+    "ui_13": "5395444784611480792",  # 🧱
+    "ui_14": "5406756500108501710",  # FR
+    "ui_15": "5463107823946717464",  # 🎵
+    "ui_16": "5453902265922376865",  # 🥉
+    "ui_17": "5447203607294265305",  # 🥈
+    "ui_18": "5440539497383087970",  # 🥇
+    "ui_19": "5422439311196834318",  # 💡
+    "ui_20": "5413879192267805083",  # 🗓️
+    "ui_21": "5449569374065152798",  # 🌙
+    "ui_22": "5399913388845322366",  # ☁️
+    "ui_23": "5402477260982731644",  # 🌞
+    "ui_24": "5217822164362739968",  # 👑
+    "ui_25": "5325547803936572038",  # ✨
+    "ui_26": "5438496463044752972",  # ⭐
+    "ui_27": "5427168083074628963",  # 💎
+    "ui_28": "5440621591387980068",  # SOON
+    "ui_29": "5415655814079723871",  # TOP
+    "ui_30": "5251203410396458957",  # 🛡️
+    "ui_31": "5424972470023104089",  # 🔥
+    "ui_32": "5458603043203327669",  # 🔔
 }
 
 # Удобные алиасы. Потом можно менять ID в одном месте.
 PREMIUM_EMOJI_ALIASES = {
     "profile": "cat_01",
-    "money": "face_01",
-    "work": "face_02",
-    "home": "cat_03",
+    "money": "ui_27",      # 💎
+    "work": "ui_15",       # 🎵
+    "home": "ui_11",       # 🏠
     "pet": "cat_01",
     "garden": "cat_12",
-    "shop": "cat_25",
-    "vip": "cat_18",
-    "game": "face_13",
-    "star": "face_14",
-    "success": "face_08",
+    "shop": "ui_25",       # ✨
+    "vip": "ui_24",        # 👑
+    "game": "ui_09",       # 🎉
+    "star": "ui_26",       # ⭐
+    "success": "ui_18",    # 🥇
     "sad": "face_11",
 }
 
 
-PREMIUM_EMOJI_ALTS = {}
+PREMIUM_EMOJI_ALTS = {
+    "5210956306952758910": "👀", "5260293700088511294": "🛑",
+    "5240241223632954241": "🚫", "5274099962655816924": "❗",
+    "5456140674028019486": "⚡", "5447644880824181073": "⚠️",
+    "5443038326535759644": "⛄", "5467538555158943525": "☃️",
+    "5461151367559141950": "🎉", "5460755126761312667": "🚩",
+    "5416041192905265756": "🏠", "5395695537687123235": "🚨",
+    "5395444784611480792": "🧱", "5463107823946717464": "🎵",
+    "5453902265922376865": "🥉", "5447203607294265305": "🥈",
+    "5440539497383087970": "🥇", "5422439311196834318": "💡",
+    "5413879192267805083": "🗓️", "5449569374065152798": "🌙",
+    "5399913388845322366": "☁️", "5402477260982731644": "🌞",
+    "5217822164362739968": "👑", "5325547803936572038": "✨",
+    "5438496463044752972": "⭐", "5427168083074628963": "💎",
+    "5251203410396458957": "🛡️", "5424972470023104089": "🔥",
+    "5458603043203327669": "🔔",
+}
 PREMIUM_EMOJI_METADATA_LOADED = False
 PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
 
 
 def load_premium_emoji_metadata():
-    """Получает правильный emoji-alt для каждого custom_emoji_id через Bot API.
+    """Оставлено для совместимости со старым кодом.
 
-    Telegram требует валидный альтернативный emoji внутри <tg-emoji>. Поэтому
-    не полагаемся на случайный fallback вроде 💰 для ID, который на самом деле
-    связан с другим emoji. Если Bot API временно недоступен, просто оставляем
-    обычные emoji — это не ломает команды и профиль.
+    Важно: здесь НЕТ сетевого запроса. Ранее вызов Bot API во время обработки
+    первой команды мог задерживать/ломать команды. Для известных ID используем
+    проверенные alt-значения из наборов; Telegram требует, чтобы alt совпадал
+    с исходным emoji custom emoji.
     """
     global PREMIUM_EMOJI_METADATA_LOADED
-    if PREMIUM_EMOJI_METADATA_LOADED:
-        return
-    with PREMIUM_EMOJI_METADATA_LOCK:
-        if PREMIUM_EMOJI_METADATA_LOADED:
-            return
-        try:
-            ids = list(dict.fromkeys(str(v) for v in PREMIUM_EMOJI_IDS.values() if v))
-            if hasattr(bot, 'get_custom_emoji_stickers') and ids:
-                stickers = bot.get_custom_emoji_stickers(ids)
-                for sticker in stickers or []:
-                    cid = getattr(sticker, 'custom_emoji_id', None)
-                    alt = getattr(sticker, 'emoji', None)
-                    if cid and alt:
-                        PREMIUM_EMOJI_ALTS[str(cid)] = str(alt)
-                print(f"[PREMIUM EMOJI] Загружено alt-emoji: {len(PREMIUM_EMOJI_ALTS)}/{len(ids)}")
-        except Exception as e:
-            print(f"[PREMIUM EMOJI] Не удалось получить метаданные: {e}")
-        finally:
-            # Не повторяем сетевой запрос на каждом сообщении при временной ошибке.
-            PREMIUM_EMOJI_METADATA_LOADED = True
+    PREMIUM_EMOJI_METADATA_LOADED = True
+    return
 
 
 def premium_emoji(name, fallback="✨"):
@@ -180,7 +212,6 @@ def premium_emoji(name, fallback="✨"):
         return fallback
 
     # Метаданные загружаются лениво после создания bot.
-    load_premium_emoji_metadata()
     alt = PREMIUM_EMOJI_ALTS.get(str(emoji_id), fallback)
     return f'<tg-emoji emoji-id="{html.escape(str(emoji_id))}">{html.escape(str(alt))}</tg-emoji>'
 
@@ -194,27 +225,21 @@ def premium_emoji_id(name):
 # Кнопки Telegram не поддерживают HTML-теги custom emoji, поэтому здесь
 # обновляются сообщения, подписи, профили, уведомления и ответы бота.
 GLOBAL_PREMIUM_EMOJI_MAP = {
-    "🐱": "cat_01", "😻": "cat_02", "😺": "cat_03", "😸": "cat_04",
-    "😹": "cat_05", "😽": "cat_06", "🙀": "cat_07", "😿": "cat_08",
-    "😾": "cat_09", "🐾": "cat_10", "💰": "face_01", "💎": "face_02",
-    "💼": "face_03", "🏠": "cat_03", "🌱": "cat_12", "🌿": "cat_13",
-    "🌟": "face_14", "⭐": "face_14", "✨": "face_08", "👑": "cat_18",
-    "🎁": "cat_25", "🛍": "cat_25", "🛒": "cat_25", "🎰": "face_13",
-    "🎲": "face_13", "🏆": "face_14", "⚡": "face_08", "🔥": "face_15",
-    "❤️": "face_14", "❤": "face_14", "💖": "face_14", "💗": "face_14",
-    "👍": "face_08", "👎": "face_11", "❌": "face_11", "✅": "face_08",
-    "⚠️": "face_11", "⚠": "face_11", "❗": "face_11", "❓": "face_11",
-    "🎨": "cat_16", "🔤": "cat_17", "🏷": "cat_18", "📸": "cat_19",
-    "🎒": "cat_20", "🚘": "cat_21", "💍": "cat_22", "🏢": "cat_23",
-    "🏦": "cat_24", "📊": "cat_26", "📈": "cat_27", "💳": "cat_28",
-    "🪙": "face_03", "💸": "face_04", "🎉": "face_05", "🤝": "face_06",
-    "🔄": "face_07", "🔙": "face_09", "⚙️": "face_10", "⚙": "face_10",
-    "📥": "face_12", "📤": "face_12", "🔔": "face_16", "👤": "face_17",
-    "🧑": "face_17", "💥": "face_18", "🤖": "face_19", "🪖": "face_20",
-    "⚖️": "face_21", "⚖": "face_21", "🕊": "face_22", "😇": "face_22",
-    "😈": "face_23", "👹": "face_24", "🍀": "face_25", "🧪": "face_26",
-    "🍖": "face_27", "🧼": "face_28", "🦮": "face_29",
+    # Котики — ID взяты из второго набора и соответствуют 🐱-стилю.
+    "🐱": "cat_01", "😺": "cat_03", "😸": "cat_04", "😹": "cat_05",
+    "😽": "cat_06", "🙀": "cat_07", "😿": "cat_08", "😾": "cat_09", "🐾": "cat_10",
+
+    # Точный третий набор со скрина. Никаких случайных подмен: 🧼 больше
+    # не превращается в улыбающийся смайлик, а ⭐ — в смайлик в очках.
+    "👀": "ui_01", "🛑": "ui_02", "🚫": "ui_03", "❗": "ui_04",
+    "⚡": "ui_05", "⚠️": "ui_06", "⚠": "ui_06", "⛄": "ui_07", "☃️": "ui_08",
+    "🎉": "ui_09", "🚩": "ui_10", "🏠": "ui_11", "🚨": "ui_12", "🧱": "ui_13",
+    "🎵": "ui_15", "🥉": "ui_16", "🥈": "ui_17", "🥇": "ui_18", "💡": "ui_19",
+    "🗓️": "ui_20", "🌙": "ui_21", "☁️": "ui_22", "🌞": "ui_23", "👑": "ui_24",
+    "✨": "ui_25", "⭐": "ui_26", "💎": "ui_27", "🛡️": "ui_30", "🛡": "ui_30",
+    "🔥": "ui_31", "🔔": "ui_32",
 }
+
 
 def format_large_numbers(text):
     """Форматирует обычные целые числа в сообщениях: 1000000 -> 1,000,000.
@@ -5420,7 +5445,7 @@ def cmd_profile_settings(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_profile_settings_view(message.chat.id, user_id, user_name)
 
-def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
+def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
     econ = get_user_econ(user_id, user_tag, username=username)
     theme_key = econ.get('profile_theme', 'default')
     theme_info = THEMES.get(theme_key, THEMES['default'])
@@ -5600,6 +5625,34 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
+
+
+def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
+    """Безопасный вход в профиль: ошибка оформления не может убить /profile."""
+    try:
+        return _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply, message_id_to_edit, username)
+    except Exception as profile_error:
+        print(f"[PROFILE BUILD ERROR] {profile_error}")
+        try:
+            econ = get_user_econ(user_id, user_tag, username=username)
+            balance = int(econ.get('balance', 0) or 0)
+            level, exp, next_exp, bar = get_account_level(econ.get('account_exp', 0))
+            fallback = (
+                f"👤 <b>ПРОФИЛЬ</b>\n"
+                f"──────────────────────\n"
+                f"Игрок: {html.escape(str(user_tag or 'Пользователь'))}\n"
+                f"💰 Баланс: <b>{balance:,}</b> Ня-коинов\n"
+                f"⭐ Уровень: <b>{level} LVL</b> [{bar}]\n"
+                f"📈 EXP: <b>{exp:,}/{next_exp:,}</b>\n"
+                f"──────────────────────\n"
+                f"⚠️ Основная карточка временно не загрузилась, но команда /profile работает."
+            )
+            if message_to_reply:
+                return bot.reply_to(message_to_reply, fallback, parse_mode='HTML')
+            return bot.send_message(chat_id, fallback, parse_mode='HTML')
+        except Exception as fallback_error:
+            print(f"[PROFILE FALLBACK ERROR] {fallback_error}")
+            return None
 
 # ---------------------------------------------------------
 # ЗАЩИТА ПОКУПОК TELEGRAM STARS
