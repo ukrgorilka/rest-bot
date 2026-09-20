@@ -48,6 +48,112 @@ TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 if not TOKEN:
     print("[ВНИМАНИЕ] BOT_TOKEN не задан в переменных окружения (ENV)! Бот ожидает BOT_TOKEN в Render.")
 bot = telebot.TeleBot(TOKEN)
+
+# ---------------------------------------------------------
+# TELEGRAM PREMIUM / CUSTOM EMOJI
+# ---------------------------------------------------------
+# ID взяты из набора Custom Emoji, который можно отправлять через Bot API.
+# Использование: premium_emoji("face_01") -> HTML-тег <tg-emoji ...>.
+# Если Telegram/ID недоступен, возвращается обычный fallback-эмодзи.
+PREMIUM_EMOJI_IDS = {
+    # Набор 1 — 29 эмодзи
+    "face_01": "5276337181055533947",
+    "face_02": "530757646769193020",
+    "face_03": "5328170176173918",
+    "face_04": "532809826289112273",
+    "face_05": "5325799368761027493",
+    "face_06": "5328205125972403196",
+    "face_07": "5294541369874851363",
+    "face_08": "5355215058605450179",
+    "face_09": "5388743385794228775",
+    "face_10": "5366573864123903238",
+    "face_11": "5276249284549820655",
+    "face_12": "5334564744177133218",
+    "face_13": "5449720324985726739",
+    "face_14": "5354903467318061957",
+    "face_15": "5391054323012608736",
+    "face_16": "5393437265357712449",
+    "face_17": "5366286462092323271",
+    "face_18": "5352609117263373617",
+    "face_19": "5363836475307730046",
+    "face_20": "5354804116134569645",
+    "face_21": "5325530959074829371",
+    "face_22": "5305670334513427489",
+    "face_23": "5328243673303886465",
+    "face_24": "5327924389730066439",
+    "face_25": "5316996360841474316",
+    "face_26": "5294325496228620537",
+    "face_27": "5452136652111620778",
+    "face_28": "5327803877242710592",
+    "face_29": "5350513671439133456",
+
+    # Набор 2 — 29 котиков / персонажей
+    "cat_01": "5294053079337950803",
+    "cat_02": "5296324661771001073",
+    "cat_03": "5296318876450052319",
+    "cat_04": "5296468075023982376",
+    "cat_05": "5296568173531781933",
+    "cat_06": "5296500709837981711",
+    "cat_07": "5298723882042154608",
+    "cat_08": "5298865946675404488",
+    "cat_09": "5298752349085394787",
+    "cat_10": "5298759929702670642",
+    "cat_11": "5298933399136787653",
+    "cat_12": "5298540521298354045",
+    "cat_13": "5299010317706091810",
+    "cat_14": "5298487194984408473",
+    "cat_15": "5364320741460304388",
+    "cat_16": "5363924273029209092",
+    "cat_17": "5364091665084605163",
+    "cat_18": "5361761585196982651",
+    "cat_19": "5361747377445167434",
+    "cat_20": "5363915549950630841",
+    "cat_21": "5364061866601504981",
+    "cat_22": "5364172191426437538",
+    "cat_23": "5361949601635334194",
+    "cat_24": "5363885644093348576",
+    "cat_25": "5398038858958921150",
+    "cat_26": "5190896516167919137",
+    "cat_27": "5190783369549474747",
+    "cat_28": "5192740946923512242",
+    "cat_29": "5190860489982243166",
+}
+
+# Удобные алиасы. Потом можно менять ID в одном месте.
+PREMIUM_EMOJI_ALIASES = {
+    "profile": "cat_01",
+    "money": "face_01",
+    "work": "face_02",
+    "home": "cat_03",
+    "pet": "cat_01",
+    "garden": "cat_12",
+    "shop": "cat_25",
+    "vip": "cat_18",
+    "game": "face_13",
+    "star": "face_14",
+    "success": "face_08",
+    "sad": "face_11",
+}
+
+
+def premium_emoji(name, fallback="✨"):
+    """Возвращает Telegram Custom Emoji в HTML-формате.
+
+    Функция безопасна для старого интерфейса: если имя/ID не найден,
+    возвращается обычный fallback-эмодзи.
+    """
+    key = PREMIUM_EMOJI_ALIASES.get(name, name)
+    emoji_id = PREMIUM_EMOJI_IDS.get(key)
+    if not emoji_id:
+        return fallback
+    return f'<tg-emoji emoji-id="{html.escape(str(emoji_id))}">{html.escape(fallback)}</tg-emoji>'
+
+
+def premium_emoji_id(name):
+    """Получить raw custom_emoji_id для случаев, где нужен MessageEntity."""
+    key = PREMIUM_EMOJI_ALIASES.get(name, name)
+    return PREMIUM_EMOJI_IDS.get(key)
+
 db_lock = threading.Lock()
 db_dirty = False
 db_version = 0
@@ -149,6 +255,32 @@ STREAM_EQUIP = {
 }
 
 STREAM_GENRES = ['Гейминг', 'ASMR', 'Мемы', 'Трэш-ток']
+
+STREAM_LEVELS = [
+    (0, '🎥 Новичок'), (100, '📹 Начинающий'), (500, '⭐ Стример'),
+    (1500, '🔥 Популярный'), (5000, '💎 Топ-стример'), (15000, '👑 Легенда стримов')
+]
+STREAM_FORMATS = {
+    'обычный': {'name': '🎥 Обычный стрим', 'mult': 1.0, 'risk': 0.05},
+    'марафон': {'name': '⏱ Стрим-марафон', 'mult': 1.45, 'risk': 0.12},
+    'турнир': {'name': '🏆 Турнирный стрим', 'mult': 1.7, 'risk': 0.18},
+    'общение': {'name': '💬 Общение с чатом', 'mult': 1.25, 'risk': 0.04},
+}
+STREAM_EVENTS = [
+    ('🔥 Виральный клип разлетелся по чатам!', 1.65, 0.15),
+    ('🎁 Зрители устроили массовый рейд!', 1.45, 0.10),
+    ('💰 Спонсор заметил стрим и прислал бонус!', 1.30, 0.00),
+    ('😹 Чат устроил безумный флуд мемами!', 1.20, 0.02),
+    ('📉 Связь начала лагать, часть зрителей ушла.', 0.72, 0.00),
+]
+
+def get_stream_level(followers):
+    level, title = 1, STREAM_LEVELS[0][1]
+    for need, name in STREAM_LEVELS:
+        if followers >= need:
+            level, title = STREAM_LEVELS.index((need, name)) + 1, name
+    return level, title
+
 
 GARDEN_SEEDS = {
     'chamomile': {'name': '🌼 Полевая ромашка', 'price': 70, 'grow_time': 3600*2, 'water_req': 2, 'reward_min': 150, 'reward_max': 250, 'emoji': '🌼'},
@@ -1197,7 +1329,7 @@ def merge_user_econ_data(dest, src):
     if tier_src > tier_dest:
         dest['vehicle'] = v_src
 
-    for eq in ['equipped_rod', 'equipped_bow', 'active_title', 'custom_title', 'badge', 'profile_theme', 'pfp_file_id', 'profile_font']:
+    for eq in ['equipped_rod', 'equipped_bow', 'active_title', 'custom_title', 'badge', 'profile_theme', 'pfp_file_id', 'profile_font', 'premium_emoji_theme', 'premium_emoji_enabled']:
         if not dest.get(eq) and src.get(eq):
             dest[eq] = src[eq]
 
@@ -1328,6 +1460,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_case_time', 0), ('last_rob_time', 0), ('last_trash_time', 0),
         ('profile_theme', 'default'), ('purchased_themes', ['default']),
         ('profile_font', 'default'), ('purchased_fonts', ['default']),
+        ('premium_emoji_theme', 'nya'), ('premium_emoji_enabled', True),
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
         ('daily_casino_profit', 0), ('daily_transferred', 0), ('daily_stats_date', ''),
@@ -2903,9 +3036,14 @@ def cmd_crash(message):
 def stream_thread(chat_id, user_id, user_name, genre, message_id):
     econ = get_user_econ(user_id, user_name)
     studio = econ.get('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
+    followers = int(econ.get('stream_followers', 0) or 0)
+    stream_level, stream_title = get_stream_level(followers)
+    fmt_key = str(econ.get('stream_format', 'обычный')).lower()
+    fmt = STREAM_FORMATS.get(fmt_key, STREAM_FORMATS['обычный'])
     
     base_viewers = (studio.get('mic', 1) + studio.get('webcam', 1) + studio.get('light', 1)) * 40
-    viewers = base_viewers + random.randint(10, 80)
+    base_viewers += stream_level * 25 + int(followers ** 0.5) * 3
+    viewers = max(1, int((base_viewers + random.randint(10, 80)) * fmt['mult']))
     
     text = (
         f"🔴 <b>СТРИМ ЗАПУЩЕН!</b> 😺\n"
@@ -2931,6 +3069,12 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
     else:
         event = "📉 Интернет лагает, часть зрителей ушла... 😿"
         viewers = int(viewers * 0.75)
+
+    # Дополнительные события расширенного стримерства
+    if random.random() < 0.55:
+        event2, event_mult, _ = random.choice(STREAM_EVENTS)
+        event = event + "\n" + event2
+        viewers = max(1, int(viewers * event_mult))
         
     text += f"\n\n⚡️ <b>Событие:</b> {event}\n<i>(👁 {viewers} зрителей)</i>"
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
@@ -2938,7 +3082,18 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         
     time.sleep(3)
     
-    donates = int(viewers * random.uniform(0.4, 1.2))
+    donates = int(viewers * random.uniform(0.4, 1.2) * fmt['mult'])
+    sponsor_bonus = 0
+    if random.random() < (0.10 + stream_level * 0.02):
+        sponsor_bonus = random.randint(100, 500) * max(1, stream_level)
+        donates += sponsor_bonus
+    new_followers = max(1, int(viewers * random.uniform(0.03, 0.10)))
+    old_followers = followers
+    followers += new_followers
+    econ['stream_followers'] = followers
+    econ['stream_streams'] = int(econ.get('stream_streams', 0) or 0) + 1
+    econ['stream_viewers_total'] = int(econ.get('stream_viewers_total', 0) or 0) + viewers
+    econ['stream_donates_total'] = int(econ.get('stream_donates_total', 0) or 0) + donates
     if 'Трэш-ток' in genre.title(): karma_diff = -2
     else: karma_diff = 1
         
@@ -2951,6 +3106,9 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         f"\n\n🏁 <b>СТРИМ ЗАВЕРШЕН!</b> 😺\n"
         f"──────────────────────\n"
         f"💸 Заработано донатов: <b>+{donates} 🪙</b> 😻\n"
+        f"👥 Новых подписчиков: <b>+{new_followers}</b> (всего {followers})\n"
+        f"📺 Всего стримов: <b>{econ['stream_streams']}</b> | 👁 Просмотров: <b>{econ['stream_viewers_total']}</b>\n"
+        f"🏅 Уровень: <b>{stream_title}</b>\n"
         f"⚖️ Влияние на Карму: <b>{k_sign}{karma_diff}</b> 😸"
     )
     try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
@@ -2972,8 +3130,12 @@ def cmd_stream(message):
         bot.reply_to(message, f"⏳ Стримить можно раз в 2 часа! Ждите: <b>{left}</b>. 😿", parse_mode='HTML')
         return
         
-    parts = message.text.split(maxsplit=1)
+    parts = message.text.split(maxsplit=2)
     genre = parts[1].strip() if len(parts) > 1 else random.choice(STREAM_GENRES)
+    fmt_key = parts[2].strip().lower() if len(parts) > 2 else 'обычный'
+    if fmt_key not in STREAM_FORMATS:
+        fmt_key = 'обычный'
+    econ['stream_format'] = fmt_key
     
     econ['last_stream_time'] = now
     mark_dirty()
@@ -4957,7 +5119,7 @@ def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
     )
 
     text = (
-        f"⚙️ <b>НАСТРОЙКИ ВНЕШНЕГО ВИДА ПРОФИЛЯ</b> 😺\n"
+        f"{premium_emoji('profile', '🐱')} ⚙️ <b>НАСТРОЙКИ ВНЕШНЕГО ВИДА ПРОФИЛЯ</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}\n"
         f"🎨 Активная тема: <b>{theme_name}</b>\n"
@@ -5090,14 +5252,14 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     raw_text = (
         f"{header}\n"
         f"{border}\n"
-        f"{t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
-        f"{t_icon} ⭐ Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
+        f"{premium_emoji('profile', '🐱')} {t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
+        f"{premium_emoji('star', '⭐')} {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
         f"{t_icon} 🪖 Погон Дурака: <b>{durak_rank}</b> | Побед: <b>{durak_wins}</b> | Поражений: <b>{durak_losses}</b>\n"
         f"{t_icon} ⚖️ Карма: <b>{karma}</b> ({karma_title})\n"
         f"{vip_line}"
         f"{stars_line}"
         f"{t_icon} {streak_str}"
-        f"{t_icon} 💵 В кармане: <b>{econ['balance']} Ня-коинов 💸</b>\n"
+        f"{premium_emoji('money', '💰')} {t_icon} В кармане: <b>{econ['balance']} Ня-коинов 💸</b>\n"
         f"{t_icon} 🏦 На депозите: <b>{econ.get('bank_deposit', 0)} 🪙</b>{loan_str}\n"
         f"{t_icon} 🚘 Гараж: <b>{veh_str}</b>\n"
         f"{t_icon} 💼 Опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n"
