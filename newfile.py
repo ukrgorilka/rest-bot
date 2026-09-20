@@ -2834,7 +2834,7 @@ def random_chat_drops_worker():
                 f"На полу чата найдена коробка с <b>{reward} Ня-коинами 🪙</b>!\n"
                 "Кто первый нажмёт кнопку ниже — заберёт всю награду себе! 😸"
             )
-            bot.send_message(target_chat, msg_text, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(target_chat, msg_text, parse_mode='HTML')
         except Exception:
             pass
 
@@ -2996,7 +2996,7 @@ def send_welcome(message):
         "👇 <i>Нажмите кнопку ниже, чтобы открыть статью:</i> 😸"
     )
     try:
-        bot.reply_to(message, welcome_text, reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, welcome_text, parse_mode='HTML')
     except Exception:
         pass
 
@@ -3486,10 +3486,10 @@ def render_public_business_view(chat_id, user_id, user_name, message_id=None):
             markup.add(InlineKeyboardButton("💰 Выплатить зарплаты", callback_data=f"pubbiz_pay:{user_id}"))
         markup.add(InlineKeyboardButton("📋 Обновить", callback_data=f"pubbiz_view:{user_id}"))
     if message_id:
-        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
         except Exception: pass
     else:
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        bot.send_message(chat_id, text, parse_mode='HTML')
 
 def render_public_jobs(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -4007,10 +4007,10 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
 
     if message_id:
         try:
-            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
             return
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    bot.send_message(chat_id, text, parse_mode='HTML')
 
 @bot.message_handler(commands=['backpack', 'рюкзак', 'инвентарь_баффов'])
 def cmd_backpack(message):
@@ -5455,26 +5455,12 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     header = theme_info['header']
     t_icon = theme_info['icon']
 
-    markup = InlineKeyboardMarkup()
+    markup = None
 
+    # Профиль теперь отображается без кнопок. Все действия вынесены в /profile_settings.
     purchased_titles = econ.get('titles', [])
     active_title = econ.get('active_title')
     custom_title = econ.get('custom_title')
-
-    if purchased_titles:
-        for title_key in purchased_titles:
-            if title_key in TITLES and title_key != active_title:
-                markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}:{user_id}"))
-        if active_title or custom_title:
-            markup.add(InlineKeyboardButton('❌ Снять текущий титул', callback_data=f'confirm_remove_title:{user_id}'))
-
-    purchased_themes = econ.get('purchased_themes', ['default'])
-    if len(purchased_themes) > 1:
-        theme_row = []
-        for t_k in purchased_themes:
-            if t_k != theme_key and t_k in THEMES:
-                theme_row.append(InlineKeyboardButton(f"Стиль: {THEMES[t_k]['name']}", callback_data=f"set_theme_{t_k}:{user_id}"))
-        if theme_row: markup.add(*theme_row)
 
     current_badge = econ.get('badge') or "Отсутствует"
 
@@ -5585,19 +5571,6 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
 
     text = apply_font(raw_text, font_key)
 
-    if inv:
-        row = []
-        for emoji in inv:
-            if emoji != current_badge:
-                row.append(InlineKeyboardButton(f"Надеть {emoji}", callback_data=f"set_badge_{emoji}:{user_id}"))
-                if len(row) == 3:
-                    markup.add(*row)
-                    row = []
-        if row: markup.add(*row)
-        if current_badge != "Отсутствует":
-            markup.add(InlineKeyboardButton("❌ Снять значок", callback_data=f"remove_badge:{user_id}"))
-        markup.add(InlineKeyboardButton("⚙️ Настройки тем и шрифтов", callback_data=f"open_profile_settings:{user_id}"))
-
     if message_id_to_edit:
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
@@ -5611,13 +5584,36 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
 
     pfp_id = econ.get('pfp_file_id')
     if pfp_id:
+        # Telegram has a much smaller limit for photo captions than for normal
+        # messages. The full profile can be longer, so never put the whole
+        # profile into a photo caption. Send the picture separately and the
+        # full profile as a normal HTML message.
         try:
             if message_to_reply:
-                bot.send_photo(chat_id, pfp_id, caption=text, reply_markup=markup, reply_to_message_id=message_to_reply.message_id, parse_mode='HTML')
+                bot.send_photo(
+                    chat_id,
+                    pfp_id,
+                    caption=f"{premium_emoji('profile', '🐱')} <b>ПРОФИЛЬ</b>",
+                    reply_to_message_id=message_to_reply.message_id,
+                    parse_mode='HTML'
+                )
             else:
-                bot.send_photo(chat_id, pfp_id, caption=text, reply_markup=markup, parse_mode='HTML')
+                bot.send_photo(
+                    chat_id,
+                    pfp_id,
+                    caption=f"{premium_emoji('profile', '🐱')} <b>ПРОФИЛЬ</b>",
+                    parse_mode='HTML'
+                )
+
+            if message_to_reply:
+                bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
+            else:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception as e: print(f"[PROFILE PHOTO ERROR] {e}")
+        except Exception as e:
+            print(f"[PROFILE PHOTO ERROR] {e}")
+            # If the saved avatar itself is invalid/deleted, still show the
+            # complete profile instead of failing silently.
 
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
@@ -9003,8 +8999,45 @@ def callback_inline(call):
             bot.answer_callback_query(call.id)
             return
 
-        elif action_data in ['ps_badges', 'ps_titles', 'ps_pfp']:
-            bot.answer_callback_query(call.id, "💡 Управление значками, титулами и аватарками доступно также в основном магазине /shop и командами /set_pfp и /custom_title! 😸", show_alert=True)
+        elif action_data == 'ps_badges':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            inv = econ.get('inventory', [])
+            current_badge = econ.get('badge')
+            markup = InlineKeyboardMarkup(row_width=3)
+            row = []
+            for emoji in inv:
+                if emoji == current_badge:
+                    continue
+                row.append(InlineKeyboardButton(f"Надеть {emoji}", callback_data=f"set_badge_{emoji}:{user_id}"))
+                if len(row) == 3:
+                    markup.add(*row); row = []
+            if row: markup.add(*row)
+            if current_badge:
+                markup.add(InlineKeyboardButton("❌ Снять текущий значок", callback_data=f"remove_badge:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            text = f"🏷 <b>НАСТРОЙКА ЗНАЧКА ПРОФИЛЯ</b>\n──────────────────────\nТекущий: <b>{current_badge or 'Отсутствует'}</b>"
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            bot.answer_callback_query(call.id); return
+
+        elif action_data == 'ps_titles':
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            owned = econ.get('titles', [])
+            active = econ.get('active_title')
+            markup = InlineKeyboardMarkup(row_width=1)
+            for title_key in owned:
+                if title_key in TITLES and title_key != active:
+                    markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}:{user_id}"))
+            if active or econ.get('custom_title'):
+                markup.add(InlineKeyboardButton("❌ Снять текущий титул", callback_data=f"confirm_remove_title:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            text = "👑 <b>НАСТРОЙКА ТИТУЛА ПРОФИЛЯ</b>\n──────────────────────\nВыберите купленный титул или снимите текущий."
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            bot.answer_callback_query(call.id); return
+
+        elif action_data == 'ps_pfp':
+            bot.answer_callback_query(call.id, "📸 Аватарка профиля настраивается командой /set_pfp.", show_alert=True)
             return
 
         # МАГАЗИН: ГЛАВНОЕ МЕНЮ
@@ -10984,7 +11017,7 @@ def callback_inline(call):
                 econ['custom_title'] = None
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"✅ Надет титул {TITLES[title_key]['text']}! 😸")
-                send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
+                render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'remove_title':
             econ = get_user_econ(user_id, user_name, username=user_username)
@@ -10992,7 +11025,7 @@ def callback_inline(call):
             econ['custom_title'] = None
             mark_dirty()
             bot.answer_callback_query(call.id, '❌ Титул снят! 😿', show_alert=True)
-            send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
+            render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data.startswith('set_badge_'):
             selected_emoji = action_data.replace('set_badge_', '')
@@ -11001,14 +11034,14 @@ def callback_inline(call):
                 econ['badge'] = selected_emoji
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"✅ Надет значок {selected_emoji}! 😸")
-                send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
+                render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'remove_badge':
             econ = get_user_econ(user_id, user_name, username=user_username)
             econ['badge'] = None
             mark_dirty()
             bot.answer_callback_query(call.id, "❌ Значок снят! 😿", show_alert=True)
-            send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
+            render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
 
     except Exception as e:
         print(f"[CALLBACK ERROR] Исключение в callback: {e}")
