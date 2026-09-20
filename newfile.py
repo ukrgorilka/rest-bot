@@ -10,6 +10,8 @@ import re
 import threading
 import time
 import telebot
+import psycopg2
+from psycopg2.extras import Json
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice
 from flask import Flask
 
@@ -78,7 +80,10 @@ def normalize_tg_id(cid_val):
         return 0
 
 # ID каналов и чатов
-DB_CHANNEL_ID = normalize_tg_id(os.environ.get('DB_CHANNEL_ID', '-1004334874700'))
+# PostgreSQL/Neon is now the primary persistent database.
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+# Telegram-channel database backups are disabled by default.
+DB_CHANNEL_ID = normalize_tg_id(os.environ.get('DB_CHANNEL_ID', '0'))
 LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-1004369517562'))
 VD_CHAT_ID = normalize_tg_id(os.environ.get('VD_CHAT_ID', '-1003703264754'))
 DATA_FILE = 'rests_data.json'
@@ -696,8 +701,8 @@ last_chat_activity = {}
 # ---------------------------------------------------------
 # БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ
 # ---------------------------------------------------------
-def load_data():
-    data = {
+def _default_data():
+    return {
         'rests': {},
         'history': {},
         'settings': {},
@@ -717,49 +722,129 @@ def load_data():
         'meme_winners': [],
         'chest_claims': {}
     }
-    # Безопасное восстановление: закреплённый бэкап используется только если
-    # локальной базы ещё нет. Иначе свежая локальная база не будет затёрта старым бэкапом.
+
+def _normalize_loaded_data(data):
+    """Keep the same defaults/compatibility rules as the old JSON loader."""
+    if not isinstance(data, dict):
+        data = {}
+    base = _default_data()
+    for key in base:
+        if key in data:
+            base[key] = data[key]
+    if not isinstance(base.get('promos'), dict):
+        base['promos'] = {}
+    if 'FIX' not in base['promos']:
+        base['promos']['FIX'] = {'reward': 5000, 'exp': 100, 'claimed': []}
+    if 'fix' not in base['promos']:
+        base['promos']['fix'] = base['promos']['FIX']
+    if 'safe' not in base or not isinstance(base['safe'], dict):
+        base['safe'] = {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []}
+    if 'daily_memes' not in base:
+        base['daily_memes'] = []
+    if 'processed_stars_charges' not in base:
+        base['processed_stars_charges'] = []
+    if 'meme_winners' not in base:
+        base['meme_winners'] = []
+    if 'chest_claims' not in base:
+        base['chest_claims'] = {}
+    return base
+
+def _pg_connect():
+    if not DATABASE_URL:
+        return None
+    return psycopg2.connect(DATABASE_URL, connect_timeout=10)
+
+def _pg_init():
+    conn = _pg_connect()
+    if conn is None:
+        return False
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS bot_state (
+                        id SMALLINT PRIMARY KEY,
+                        data JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+        return True
+    finally:
+        conn.close()
+
+def _pg_load():
+    conn = _pg_connect()
+    if conn is None:
+        return None
+    try:
+        _pg_init()
+        with conn.cursor() as cur:
+            cur.execute('SELECT data FROM bot_state WHERE id = 1')
+            row = cur.fetchone()
+            return row[0] if row else None
+    finally:
+        conn.close()
+
+def _pg_save(snapshot):
+    conn = _pg_connect()
+    if conn is None:
+        return False
+    try:
+        _pg_init()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO bot_state (id, data, updated_at)
+                    VALUES (1, %s, NOW())
+                    ON CONFLICT (id) DO UPDATE SET
+                        data = EXCLUDED.data,
+                        updated_at = NOW()
+                """, (Json(snapshot),))
+        return True
+    finally:
+        conn.close()
+
+def _load_local_json():
     if not os.path.exists(DATA_FILE):
-        try:
-            if DB_CHANNEL_ID:
-                chat = bot.get_chat(DB_CHANNEL_ID)
-                if chat and chat.pinned_message and chat.pinned_message.document:
-                    file_info = bot.get_file(chat.pinned_message.document.file_id)
-                    downloaded_file = bot.download_file(file_info.file_path)
-                    with open(DATA_FILE, 'wb') as new_file:
-                        new_file.write(downloaded_file)
-                    print("Успешно загружен бекап из закрепа в Telegram-канале!")
-        except Exception as e:
-            print(f"Инфо: Загрузка из Telegram пропущена: {e}")
+        return None
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f'[DB] Ошибка чтения локального JSON: {e}')
+        return None
 
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                loaded = json.load(f)
-                for key in data.keys():
-                    if key in loaded:
-                        data[key] = loaded[key]
-                if 'promos' not in data:
-                    data['promos'] = {}
-                if 'FIX' not in data['promos']:
-                    data['promos']['FIX'] = {'reward': 5000, 'exp': 100, 'claimed': []}
-                if 'fix' not in data['promos']:
-                    data['promos']['fix'] = data['promos']['FIX']
-                if 'safe' not in data:
-                    data['safe'] = {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []}
-                if 'daily_memes' not in data:
-                    data['daily_memes'] = []
-                if 'processed_stars_charges' not in data:
-                    data['processed_stars_charges'] = []
-                if 'meme_winners' not in data:
-                    data['meme_winners'] = []
-                if 'chest_claims' not in data:
-                    data['chest_claims'] = {}
-                return data
-        except Exception as e:
-            print(f'Ошибка чтения файла: {e}')
+def load_data():
+    """Load state from Neon first; migrate existing rests_data.json once if Neon is empty."""
+    base = _default_data()
 
-    return data
+    if DATABASE_URL:
+        try:
+            pg_data = _pg_load()
+            if pg_data is not None:
+                print('[DB] Загружена база из Neon PostgreSQL.')
+                return _normalize_loaded_data(pg_data)
+
+            local_data = _load_local_json()
+            if local_data is not None:
+                migrated = _normalize_loaded_data(local_data)
+                if _pg_save(migrated):
+                    print('[DB] Выполнена первичная миграция rests_data.json -> Neon PostgreSQL.')
+                return migrated
+
+            print('[DB] Neon пустая, локальная JSON-база не найдена. Создаётся новая база.')
+            base = _normalize_loaded_data(base)
+            _pg_save(base)
+            return base
+        except Exception as e:
+            print(f'[DB ERROR] Не удалось загрузить Neon: {e}')
+            print('[DB] Переключение на локальный JSON как аварийный fallback.')
+
+    local_data = _load_local_json()
+    if local_data is not None:
+        return _normalize_loaded_data(local_data)
+
+    return _normalize_loaded_data(base)
 
 def mark_dirty():
     global db_dirty, db_version
@@ -768,29 +853,39 @@ def mark_dirty():
 
 def save_data(send_backup=False):
     global db_dirty
-    # Снимаем непротиворечивый snapshot под lock, а запись на диск выполняем уже без lock.
-    # Если за время записи база изменилась, db_dirty не сбрасывается.
+    # PostgreSQL/Neon is the primary store. A local JSON snapshot is kept as a
+    # safety fallback, but Telegram channel backups are optional and disabled by default.
     with db_lock:
         snapshot = copy.deepcopy(db)
         snapshot_version = db_version
     try:
+        saved_to_pg = False
+        if DATABASE_URL:
+            try:
+                saved_to_pg = _pg_save(snapshot)
+                if not saved_to_pg:
+                    raise RuntimeError('PostgreSQL недоступен')
+            except Exception as e:
+                print(f'[DB ERROR] Ошибка сохранения в Neon: {e}')
+
         temp_file = f"{DATA_FILE}.tmp"
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, ensure_ascii=False, indent=4)
         os.replace(temp_file, DATA_FILE)
+
         with db_lock:
-            if db_version == snapshot_version:
+            if db_version == snapshot_version and (saved_to_pg or not DATABASE_URL):
                 db_dirty = False
 
         if send_backup and DB_CHANNEL_ID:
             with open(DATA_FILE, 'rb') as f:
-                msg = bot.send_document(DB_CHANNEL_ID, f, caption="💾 Экстренный бекап базы данных")
+                msg = bot.send_document(DB_CHANNEL_ID, f, caption='💾 Экстренный бекап базы данных')
                 try:
                     bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
                 except Exception as e:
-                    print(f"[BACKUP PIN ERROR] {e}")
+                    print(f'[BACKUP PIN ERROR] {e}')
     except Exception as e:
-        print(f"Ошибка при сохранении базы данных: {e}")
+        print(f'Ошибка при сохранении базы данных: {e}')
 
 def auto_save_worker():
     global db_dirty
@@ -804,18 +899,19 @@ def auto_save_worker():
             save_data(send_backup=False)
 
 def periodic_backup_worker():
+    # Telegram channel backups are opt-in now. Neon is the primary persistent DB.
     while True:
         time.sleep(900)
         try:
             if DB_CHANNEL_ID and os.path.exists(DATA_FILE):
                 with open(DATA_FILE, 'rb') as f:
-                    msg = bot.send_document(DB_CHANNEL_ID, f, caption=f"💾 Плановый авто-бекап базы данных [{now_msk().strftime('%d.%m.%Y %H:%M')}]")
+                    msg = bot.send_document(DB_CHANNEL_ID, f, caption=f"💾 Плановый авто-бекап базы данных [{now_msk().strftime('%d.%m.%Y %H:%M')}]" )
                     try:
                         bot.pin_chat_message(DB_CHANNEL_ID, msg.message_id, disable_notification=True)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f'[BACKUP PIN ERROR] {e}')
         except Exception as e:
-            print(f"[BACKUP ERROR] Ошибка планового бекапа: {e}")
+            print(f'[BACKUP ERROR] Ошибка планового бекапа: {e}')
 
 db = load_data()
 
