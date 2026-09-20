@@ -697,6 +697,8 @@ current_quiz = {}
 
 user_flood_history = {}
 user_flood_muted = {}
+# Лимит команд: отдельная история, чтобы старый антиспам не очищал её.
+command_rate_history = {}
 last_chat_activity = {}
 # ---------------------------------------------------------
 # БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ
@@ -992,11 +994,23 @@ def get_chat_settings(chat_id):
     str_chat = str(chat_id)
     if str_chat not in db['settings']:
         db['settings'][str_chat] = {
-            'max_days': 30,
-            'delete_rest_msg': False,
+            'max_days': None,  # лимит реста отключён
+            'rp_enabled': True,
+            'flood_protection': False,
+            'auto_reactions': True,
+            'welcome_enabled': True,
             'timezone_offset': 3,
             'remind_minutes': 60
         }
+    else:
+        # Новые настройки добавляются без сброса старых параметров.
+        sett = db['settings'][str_chat]
+        sett.setdefault('rp_enabled', True)
+        sett.setdefault('flood_protection', False)
+        sett.setdefault('auto_reactions', True)
+        sett.setdefault('welcome_enabled', True)
+        # Раньше стоял жёсткий лимит 30/60 дней — теперь ограничения нет.
+        sett['max_days'] = None
         mark_dirty()
     return db['settings'][str_chat]
 
@@ -1993,9 +2007,11 @@ def parse_duration_to_seconds(duration_str, chat_id=None):
 
         if chat_id:
             sett = get_chat_settings(chat_id)
-            max_sec = sett['max_days'] * 86400
-            if sec > max_sec:
-                return max_sec
+            max_days = sett.get('max_days')
+            if max_days is not None:
+                max_sec = max_days * 86400
+                if sec > max_sec:
+                    return max_sec
         return sec
 
     match_date = re.search(r'(\d{1,2})[\.\/](\d{1,2})(?:[\.\/](\d{2,4}))?', duration_str)
@@ -2201,6 +2217,10 @@ def memory_and_debt_worker():
                 user_flood_history[uid] = [t for t in user_flood_history[uid] if now - t <= 5.0]
                 if not user_flood_history[uid]:
                     user_flood_history.pop(uid, None)
+            for key in list(command_rate_history.keys()):
+                command_rate_history[key] = [t for t in command_rate_history[key] if now - t < 3600]
+                if not command_rate_history[key]:
+                    command_rate_history.pop(key, None)
 
             # Коллекторы по кредитам (исправлено списание депозита)
             for key, econ in list(db.get('economy', {}).items()):
@@ -2404,7 +2424,12 @@ def start_background_threads():
 def welcome_new_members(message):
     if not can_process_user_message(message):
         return
+    if not get_chat_settings(message.chat.id).get('welcome_enabled', True):
+        return
     for member in message.new_chat_members:
+        # Бот не приветствует самого себя и вообще не приветствует других ботов.
+        if getattr(member, 'is_bot', False):
+            continue
         user_name = (f"{member.first_name or ''} {member.last_name or ''}").strip() or member.username
         user_link = make_link(message.chat.id, user_name, member.id, ping=True)
         add_coins(member.id, user_name, 50, username=member.username)
@@ -2419,19 +2444,6 @@ def welcome_new_members(message):
             bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
         except Exception:
             pass
-
-@bot.message_handler(content_types=['left_chat_member'])
-def goodbye_left_member(message):
-    if not can_process_user_message(message):
-        return
-    member = message.left_chat_member
-    user_name = (f"{member.first_name or ''} {member.last_name or ''}").strip() or member.username
-    user_link = make_link(message.chat.id, user_name, member.id, ping=False)
-    farewell_text = f"👋 <b>{user_link}</b> покинул(а) наш чат. Пожелаем удачи на пути! 😿🌸"
-    try:
-        bot.send_message(message.chat.id, farewell_text, parse_mode='HTML')
-    except Exception:
-        pass
 
 # ---------------------------------------------------------
 # ГЛАВНОЕ МЕНЮ И СПРАВОЧНИК
@@ -4578,22 +4590,30 @@ def cmd_history(message):
 
 def render_settings_view(chat_id, user_id=None, message_id=None):
     sett = get_chat_settings(chat_id)
-    del_msg_status = "✅ Включено" if sett.get('delete_rest_msg', False) else "❌ Выключено"
+    rp_status = "✅ Включено" if sett.get('rp_enabled', True) else "❌ Выключено"
+    flood_status = "✅ Включён" if sett.get('flood_protection', False) else "❌ Выключен"
+    react_status = "✅ Включены" if sett.get('auto_reactions', True) else "❌ Выключены"
+    welcome_status = "✅ Включено" if sett.get('welcome_enabled', True) else "❌ Выключено"
 
     uid_tag = f":{user_id}" if user_id else ""
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"⏳ Макс. дней реста: {sett['max_days']} дн.", callback_data=f"set_max_days{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"🗑 Авто-удаление смс в ресте: {del_msg_status}", callback_data=f"toggle_del_msg{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"🔔 Напоминание за: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
 
     text = (
         f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺\n"
         f"──────────────────────\n"
-        f"• Максимальный срок реста: <b>{sett['max_days']} дней</b>\n"
-        f"• Авто-удаление сообщений отдыхающих: <b>{del_msg_status}</b>\n"
-        f"• Напоминание об окончании реста: за <b>{sett.get('remind_minutes', 60)} мин.</b>\n"
+        f"🌴 Максимальный срок реста: <b>без ограничений</b>\n"
+        f"🎭 РП-команды: <b>{rp_status}</b>\n"
+        f"🛡 Антифлуд: <b>{flood_status}</b> — 5 команд/час\n"
+        f"✨ Авто-реакции: <b>{react_status}</b>\n"
+        f"👋 Приветствия: <b>{welcome_status}</b>\n"
+        f"🔔 Напоминание: за <b>{sett.get('remind_minutes', 60)} мин.</b>\n"
         f"──────────────────────\n"
-        f"<i>Нажимайте кнопки ниже для переключения параметров:</i> 😸"
+        f"<i>Все переключатели доступны администраторам чата.</i> 😸"
     )
 
     if message_id:
@@ -6883,14 +6903,33 @@ def handle_messages(message):
         if now_ts < user_flood_muted[user_id]: return
         else: del user_flood_muted[user_id]
 
-    user_hist = [t for t in user_flood_history.get(user_id, []) if now_ts - t <= 3.0]
-    user_hist.append(now_ts)
-    user_flood_history[user_id] = user_hist
-    if len(user_hist) >= 6:
-        user_flood_muted[user_id] = now_ts + 20
-        u_link = make_link(chat_id, user_name, user_id, ping=True)
-        bot.send_message(chat_id, f"🧊 {u_link}, <b>остудись!</b> Слишком частые команды (заморозка на 20 сек). 😾", parse_mode='HTML')
-        return
+    chat_settings = get_chat_settings(chat_id)
+
+    # АНТИФЛУД: настройка действует ТОЛЬКО в том чате, где её включил администратор.
+    # ЛС боту и другие чаты никогда не попадают под лимит этого чата.
+    # Лимит: 5 команд в час на пользователя именно в этом чате.
+    is_private_chat = getattr(message.chat, 'type', '') == 'private'
+    if (not is_private_chat and chat_settings.get('flood_protection', False)
+            and text_lower.startswith('/')):
+        flood_key = f"{chat_id}:{user_id}"
+        cmd_hist = [t for t in command_rate_history.get(flood_key, []) if now_ts - t < 3600]
+        if len(cmd_hist) >= 5:
+            command_rate_history[flood_key] = cmd_hist
+            remaining = max(1, int(3600 - (now_ts - cmd_hist[0])))
+            mins = max(1, (remaining + 59) // 60)
+            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            bot.send_message(chat_id, f"🛡 {u_link}, <b>антифлуд сработал.</b> Лимит — 5 команд в час. Попробуй снова примерно через {mins} мин. 😾", parse_mode='HTML')
+            return
+        cmd_hist.append(now_ts)
+        command_rate_history[flood_key] = cmd_hist
+        if len(cmd_hist) == 4:
+            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            bot.send_message(chat_id, f"⚠️ {u_link}, предупреждение антифлуда: использовано <b>4/5 команд</b> за последний час.", parse_mode='HTML')
+        elif len(cmd_hist) == 5:
+            u_link = make_link(chat_id, user_name, user_id, ping=True)
+            bot.send_message(chat_id, f"⚠️ {u_link}, <b>5/5 команд</b> использовано. Следующая команда будет заблокирована до окончания часового лимита.", parse_mode='HTML')
+
+    # Старый короткий антиспам оставляем только для одинаковых экономических команд.
 
     add_message_stat(user_id, user_name, username=user_username)
     add_bp_exp(user_id, user_name, 2, username=user_username)
@@ -6910,7 +6949,7 @@ def handle_messages(message):
         return
 
     # РЕАКЦИИ
-    if random.random() < 0.04 and len(text) > 2:
+    if get_chat_settings(chat_id).get('auto_reactions', True) and random.random() < 0.04 and len(text) > 2:
         try:
             rx_list = ['🔥', '🗿', '❤️', '👍', '⚡️', '🎉', '👀', '👏']
             chosen_rx = random.choice(rx_list)
@@ -7268,50 +7307,54 @@ def handle_messages(message):
             bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
         return
 
-    # ОДИНОЧНЫЕ РП
-    for solo_cmd, (solo_text, solo_emoji) in RP_SOLO_ACTIONS.items():
-        if text_lower == solo_cmd or text_lower.startswith(f"{solo_cmd} "):
-            sender_link = make_link(chat_id, user_name, user_id, ping=True)
-            check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
-            add_account_exp(user_id, user_name, 3, username=user_username)
-            bot.send_message(chat_id, f"{solo_emoji} {sender_link} {solo_text}", parse_mode='HTML')
-            return
-
-    # ПАРНЫЕ РП
-    for rp_cmd, rp_data in RP_ACTIONS.items():
-        if text_lower.startswith(rp_cmd):
-            target_user = None
-            target_user_id = None
-            if message.reply_to_message:
-                u = message.reply_to_message.from_user
-                target_user = (f"{u.first_name or ''} {u.last_name or ''}").strip() or u.username
-                target_user_id = u.id
-            else:
-                raw_arg = text[len(rp_cmd):].strip()
-                if raw_arg:
-                    uid, uname = resolve_user_from_string(chat_id, raw_arg)
-                    target_user = uname or raw_arg
-                    target_user_id = uid
-
-            if target_user:
-                if target_user_id == user_id:
-                    bot.reply_to(message, "❌ Вы не можете использовать это действие на себе! 😾")
-                    return
+    # РП-КОМАНДЫ МОЖНО ОТКЛЮЧИТЬ ДЛЯ КОНКРЕТНОГО ЧАТА
+    chat_sett = get_chat_settings(chat_id)
+    if chat_sett.get('rp_enabled', True):
+        # ОДИНОЧНЫЕ РП
+        for solo_cmd, (solo_text, solo_emoji) in RP_SOLO_ACTIONS.items():
+            if text_lower == solo_cmd or text_lower.startswith(f"{solo_cmd} "):
                 sender_link = make_link(chat_id, user_name, user_id, ping=True)
-                target_link = make_link(chat_id, target_user, target_user_id, ping=True)
                 check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
                 add_account_exp(user_id, user_name, 3, username=user_username)
-                k_val = rp_data.get('karma', 0)
-                if k_val != 0:
-                    change_karma(user_id, user_name, k_val)
-                    k_sign = "+" if k_val > 0 else ""
-                    k_str = f" [Карма {k_sign}{k_val}]"
-                else: k_str = ""
-                bot.send_message(chat_id, f"{rp_data['emoji']} {sender_link} <b>{rp_data['verb']}</b> {target_link}!{k_str}", parse_mode='HTML')
+                bot.send_message(chat_id, f"{solo_emoji} {sender_link} {solo_text}", parse_mode='HTML')
                 return
-            else:
-                bot.reply_to(message, f"💡 Ответьте на сообщение или укажите ник:\n<code>{rp_cmd} @username</code> 😸", parse_mode='HTML')
-                return
+
+        # ПАРНЫЕ РП
+        for rp_cmd, rp_data in RP_ACTIONS.items():
+            if text_lower.startswith(rp_cmd):
+                target_user = None
+                target_user_id = None
+                if message.reply_to_message:
+                    u = message.reply_to_message.from_user
+                    target_user = (f"{u.first_name or ''} {u.last_name or ''}").strip() or u.username
+                    target_user_id = u.id
+                else:
+                    raw_arg = text[len(rp_cmd):].strip()
+                    if raw_arg:
+                        uid, uname = resolve_user_from_string(chat_id, raw_arg)
+                        target_user = uname or raw_arg
+                        target_user_id = uid
+
+                if target_user:
+                    if target_user_id == user_id:
+                        bot.reply_to(message, "❌ Вы не можете использовать это действие на себе! 😾")
+                        return
+                    sender_link = make_link(chat_id, user_name, user_id, ping=True)
+                    target_link = make_link(chat_id, target_user, target_user_id, ping=True)
+                    check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
+                    add_account_exp(user_id, user_name, 3, username=user_username)
+                    k_val = rp_data.get('karma', 0)
+                    if k_val != 0:
+                        change_karma(user_id, user_name, k_val)
+                        k_sign = "+" if k_val > 0 else ""
+                        k_str = f" [Карма {k_sign}{k_val}]"
+                    else:
+                        k_str = ""
+                    bot.send_message(chat_id, f"{rp_data['emoji']} {sender_link} <b>{rp_data['verb']}</b> {target_link}!{k_str}", parse_mode='HTML')
+                    return
+                else:
+                    bot.reply_to(message, f"💡 Ответьте на сообщение или укажите ник:\n<code>{rp_cmd} @username</code> 😸", parse_mode='HTML')
+                    return
 
     # КТО ТЫ
     who_match = re.match(r'^(?:кто\s+ты)(?:\s+(.+))?$', text_lower)
@@ -7343,19 +7386,6 @@ def handle_messages(message):
         if re.search(pattern, text_lower, re.IGNORECASE):
             bot.reply_to(message, random.choice(responses))
             break
-
-    # АВТО-УДАЛЕНИЕ СООБЩЕНИЙ В РЕСТЕ
-    sett = get_chat_settings(chat_id)
-    if sett.get('delete_rest_msg', False) and str_chat in db.get('rests', {}):
-        in_rest, _, _ = check_user_rest(db['rests'][str_chat], user_id=user_id, user_name=user_name)
-        if in_rest:
-            try:
-                bot.delete_message(chat_id, message.message_id)
-                user_link = make_link(chat_id, user_name, user_id, ping=True)
-                warn = bot.send_message(chat_id, f'⚠️ {user_link}, вы находитесь в ресте! Ваше сообщение удалено. 😾', parse_mode='HTML')
-                threading.Timer(5, lambda: bot.delete_message(chat_id, warn.message_id)).start()
-                return
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
     if text_lower in ['+смехуятинка', 'смехуятинка']:
         if message.reply_to_message:
@@ -7851,7 +7881,7 @@ def callback_inline(call):
                 owner_id = int(parts[1])
 
         if owner_id and owner_id != user_id:
-            if action_data in ['set_max_days', 'toggle_del_msg', 'set_remind_time']:
+            if action_data in ['set_max_days', 'set_remind_time', 'toggle_rp', 'toggle_flood', 'toggle_reactions', 'toggle_welcome']:
                 if not is_admin(chat_id, user_id):
                     bot.answer_callback_query(call.id, "❌ Настройки доступны только администраторам!", show_alert=True)
                     return
@@ -9813,19 +9843,41 @@ def callback_inline(call):
         elif action_data == 'set_max_days':
             if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
-            opts = [14, 30, 60]
-            next_opt = opts[(opts.index(sett['max_days']) + 1) % len(opts)]
-            sett['max_days'] = next_opt
+            sett['max_days'] = None
             mark_dirty()
-            bot.answer_callback_query(call.id, f'✅ Лимит изменен на {next_opt} дней! 😸')
+            bot.answer_callback_query(call.id, '✅ Лимит реста полностью отключён! 😸')
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
-        elif action_data == 'toggle_del_msg':
+        elif action_data == 'toggle_rp':
             if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
-            sett['delete_rest_msg'] = not sett['delete_rest_msg']
+            sett['rp_enabled'] = not sett.get('rp_enabled', True)
             mark_dirty()
-            bot.answer_callback_query(call.id, f"✅ Авто-удаление: {'Включено' if sett['delete_rest_msg'] else 'Выключено'} 😸")
+            bot.answer_callback_query(call.id, f"🎭 РП-команды {'включены' if sett['rp_enabled'] else 'выключены'}!")
+            render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
+
+        elif action_data == 'toggle_flood':
+            if not is_admin(chat_id, user_id): return
+            sett = get_chat_settings(chat_id)
+            sett['flood_protection'] = not sett.get('flood_protection', False)
+            mark_dirty()
+            bot.answer_callback_query(call.id, f"🛡 Антифлуд {'включён' if sett['flood_protection'] else 'выключен'}!")
+            render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
+
+        elif action_data == 'toggle_reactions':
+            if not is_admin(chat_id, user_id): return
+            sett = get_chat_settings(chat_id)
+            sett['auto_reactions'] = not sett.get('auto_reactions', True)
+            mark_dirty()
+            bot.answer_callback_query(call.id, f"✨ Авто-реакции {'включены' if sett['auto_reactions'] else 'выключены'}!")
+            render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
+
+        elif action_data == 'toggle_welcome':
+            if not is_admin(chat_id, user_id): return
+            sett = get_chat_settings(chat_id)
+            sett['welcome_enabled'] = not sett.get('welcome_enabled', True)
+            mark_dirty()
+            bot.answer_callback_query(call.id, f"👋 Приветствия {'включены' if sett['welcome_enabled'] else 'выключены'}!")
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'set_remind_time':
