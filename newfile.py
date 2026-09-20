@@ -357,6 +357,31 @@ BUSINESSES = {
 
 CUSTOM_TITLE_CERT_PRICE = 15000
 
+# ---------------------------------------------------------
+# НОВЫЕ СИСТЕМЫ КЛАНА: ПУБЛИЧНЫЕ БИЗНЕСЫ / ОДЕЖДА / ДОМА / МОНОПОЛИЯ
+# ---------------------------------------------------------
+PET_CLOTHES = {
+    'work_cap': {'name': '🧢 Кепка работяги', 'price': 2500, 'work_bonus': 0.15, 'desc': '+15% к зарплате и доходу от работы'},
+    'garden_apron': {'name': '🧑‍🌾 Фартук садовода', 'price': 4000, 'garden_bonus': 1, 'desc': '+1 слот для растения'},
+    'lucky_scarf': {'name': '🧣 Шарфик удачи', 'price': 6500, 'work_bonus': 0.10, 'garden_bonus': 1, 'desc': '+10% к работе и +1 слот сада'},
+    'business_suit': {'name': '👔 Деловой костюм', 'price': 12000, 'business_bonus': 0.15, 'desc': '+15% к прибыли публичного бизнеса'},
+    'royal_crown': {'name': '👑 Королевская корона', 'price': 30000, 'work_bonus': 0.20, 'business_bonus': 0.20, 'desc': '+20% к работе и публичному бизнесу'},
+}
+
+PERSONAL_HOUSES = {
+    'room': {'name': '🛏 Комната в общежитии', 'price': 8000, 'income': 4, 'city': 'Ня-Сити'},
+    'flat': {'name': '🏢 Уютная квартира', 'price': 30000, 'income': 15, 'city': 'Ня-Сити'},
+    'cottage': {'name': '🏡 Загородный коттедж', 'price': 85000, 'income': 45, 'city': 'Пригород'},
+    'mansion': {'name': '🏰 Роскошный особняк', 'price': 250000, 'income': 140, 'city': 'Элитный район'},
+}
+
+MONOPOLY_BOARD = [
+    ('Старт', 0, 0), ('🍕 Пиццерия', 1200, 120), ('🎰 Казино', 1800, 180), ('🏖 Пляж', 2500, 250),
+    ('🚉 Вокзал', 3200, 320), ('🍔 Бургерная', 4200, 420), ('🏬 ТЦ', 5500, 550), ('💎 Ювелирка', 7000, 700),
+    ('🏨 Отель', 9000, 900), ('🚀 Космопорт', 12000, 1200), ('🏦 Банк', 15000, 1500), ('🏰 Замок', 20000, 2000)
+]
+active_monopoly = {}
+
 RODS = {
     'rod_stick': {'name': '🪵 Палка с ниткой', 'short': '🪵 Ветка', 'price': 120, 'luck': 4},
     'rod_bamboo': {'name': '🎋 Бамбуковая удочка', 'short': '🎋 Бамбук', 'price': 500, 'luck': 10},
@@ -687,7 +712,6 @@ active_crash = {}
 active_brick = {}
 active_c_mines = {}
 active_durak = {}
-active_clash = {}
 active_wanted = {}  # {(chat_id, user_id): wanted_data}
 active_pet_fights = {}
 active_memes = {}
@@ -927,7 +951,6 @@ def setup_bot_commands():
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
         BotCommand('trash', '🗑 Порыться в мусорке в поисках лута'),
         BotCommand('durak', '🃏 Карточная игра Дурак (36 карт)'),
-        BotCommand('clash', '👑 Clash Royale — арена 1v1'),
         BotCommand('promo', '🎁 Активировать промокод на коины'),
         BotCommand('stream', '🎥 Запустить трансляцию стримера'),
         BotCommand('garden', '🪴 Ваша личная оранжерея Бонсай'),
@@ -1308,7 +1331,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
         ('daily_casino_profit', 0), ('daily_transferred', 0), ('daily_stats_date', ''),
-        ('karma', 0), ('chat_ids', []), ('garden', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
+        ('karma', 0), ('chat_ids', []), ('garden', None), ('garden_capacity', 1), ('pet_clothes', []), ('equipped_pet_clothes', None), ('public_business', None), ('public_business_workers', []), ('employer_salary', None), ('home', None), ('home_installment', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
@@ -2961,81 +2984,217 @@ def cmd_stream(message):
     t.start()
 
 # ---------------------------------------------------------
+# ПУБЛИЧНЫЕ БИЗНЕСЫ КЛАНА
+# ---------------------------------------------------------
+def pet_bonus(econ, key):
+    clothes = econ.get('pet_clothes', [])
+    equipped = econ.get('equipped_pet_clothes')
+    if equipped and equipped in clothes and equipped in PET_CLOTHES:
+        return PET_CLOTHES[equipped].get(key, 0)
+    return 0
+
+def get_garden_capacity(econ):
+    base = int(econ.get('garden_capacity', 1) or 1)
+    return max(1, base + int(pet_bonus(econ, 'garden_bonus')))
+
+def public_business_income(econ):
+    pb = econ.get('public_business') or {}
+    if not pb.get('name'):
+        return 0
+    base = int(pb.get('salary_per_worker', 100)) * len(econ.get('public_business_workers', []))
+    return int(base * (1 + pet_bonus(econ, 'business_bonus')))
+
+def render_public_business_view(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    pb = econ.get('public_business')
+    if not pb:
+        markup = InlineKeyboardMarkup(row_width=2)
+        for b_id, b in BUSINESSES.items():
+            price = max(3000, b['price'] * 2)
+            markup.add(InlineKeyboardButton(f"🏢 {b['short']} — {price:,} 🪙", callback_data=f"pubbiz_create_{b_id}:{user_id}"))
+        text = "🏢 <b>ПУБЛИЧНЫЕ БИЗНЕСЫ</b> 😺\n──────────────────────\nСоздайте предприятие, куда другие игроки смогут устроиться. Работникам зарплата доступна раз в 3 дня, а владелец получает прибыль с каждой выплаченной зарплаты.\n\n<b>Выберите тип бизнеса:</b>"
+    else:
+        workers = econ.get('public_business_workers', [])
+        income = public_business_income(econ)
+        text = (f"🏢 <b>{html.escape(pb.get('name','Бизнес'))}</b>\n──────────────────────\n"
+                f"👥 Работников: <b>{len(workers)}/5</b>\n💵 Зарплата: <b>{pb.get('salary_per_worker',100):,} 🪙 каждые 3 дня</b>\n"
+                f"💰 Ваша прибыль с текущего состава: <b>~{income:,} 🪙</b> за выплату\n")
+        if workers:
+            text += "\n<b>Сотрудники:</b>\n" + "\n".join(f"• {html.escape(str(w.get('name','Игрок')))}" for w in workers)
+        else:
+            text += "\n<i>Пока никто не работает. Отправьте игрокам /бизнес и они смогут устроиться.</i>"
+        markup = InlineKeyboardMarkup(row_width=2)
+        if workers:
+            markup.add(InlineKeyboardButton("💰 Выплатить зарплаты", callback_data=f"pubbiz_pay:{user_id}"))
+        markup.add(InlineKeyboardButton("📋 Обновить", callback_data=f"pubbiz_view:{user_id}"))
+    if message_id:
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception: pass
+    else:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+def render_public_jobs(chat_id, user_id, user_name, message_id=None):
+    econ = get_user_econ(user_id, user_name)
+    rows=[]
+    for key, e in db.get('economy', {}).items():
+        pb=e.get('public_business')
+        if pb and len(e.get('public_business_workers', [])) < 5 and e.get('user_id') != user_id:
+            rows.append((e, key))
+    markup=InlineKeyboardMarkup(row_width=1)
+    lines=["💼 <b>ПУБЛИЧНЫЕ ВАКАНСИИ</b>","──────────────────────"]
+    if not rows:
+        lines.append("Пока нет свободных вакансий. 😿")
+    for e,key in rows[:30]:
+        pb=e['public_business']
+        lines.append(f"🏢 <b>{html.escape(pb.get('name','Бизнес'))}</b> — {html.escape(e.get('display_name','Владелец'))}\n💵 Зарплата: {pb.get('salary_per_worker',100):,} 🪙 / 3 дня")
+        markup.add(InlineKeyboardButton(f"Устроиться: {pb.get('name','Бизнес')[:30]}", callback_data=f"pubbiz_join_{e.get('user_id')}:{user_id}"))
+    markup.add(InlineKeyboardButton("🔄 Обновить", callback_data=f"pubbiz_jobs:{user_id}"))
+    text="\n".join(lines)
+    if message_id:
+        try: bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
+        except Exception: pass
+    else: bot.send_message(chat_id,text,reply_markup=markup,parse_mode='HTML')
+
+@bot.message_handler(commands=['salary','зарплата'])
+def cmd_public_salary(message):
+    if not can_process_user_message(message): return
+    uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    econ=get_user_econ(uid,name,username=message.from_user.username); es=econ.get('employer_salary')
+    if not es or not es.get('owner_id'):
+        bot.reply_to(message,'💼 Вы сейчас не работаете в публичном бизнесе. Вакансии: /вакансии'); return
+    if time.time()<es.get('next_due',0):
+        left=cooldown_text(es.get('next_due',0),0,econ)
+        bot.reply_to(message,f'⏳ Следующая зарплата будет через <b>{left}</b>.',parse_mode='HTML'); return
+    owner=get_user_econ(es['owner_id']); pb=owner.get('public_business')
+    if not pb:
+        econ['employer_salary']=None; mark_dirty(); bot.reply_to(message,'❌ Бизнес больше не существует.'); return
+    salary=int(pb.get('salary_per_worker',100)*(1+pet_bonus(owner,'business_bonus')))
+    profit=max(1,int(salary*0.25))
+    if owner.get('balance',0)<salary:
+        bot.reply_to(message,'⏳ У владельца пока недостаточно средств для выплаты зарплаты.'); return
+    owner['balance']-=salary; econ['balance']+=salary; owner['balance']+=profit
+    es['next_due']=time.time()+3*86400; econ['employer_salary']=es; mark_dirty()
+    bot.reply_to(message,f'💵 <b>Зарплата получена!</b> +{salary:,} 🪙\n🏢 Владелец получил прибыль +{profit:,} 🪙.',parse_mode='HTML')
+
+@bot.message_handler(commands=['jobs', 'вакансии'])
+def cmd_public_jobs(message):
+    if not can_process_user_message(message): return
+    name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_public_jobs(message.chat.id,message.from_user.id,name)
+
+# ---------------------------------------------------------
+# ПИТОМЕЦ: ОДЕЖДА И БАФФЫ
+# ---------------------------------------------------------
+def render_pet_clothes(chat_id,user_id,user_name,message_id=None):
+    econ=get_user_econ(user_id,user_name)
+    owned=econ.setdefault('pet_clothes',[])
+    equipped=econ.get('equipped_pet_clothes')
+    lines=["👗 <b>ГАРДЕРОБ ПИТОМЦА</b>","──────────────────────"]
+    markup=InlineKeyboardMarkup(row_width=1)
+    for k,v in PET_CLOTHES.items():
+        if k in owned:
+            state='✅ Надето' if equipped==k else '👕 Надеть'
+            markup.add(InlineKeyboardButton(f"{state}: {v['name']}",callback_data=f"petcloth_equip_{k}:{user_id}"))
+        else:
+            markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['price']:,} 🪙",callback_data=f"petcloth_buy_{k}:{user_id}"))
+        lines.append(f"• {v['name']} — {v['desc']}")
+    lines.append("──────────────────────")
+    lines.append(f"Надето: <b>{PET_CLOTHES[equipped]['name'] if equipped in PET_CLOTHES else 'ничего'}</b>")
+    if message_id:
+        try: bot.edit_message_text("\n".join(lines),chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
+        except Exception: pass
+    else: bot.send_message(chat_id,"\n".join(lines),reply_markup=markup,parse_mode='HTML')
+
+# ---------------------------------------------------------
+# ЛИЧНЫЕ ДОМА И РАССРОЧКА
+# ---------------------------------------------------------
+def render_personal_home(chat_id,user_id,user_name,message_id=None):
+    econ=get_user_econ(user_id,user_name)
+    home=econ.get('home')
+    inst=econ.get('home_installment')
+    markup=InlineKeyboardMarkup(row_width=1)
+    lines=["🏠 <b>ЛИЧНЫЙ ДОМ</b>","──────────────────────"]
+    if home:
+        h=PERSONAL_HOUSES.get(home['id'],PERSONAL_HOUSES['room'])
+        lines += [f"🏠 {h['name']}",f"📍 {h['city']}",f"💰 Пассивный бонус: +{h['income']} 🪙/ч"]
+    elif inst:
+        h=PERSONAL_HOUSES.get(inst['id'],PERSONAL_HOUSES['room'])
+        lines += [f"🏗 <b>Дом в рассрочку: {h['name']}</b>",f"💳 Осталось: <b>{inst['remaining']:,} 🪙</b>",f"💵 Следующий платёж: <b>{inst['payment']:,} 🪙</b>",f"📅 Платёж раз в 2 дня"]
+        markup.add(InlineKeyboardButton(f"💳 Внести платёж {inst['payment']:,} 🪙",callback_data=f"home_pay:{user_id}"))
+    else:
+        lines.append("Выберите дом. Первые 25% оплачиваются сразу, остальное — в рассрочку раз в 2 дня.")
+        for k,h in PERSONAL_HOUSES.items():
+            markup.add(InlineKeyboardButton(f"🏠 {h['name']} — {h['price']:,} 🪙",callback_data=f"home_buy_{k}:{user_id}"))
+    if home: lines.append("\nДом уже полностью выплачен. 😻")
+    lines.append("\n<i>Кредит /кредит можно использовать отдельно от рассрочки.</i>")
+    if message_id:
+        try: bot.edit_message_text("\n".join(lines),chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
+        except Exception: pass
+    else: bot.send_message(chat_id,"\n".join(lines),reply_markup=markup,parse_mode='HTML')
+
+# ---------------------------------------------------------
+# МОНОПОЛИЯ
+# ---------------------------------------------------------
+def monopoly_text(game):
+    lines=["🎩 <b>НЯ-МОНОПОЛИЯ</b>","──────────────────────"]
+    for uid,p in game['players'].items():
+        marker='👉' if uid==game['turn'] else '  '
+        lines.append(f"{marker} {html.escape(p['name'])}: позиция {p['pos']}, {p['money']:,} 🪙")
+    lines.append(f"\nХод: <b>{html.escape(game['players'][game['turn']]['name'])}</b>")
+    lines.append("Клетки с 🏠 можно купить. Попав на чужую — платите аренду.")
+    return "\n".join(lines)
+
+def render_monopoly(chat_id,game,message_id=None):
+    markup=InlineKeyboardMarkup(row_width=2)
+    if game.get('started'):
+        markup.add(InlineKeyboardButton("🎲 Бросить кубик",callback_data=f"mono_roll:{game['id']}"))
+        markup.add(InlineKeyboardButton("🏠 Купить клетку",callback_data=f"mono_buy:{game['id']}"),InlineKeyboardButton("⏭ Пропустить",callback_data=f"mono_skip:{game['id']}"))
+    else:
+        markup.add(InlineKeyboardButton("➕ Присоединиться",callback_data=f"mono_join:{game['id']}"),InlineKeyboardButton("▶️ Начать",callback_data=f"mono_start:{game['id']}"))
+    if message_id:
+        try: bot.edit_message_text(monopoly_text(game),chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
+        except Exception: pass
+    else: bot.send_message(chat_id,monopoly_text(game),reply_markup=markup,parse_mode='HTML')
+
+@bot.message_handler(commands=['monopoly','монополия'])
+def cmd_monopoly(message):
+    if not can_process_user_message(message): return
+    gid=f"mono_{message.chat.id}_{int(time.time()*1000)}"
+    uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    active_monopoly[gid]={'id':gid,'chat_id':message.chat.id,'started':False,'turn':uid,'players':{uid:{'name':name,'money':30000,'pos':0}},'owners':{}}
+    render_monopoly(message.chat.id,active_monopoly[gid])
+
+# ---------------------------------------------------------
 # САД БОНСАЙ (/garden)
 # ---------------------------------------------------------
 def render_garden_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
-    garden = econ.get('garden')
-
-    markup = InlineKeyboardMarkup(row_width=2)
-    if not garden:
-        text = (
-            f"🪴 <b>ВАША ОРАНЖЕРЕЯ БОНСАЙ</b> 😺\n"
-            f"──────────────────────\n"
-            f"У вас пока нет посаженных растений! 😿\n\n"
-            f"Купите семена ниже, чтобы начать выращивать свой сад для пассивного заработка. 😻\n"
-            f"💧 <i>Полив платный (15 🪙 за ведро), а почва постепенно высыхает со временем!</i>"
-        )
-        for s_id, s_info in GARDEN_SEEDS.items():
-            markup.add(InlineKeyboardButton(f"{s_info['emoji']} Купить {s_info['name']} ({s_info['price']} 🪙)", callback_data=f"buy_seed_{s_id}:{user_id}"))
-    else:
-        seed_id = garden['seed']
-        seed_info = GARDEN_SEEDS.get(seed_id, GARDEN_SEEDS['sakura'])
-        now = time.time()
-        
-        # Пересчет высыхания влаги
-        last_dry_calc = garden.get('last_dry_calc', garden.get('planted_at', now))
-        dry_interval = 3600 * 2  # каждые 2 часа почва теряет 1 очко полива
-        lost_water = int((now - last_dry_calc) // dry_interval)
-        if lost_water > 0:
-            garden['water_count'] = max(0, garden.get('water_count', 0) - lost_water)
-            garden['last_dry_calc'] = last_dry_calc + (lost_water * dry_interval)
-            mark_dirty()
-
-        elapsed = now - garden['planted_at']
-        progress_pct = min(100, int((elapsed / seed_info['grow_time']) * 100))
-        water_count = garden['water_count']
-        req_water = seed_info['water_req']
-        can_harvest = (progress_pct >= 100 and water_count >= req_water)
-        
-        stage = "🌱 Росток"
-        if progress_pct >= 100 and water_count >= req_water: 
-            stage = "🍎 Урожай готов к сбору!"
-        elif progress_pct >= 100:
-            stage = "🥀 Созрело, но почва пересохла! Нужен полив!"
-        elif progress_pct >= 50: 
-            stage = "🌿 Буйное цветение"
-            
-        bar_len = progress_pct // 10
-        bar = "🟩" * bar_len + "⬜️" * (10 - bar_len)
-        
-        bp = econ.get('backpack', {})
-        fert_count = bp.get('garden_fertilizer', 0)
-
-        text = (
-            f"🪴 <b>ВАШ САД: {seed_info['name']}</b> 😺\n"
-            f"──────────────────────\n"
-            f"📈 Прогресс роста: <b>{progress_pct}%</b>\n"
-            f"[{bar}]\n"
-            f"💧 Влажность почвы: <b>{water_count}/{req_water}</b> (15 🪙 / полив)\n"
-            f"⏳ Почва постепенно высыхает каждые 2 часа!\n"
-            f"🌻 Стадия: <b>{stage}</b>\n"
-            f"──────────────────────"
-        )
-        
-        markup.add(InlineKeyboardButton(f"💦 Полить растение (15 🪙)", callback_data=f"water_plant:{user_id}"))
-        if fert_count > 0 and progress_pct < 100:
-            markup.add(InlineKeyboardButton(f"🧪 Удобрить ({fert_count} шт. в рюкзаке)", callback_data=f"fertilize_plant:{user_id}"))
-        if can_harvest:
-            markup.add(InlineKeyboardButton("🧺 Собрать урожай", callback_data=f"harvest_plant:{user_id}"))
-        markup.add(InlineKeyboardButton("❌ Выкорчевать", callback_data=f"uproot_plant:{user_id}"))
-        
+    raw = econ.get('garden')
+    if raw is None: slots=[]
+    elif isinstance(raw, list): slots=raw
+    else: slots=[raw]
+    econ['garden']=slots
+    cap=get_garden_capacity(econ)
+    lines=[f"🪴 <b>ОГОРОД БОНСАЙ</b> — {len(slots)}/{cap} грядок","──────────────────────"]
+    markup=InlineKeyboardMarkup(row_width=2)
+    now=time.time()
+    for idx,garden in enumerate(slots):
+        seed=GARDEN_SEEDS.get(garden.get('seed'))
+        if not seed: continue
+        elapsed=now-garden.get('planted_at',now)
+        pct=min(100,int(elapsed/seed['grow_time']*100))
+        ready=elapsed>=seed['grow_time'] and garden.get('water_count',0)>=seed['water_req']
+        lines.append(f"{idx+1}. {seed['emoji']} <b>{seed['name']}</b> — {pct}% | 💦 {garden.get('water_count',0)}/{seed['water_req']}")
+        if ready: markup.add(InlineKeyboardButton(f"🧺 Собрать #{idx+1}",callback_data=f"harvest_slot_{idx}:{user_id}"))
+        else: markup.add(InlineKeyboardButton(f"💦 Полить #{idx+1} (-15 🪙)",callback_data=f"water_slot_{idx}:{user_id}"))
+        markup.add(InlineKeyboardButton(f"❌ Выкорчевать #{idx+1}",callback_data=f"uproot_slot_{idx}:{user_id}"))
+    if len(slots)<cap:
+        markup.add(InlineKeyboardButton("🌱 Посадить растение",callback_data=f"garden_seeds:{user_id}"))
+    lines.append(f"\n🐾 Бонус питомца: +{int(pet_bonus(econ,'garden_bonus'))} слот(ов)")
     if message_id:
-        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-    else:
-        try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
+        try: bot.edit_message_text("\n".join(lines),chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
+        except Exception: pass
+    else: bot.send_message(chat_id,"\n".join(lines),reply_markup=markup,parse_mode='HTML')
 
 @bot.message_handler(commands=['garden', 'сад'])
 def cmd_garden(message):
@@ -3849,14 +4008,12 @@ def render_durak_board(game_id, viewer_id=None):
     players = game['players']
     table = game['table']
 
-    attacker_name = players[game['attacker_idx']]['name'] if players and game.get('attacker_idx', 0) < len(players) else '—'
-    defender_name = players[game['defender_idx']]['name'] if players and game.get('defender_idx', 0) < len(players) else '—'
     lines = [
         f"🃏 <b>ДУРАК (36 КАРТ) | РЕЖИМ: {game['mode_name']}</b> 😺",
         "──────────────────────",
         f"👑 Козырь: <b>{trump}</b> | В колоде: <b>{deck_count} карт</b>",
-        f"⚔️ Атакует: <b>{attacker_name}</b>",
-        f"🛡 Защищается: <b>{defender_name}</b>\n",
+        f"⚔️ Атакует: <b>{players[game['attacker_idx']]['name']}</b>",
+        f"🛡 Защищается: <b>{players[game['defender_idx']]['name']}</b>\n",
         "<b>Игровой стол:</b>"
     ]
 
@@ -3949,199 +4106,7 @@ def cmd_durak(message):
         reply_markup=markup,
         parse_mode='HTML'
             )
-    
-# ---------------------------------------------------------
-# CLASH ROYALE-LIKE: БОЙ 1v1 В TELEGRAM
-# ---------------------------------------------------------
-CLASH_CARDS = {
-    'knight': {'name': '⚔️ Рыцарь', 'cost': 3, 'damage': 220, 'hp': 900, 'tower_damage': 160},
-    'archers': {'name': '🏹 Лучницы', 'cost': 3, 'damage': 150, 'hp': 520, 'tower_damage': 120},
-    'giant': {'name': '🗿 Гигант', 'cost': 5, 'damage': 120, 'hp': 1800, 'tower_damage': 360},
-    'goblins': {'name': '👺 Гоблины', 'cost': 2, 'damage': 180, 'hp': 380, 'tower_damage': 150},
-    'mini_pekka': {'name': '🤖 Мини П.Е.К.К.А', 'cost': 4, 'damage': 420, 'hp': 950, 'tower_damage': 300},
-    'wizard': {'name': '🧙 Маг', 'cost': 5, 'damage': 300, 'hp': 700, 'tower_damage': 210},
-    'valkyrie': {'name': '🪓 Валькирия', 'cost': 4, 'damage': 260, 'hp': 1100, 'tower_damage': 190},
-    'fireball': {'name': '🔥 Огненный шар', 'cost': 4, 'damage': 0, 'hp': 1, 'tower_damage': 650},
-}
-CLASH_DECK = ['knight', 'archers', 'giant', 'goblins', 'mini_pekka', 'wizard', 'valkyrie', 'fireball']
-CLASH_TOWER_HP = 2800
-
-def clash_make_player(uid, name):
-    return {
-        'id': uid,
-        'name': name,
-        'deck': CLASH_DECK[:],
-        'hand': CLASH_DECK[:4],
-        'next_card': 4,
-        'elixir': 5,
-        'tower_left': CLASH_TOWER_HP,
-        'tower_right': CLASH_TOWER_HP,
-        'king': 4200,
-        'troops_left': [],
-        'troops_right': [],
-    }
-
-def clash_card_line(p):
-    parts = []
-    for idx, key in enumerate(p['hand']):
-        c = CLASH_CARDS[key]
-        parts.append(f"{idx+1}. {c['name']} [{c['cost']}⚡]")
-    return "\n".join(parts)
-
-def clash_render(game):
-    p1, p2 = game['players'][0], game['players'][1]
-    lines = [
-        "👑 <b>CLASH ROYALE: NYA ARENA</b>",
-        "──────────────────────",
-        f"🔴 <b>{html.escape(p1['name'])}</b>: 🏰 {max(0,p1['tower_left'])} | 🏰 {max(0,p1['tower_right'])} | 👑 {max(0,p1['king'])}",
-        f"🔵 <b>{html.escape(p2['name'])}</b>: 🏰 {max(0,p2['tower_left'])} | 🏰 {max(0,p2['tower_right'])} | 👑 {max(0,p2['king'])}",
-        "──────────────────────",
-        f"⚡️ {html.escape(p1['name'])}: <b>{p1['elixir']:.1f}/10</b>",
-        f"⚡️ {html.escape(p2['name'])}: <b>{p2['elixir']:.1f}/10</b>",
-    ]
-    if game.get('log'):
-        lines.append(f"\n📢 {html.escape(game['log'])}")
-    if not game.get('started'):
-        lines.append(f"\n⏳ Ожидание соперника: {len(game['players'])}/2")
-        return "\n".join(lines), InlineKeyboardMarkup().add(
-            InlineKeyboardButton("⚔️ Присоединиться к бою", callback_data=f"cr_join_{game['id']}")
-        )
-    turn_name = game['players'][game['turn_idx']]['name']
-    lines.append(f"\n🎯 Ход: <b>{html.escape(turn_name)}</b>")
-    lines.append("\n🎴 <b>Карты скрыты от соперника.</b> Выберите номер карты из своей руки (1–4).")
-    markup = InlineKeyboardMarkup(row_width=2)
-    for idx in range(4):
-        markup.add(
-            InlineKeyboardButton(
-                f"🎴 Карта {idx+1}",
-                callback_data=f"cr_card_{game['id']}_{idx}"
-            )
-        )
-    markup.add(
-        InlineKeyboardButton("⬅️ Левая башня", callback_data=f"cr_lane_{game['id']}_0:{p1['id']}"),
-        InlineKeyboardButton("➡️ Правая башня", callback_data=f"cr_lane_{game['id']}_1:{p1['id']}")
-    )
-    markup.add(InlineKeyboardButton("🏳️ Сдаться", callback_data=f"cr_surrender_{game['id']}:{p1['id']}"))
-    return "\n".join(lines), markup
-
-def clash_refresh_hand(p):
-    if len(p['hand']) >= 4:
-        return
-    while len(p['hand']) < 4:
-        p['hand'].append(p['deck'][p['next_card'] % len(p['deck'])])
-        p['next_card'] += 1
-
-def clash_apply_troops(p, enemy, lane):
-    """Resolve existing troops on a lane before the new card acts."""
-    key = 'troops_left' if lane == 0 else 'troops_right'
-    troops = p[key]
-    enemy_tower_key = 'tower_left' if lane == 0 else 'tower_right'
-    remaining = []
-    for troop in troops:
-        troop['hp'] -= 170
-        if troop['hp'] > 0:
-            enemy[enemy_tower_key] -= troop['tower_damage']
-            remaining.append(troop)
-    p[key] = remaining
-
-def clash_play_card(game, actor_idx, card_idx, lane):
-    actor = game['players'][actor_idx]
-    enemy = game['players'][1 - actor_idx]
-    if game.get('finished'):
-        return False, "Игра уже закончена."
-    if game['turn_idx'] != actor_idx:
-        return False, "Сейчас ход соперника!"
-    if card_idx < 0 or card_idx >= len(actor['hand']):
-        return False, "Карта уже ушла из руки."
-    if lane not in (0, 1):
-        return False, "Выберите линию."
-    key = actor['hand'][card_idx]
-    card = CLASH_CARDS[key]
-    if actor['elixir'] < card['cost']:
-        return False, f"Не хватает эликсира: нужно {card['cost']}⚡."
-    actor['elixir'] -= card['cost']
-    actor['hand'].pop(card_idx)
-    clash_refresh_hand(actor)
-
-    # Fireball damages the selected tower immediately.
-    if key == 'fireball':
-        tower_key = 'tower_left' if lane == 0 else 'tower_right'
-        enemy[tower_key] -= card['tower_damage']
-        game['log'] = f"{actor['name']} бросил(а) Огненный шар! -{card['tower_damage']} HP."
-    else:
-        troop = {
-            'hp': card['hp'],
-            'damage': card['damage'],
-            'tower_damage': card['tower_damage'],
-            'name': card['name']
-        }
-        key_t = 'troops_left' if lane == 0 else 'troops_right'
-        actor[key_t].append(troop)
-        clash_apply_troops(actor, enemy, lane)
-        game['log'] = f"{actor['name']} сыграл(а) {card['name']} на {'левой' if lane == 0 else 'правой'} линии."
-
-    # Elixir regeneration after each action keeps the Telegram version responsive.
-    for p in game['players']:
-        p['elixir'] = min(10.0, p['elixir'] + 1.0)
-    game['turn_idx'] = 1 - actor_idx
-
-    if enemy['king'] <= 0 or (enemy['tower_left'] <= 0 and enemy['tower_right'] <= 0):
-        game['finished'] = True
-        game['winner_idx'] = actor_idx
-        game['log'] += f" Победа {actor['name']}!"
-    elif actor['king'] <= 0 or (actor['tower_left'] <= 0 and actor['tower_right'] <= 0):
-        game['finished'] = True
-        game['winner_idx'] = 1 - actor_idx
-    return True, game['log']
-
-def clash_bot_turn(game):
-    if game.get('finished') or len(game.get('players', [])) != 2:
-        return
-    bot_idx = next((i for i,p in enumerate(game['players']) if p['id'] == 'bot'), None)
-    if bot_idx is None or game.get('turn_idx') != bot_idx:
-        return
-    bot_player = game['players'][bot_idx]
-    affordable = [i for i,k in enumerate(bot_player['hand']) if CLASH_CARDS[k]['cost'] <= bot_player['elixir']]
-    if not affordable:
-        bot_player['elixir'] = min(10.0, bot_player['elixir'] + 2.0)
-        affordable = [i for i,k in enumerate(bot_player['hand']) if CLASH_CARDS[k]['cost'] <= bot_player['elixir']]
-    if not affordable:
-        game['turn_idx'] = 1 - bot_idx
-        game['log'] = "🤖 Бот накопил эликсир."
-        return
-    idx = random.choice(affordable)
-    lane = random.randint(0, 1)
-    ok, msg = clash_play_card(game, bot_idx, idx, lane)
-    if ok:
-        game['log'] = "🤖 Ня-Бот сделал ход."
-
-@bot.message_handler(commands=['clash', 'clashroyale', 'royale'])
-def cmd_clash(message):
-    if not can_process_user_message(message):
-        return
-    uid = message.from_user.id
-    name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Игрок'
-    game_id = f"{uid}_{time.time_ns()}"
-    game = {
-        'id': game_id,
-        'chat_id': message.chat.id,
-        'msg_id': None,
-        'players': [clash_make_player(uid, name)],
-        'started': False,
-        'finished': False,
-        'turn_idx': 0,
-        'log': 'Лобби создано. Нажмите кнопку, чтобы позвать второго игрока.',
-        'created_at': time.time(),
-    }
-    active_clash[game_id] = game
-    text, markup = clash_render(game)
-    # В лобби добавляем отдельную кнопку быстрого боя с ботом.
-    markup.add(InlineKeyboardButton("🤖 Бой с Ня-Ботом", callback_data=f"cr_bot_{game_id}"))
-    sent = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-    game['msg_id'] = sent.message_id
-
-
-# ---------------------------------------------------------
+    # ---------------------------------------------------------
 # МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
 # ---------------------------------------------------------
 @bot.message_handler(commands=['dick', 'писюн', 'замер'])
@@ -4374,7 +4339,8 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
     )
     markup.add(
         InlineKeyboardButton("🦮 Отправить гулять", callback_data=f"pet_walk_btn:{user_id}"),
-        InlineKeyboardButton("🐾 Зоомагазин", callback_data=f"shop_cat_pets_0:{user_id}")
+        InlineKeyboardButton("🐾 Зоомагазин", callback_data=f"shop_cat_pets_0:{user_id}"),
+        InlineKeyboardButton("👗 Одежда", callback_data=f"pet_clothes:{user_id}")
     )
 
     text = (
@@ -4538,6 +4504,7 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
         markup.add(*b_btns[i:i+2])
 
     markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data=f"collect_biz_profit:{user_id}"))
+    markup.add(InlineKeyboardButton("🏢 Мой публичный бизнес", callback_data=f"pubbiz_view:{user_id}"), InlineKeyboardButton("💼 Вакансии", callback_data=f"pubbiz_jobs:{user_id}"))
     lines.append("──────────────────────")
     lines.append("🌴 <i>В ресте действует курортный бонус: +20% к прибыли!</i>")
 
@@ -5035,7 +5002,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
             if title_key in TITLES and title_key != active_title:
                 markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}:{user_id}"))
         if active_title or custom_title:
-            markup.add(InlineKeyboardButton('❌ Снять текущий титул', callback_data=f'remove_title:{user_id}'))
+            markup.add(InlineKeyboardButton('❌ Снять текущий титул', callback_data=f'confirm_remove_title:{user_id}'))
 
     purchased_themes = econ.get('purchased_themes', ['default'])
     if len(purchased_themes) > 1:
@@ -5091,6 +5058,9 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
     )
 
     lvl, cur_exp, next_exp, bar = get_account_level(econ.get('account_exp', 0))
+    durak_wins = int(econ.get('durak_wins', 0))
+    durak_losses = int(econ.get('durak_losses', 0))
+    durak_rank = get_durak_rank(durak_wins)
 
     karma = econ.get('karma', 0)
     if karma >= 80: karma_title = "😇 Святой Ангел"
@@ -5122,6 +5092,7 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
         f"{border}\n"
         f"{t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
         f"{t_icon} ⭐ Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
+        f"{t_icon} 🪖 Погон Дурака: <b>{durak_rank}</b> | Побед: <b>{durak_wins}</b> | Поражений: <b>{durak_losses}</b>\n"
         f"{t_icon} ⚖️ Карма: <b>{karma}</b> ({karma_title})\n"
         f"{vip_line}"
         f"{stars_line}"
@@ -6350,13 +6321,29 @@ def render_house_view(chat_id, user_id, user_name, message_id=None):
         return
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
+@bot.message_handler(commands=['home','жильё','жилье'])
+def cmd_personal_home(message):
+    if not can_process_user_message(message): return
+    name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_personal_home(message.chat.id,message.from_user.id,name)
+
+@bot.message_handler(commands=['petclothes','одежда_питомца'])
+def cmd_pet_clothes(message):
+    if not can_process_user_message(message): return
+    name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
+    render_pet_clothes(message.chat.id,message.from_user.id,name)
+
 @bot.message_handler(commands=['house', 'дом'])
 def cmd_house(message):
     if not can_process_user_message(message):
         return
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    render_house_view(message.chat.id, user_id, user_name)
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    if not econ.get('marriage'):
+        render_personal_home(message.chat.id, user_id, user_name)
+    else:
+        render_house_view(message.chat.id, user_id, user_name)
 
 # ---------------------------------------------------------
 # КРИМИНАЛ И ПОЛИЦИЯ ЧАТА (ШЕРИФ, РОЗЫСК, КПЗ, ПОБЕГ, ЗАЛОГ)
@@ -7715,7 +7702,7 @@ def handle_messages(message):
         'кредит': cmd_loan, 'погасить кредит': cmd_repay, 'погасить': cmd_repay,
         'работа': cmd_work, 'бизнес': cmd_business, 'бизнесы': cmd_business,
         'прибыль': cmd_collect, 'собрать прибыль': cmd_collect,
-        'сад': cmd_garden,
+        'сад': cmd_garden, 'вакансии': cmd_public_jobs, 'jobs': cmd_public_jobs, 'зарплата': cmd_public_salary, 'salary': cmd_public_salary, 'монополия': cmd_monopoly, 'monopoly': cmd_monopoly, 'жильё': cmd_personal_home, 'жилье': cmd_personal_home, 'одежда питомца': cmd_pet_clothes,
         'топ': cmd_top, 'топ дня': cmd_top_daily, 'топ недели': cmd_top_weekly,
         'рулетка': cmd_wheel, 'мины': cmd_mines, 'дурак': cmd_durak,
     }
@@ -7766,7 +7753,6 @@ def handle_messages(message):
     elif text_lower in ['мемы']: cmd_memes(message); return
     elif text_lower.startswith(('промо', 'промокод')): cmd_promo(message); return
     elif text_lower.startswith(('дурак', '/durak')): cmd_durak(message); return
-    elif text_lower.startswith(('клеш рояль', 'clash royale', '/clash', '/clashroyale', '/royale')): cmd_clash(message); return
     elif text_lower in ['настройки профиля', 'настройка профиля']: cmd_profile_settings(message); return
     elif text_lower.startswith(('сейф', '/safe')): cmd_safe(message); return
     elif text_lower in ['дом', 'мой дом', 'семейный дом', '/house']: cmd_house(message); return
@@ -8147,129 +8133,6 @@ def callback_inline(call):
                 return
 
 
-        # CLASH ROYALE
-        elif action_data.startswith('cr_bot_'):
-            game_id = action_data.replace('cr_bot_', '', 1)
-            game = active_clash.get(game_id)
-            if not game or game.get('finished') or game.get('started'):
-                bot.answer_callback_query(call.id, "❌ Лобби уже недоступно.", show_alert=True)
-                return
-            if game['players'][0]['id'] != user_id:
-                bot.answer_callback_query(call.id, "❌ Только создатель лобби может выбрать бой с ботом.", show_alert=True)
-                return
-            game['players'].append(clash_make_player('bot', '🤖 Ня-Бот'))
-            game['started'] = True
-            game['log'] = f"Бой начался! Ходит {game['players'][0]['name']}."
-            text, markup = clash_render(game)
-            try:
-                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], reply_markup=markup, parse_mode='HTML')
-            except Exception:
-                pass
-            bot.answer_callback_query(call.id, "🤖 Бот подключился!")
-            return
-
-        elif action_data.startswith('cr_join_'):
-            game_id = action_data.replace('cr_join_', '', 1)
-            game = active_clash.get(game_id)
-            if not game or game.get('finished'):
-                bot.answer_callback_query(call.id, "❌ Бой уже завершён!", show_alert=True)
-                return
-            if game.get('started'):
-                bot.answer_callback_query(call.id, "❌ Бой уже начался!", show_alert=True)
-                return
-            if any(p['id'] == user_id for p in game['players']):
-                bot.answer_callback_query(call.id, "Вы уже в этом бою!", show_alert=True)
-                return
-            game['players'].append(clash_make_player(user_id, user_name))
-            if len(game['players']) >= 2:
-                game['started'] = True
-                game['log'] = f"Бой начался! Ходит {game['players'][0]['name']}."
-            text, markup = clash_render(game)
-            try:
-                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], reply_markup=markup, parse_mode='HTML')
-            except Exception:
-                pass
-            bot.answer_callback_query(call.id, "⚔️ Вы вошли в бой!")
-            return
-
-        elif action_data.startswith('cr_card_'):
-            parts = action_data.split('_')
-            try:
-                # cr_card_GAMEID_CARDINDEX
-                game_id = "_".join(parts[2:-1])
-                card_idx = int(parts[-1])
-            except (ValueError, IndexError):
-                bot.answer_callback_query(call.id, "❌ Некорректная карта.", show_alert=True)
-                return
-            game = active_clash.get(game_id)
-            if not game:
-                bot.answer_callback_query(call.id, "❌ Бой не найден.", show_alert=True)
-                return
-            game['_pending_card'] = {'user_id': user_id, 'idx': card_idx}
-            bot.answer_callback_query(call.id, "Теперь выберите линию 👇")
-            return
-
-        elif action_data.startswith('cr_lane_'):
-            parts = action_data.split('_')
-            try:
-                # cr_lane_GAMEID_0/1
-                lane = int(parts[-1])
-                game_id = "_".join(parts[2:-1])
-            except (ValueError, IndexError):
-                bot.answer_callback_query(call.id, "❌ Некорректная линия.", show_alert=True)
-                return
-            game = active_clash.get(game_id)
-            if not game or not game.get('started') or game.get('finished'):
-                bot.answer_callback_query(call.id, "❌ Бой недоступен.", show_alert=True)
-                return
-            pending = game.get('_pending_card')
-            if not pending or pending.get('user_id') != user_id:
-                bot.answer_callback_query(call.id, "Сначала выберите карту.", show_alert=True)
-                return
-            ok, msg = clash_play_card(game, next(i for i,p in enumerate(game['players']) if p['id'] == user_id), pending['idx'], lane)
-            game.pop('_pending_card', None)
-            if not ok:
-                bot.answer_callback_query(call.id, msg, show_alert=True)
-                return
-            if not game.get('finished') and any(p['id'] == 'bot' for p in game['players']):
-                clash_bot_turn(game)
-            text, markup = clash_render(game)
-            if game.get('finished'):
-                winner = game['players'][game['winner_idx']]['name']
-                text += f"\n\n🏆 <b>Победитель: {html.escape(winner)}</b>"
-                active_clash.pop(game_id, None)
-                markup = None
-            try:
-                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], reply_markup=markup, parse_mode='HTML')
-            except Exception:
-                pass
-            bot.answer_callback_query(call.id, "⚔️ Ход сделан!")
-            return
-
-        elif action_data.startswith('cr_surrender_'):
-            game_id = action_data.replace('cr_surrender_', '', 1)
-            game = active_clash.get(game_id)
-            if not game or game.get('finished'):
-                bot.answer_callback_query(call.id, "❌ Бой уже завершён.", show_alert=True)
-                return
-            idx = next((i for i,p in enumerate(game['players']) if p['id'] == user_id), None)
-            if idx is None:
-                bot.answer_callback_query(call.id, "❌ Вы не участник.", show_alert=True)
-                return
-            game['finished'] = True
-            game['winner_idx'] = 1 - idx if len(game['players']) == 2 else None
-            if game['winner_idx'] is not None:
-                text = f"🏳️ {html.escape(game['players'][idx]['name'])} сдался.\n🏆 Победитель: <b>{html.escape(game['players'][game['winner_idx']]['name'])}</b>"
-            else:
-                text = "🏳️ Игрок сдался."
-            try:
-                bot.edit_message_text(text, chat_id=game['chat_id'], message_id=game['msg_id'], parse_mode='HTML')
-            except Exception:
-                pass
-            active_clash.pop(game_id, None)
-            bot.answer_callback_query(call.id, "🏳️ Вы сдались.")
-            return
-
         # МЕМЫ: ГОЛОСОВАНИЕ
         elif action_data.startswith('meme_l_') or action_data.startswith('meme_d_'):
             meme_id = action_data[7:]
@@ -8347,6 +8210,141 @@ def callback_inline(call):
             render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
             bot.answer_callback_query(call.id, "Статус дома обновлен! 😸")
             return
+
+        # САД: НЕСКОЛЬКО ГРЯДОК
+        elif action_data.startswith('water_slot_') or action_data.startswith('harvest_slot_') or action_data.startswith('uproot_slot_'):
+            m=re.match(r'(water|harvest|uproot)_slot_(\d+)$',action_data)
+            if not m: return
+            idx=int(m.group(2)); econ=get_user_econ(user_id,user_name,username=user_username); slots=econ.get('garden') or []
+            if not isinstance(slots,list): slots=[slots]
+            if idx<0 or idx>=len(slots): bot.answer_callback_query(call.id,'Грядка уже исчезла.',show_alert=True); return
+            g=slots[idx]; seed=GARDEN_SEEDS.get(g.get('seed'))
+            if not seed: return
+            if m.group(1)=='water':
+                if econ['balance']<15: bot.answer_callback_query(call.id,'Нужно 15 🪙!',show_alert=True); return
+                if g.get('water_count',0)>=seed['water_req']: bot.answer_callback_query(call.id,'Земля уже достаточно влажная.',show_alert=True); return
+                econ['balance']-=15; g['water_count']=g.get('water_count',0)+1; g['last_dry_calc']=time.time(); mark_dirty(); bot.answer_callback_query(call.id,'💦 Полито!'); render_garden_view(chat_id,user_id,user_name,call.message.message_id); return
+            if m.group(1)=='harvest':
+                if time.time()-g.get('planted_at',time.time())<seed['grow_time'] or g.get('water_count',0)<seed['water_req']:
+                    bot.answer_callback_query(call.id,'❌ Растение ещё не готово или ему не хватило воды.',show_alert=True); return
+                reward=random.randint(seed['reward_min'],seed['reward_max']); reward=int(reward*(1+0.10*pet_bonus(econ,'garden_bonus'))); econ['balance']+=reward; slots.pop(idx); econ['garden']=slots; mark_dirty(); bot.answer_callback_query(call.id,f'🧺 Урожай: +{reward} 🪙',show_alert=True); render_garden_view(chat_id,user_id,user_name,call.message.message_id); return
+            # uproot
+            slots.pop(idx); econ['garden']=slots; mark_dirty(); bot.answer_callback_query(call.id,'❌ Растение выкорчевано.',show_alert=True); render_garden_view(chat_id,user_id,user_name,call.message.message_id); return
+
+        # ПУБЛИЧНЫЕ БИЗНЕСЫ / ОДЕЖДА / ДОМА / МОНОПОЛИЯ
+        elif action_data == 'pubbiz_view':
+            render_public_business_view(chat_id,user_id,user_name,call.message.message_id); bot.answer_callback_query(call.id); return
+        elif action_data == 'pubbiz_jobs':
+            render_public_jobs(chat_id,user_id,user_name,call.message.message_id); bot.answer_callback_query(call.id); return
+        elif action_data.startswith('pubbiz_create_'):
+            b_id=action_data.replace('pubbiz_create_','')
+            econ=get_user_econ(user_id,user_name,username=user_username)
+            if econ.get('public_business'):
+                bot.answer_callback_query(call.id,'У вас уже есть публичный бизнес!',show_alert=True); return
+            if b_id not in BUSINESSES: return
+            price=max(3000,BUSINESSES[b_id]['price']*2)
+            if econ['balance']<price:
+                bot.answer_callback_query(call.id,f'Нужно {price:,} 🪙!',show_alert=True); return
+            econ['balance']-=price
+            econ['public_business']={'name':BUSINESSES[b_id]['name'],'salary_per_worker':max(100,BUSINESSES[b_id]['base_income']*20),'created_at':time.time(),'last_salary':0}
+            econ['public_business_workers']=[]
+            mark_dirty(); bot.answer_callback_query(call.id,'🏢 Публичный бизнес создан!'); render_public_business_view(chat_id,user_id,user_name,call.message.message_id); return
+        elif action_data.startswith('pubbiz_join_'):
+            owner_id=int(action_data.replace('pubbiz_join_',''))
+            if owner_id==user_id: return
+            owner=get_user_econ(owner_id)
+            pb=owner.get('public_business')
+            workers=owner.setdefault('public_business_workers',[])
+            if not pb or len(workers)>=5:
+                bot.answer_callback_query(call.id,'❌ Вакансия уже закрыта!',show_alert=True); return
+            if any(w.get('id')==user_id for w in workers):
+                bot.answer_callback_query(call.id,'Вы уже работаете здесь.',show_alert=True); return
+            my=get_user_econ(user_id,user_name,username=user_username)
+            old=my.get('employer_salary')
+            if old and old.get('owner_id') and old.get('owner_id')!=owner_id:
+                bot.answer_callback_query(call.id,'❌ Вы уже работаете в другом публичном бизнесе!',show_alert=True); return
+            workers.append({'id':user_id,'name':user_name,'joined_at':time.time()})
+            my['employer_salary']={'owner_id':owner_id,'joined_at':time.time(),'next_due':time.time()+3*86400,'business_name':pb.get('name','Бизнес')}
+            mark_dirty(); bot.answer_callback_query(call.id,'💼 Вы устроились на работу! Зарплата будет доступна через 3 дня.'); render_public_jobs(chat_id,user_id,user_name,call.message.message_id); return
+        elif action_data == 'pubbiz_pay':
+            econ=get_user_econ(user_id,user_name,username=user_username); pb=econ.get('public_business'); workers=econ.get('public_business_workers',[])
+            if not pb or not workers: return
+            if time.time()-pb.get('last_salary',0)<3*86400:
+                left=cooldown_text(pb.get('last_salary',0),3*86400,econ); bot.answer_callback_query(call.id,f'⏳ Следующая выплата через {left}.',show_alert=True); return
+            total=0; bonus=1+pet_bonus(econ,'business_bonus')
+            for w in workers:
+                we=get_user_econ(w.get('id'),w.get('name')); salary=int(pb.get('salary_per_worker',100)*bonus); we['balance']+=salary; total+=salary
+                es=we.get('employer_salary') or {}; es['next_due']=time.time()+3*86400; we['employer_salary']=es
+            pb['last_salary']=time.time(); econ['balance']+=total; mark_dirty()
+            bot.answer_callback_query(call.id,f'💰 Зарплаты выплачены. Вам начислено +{total:,} 🪙 прибыли.',show_alert=True); render_public_business_view(chat_id,user_id,user_name,call.message.message_id); return
+        elif action_data == 'pet_clothes':
+            render_pet_clothes(chat_id,user_id,user_name,call.message.message_id); bot.answer_callback_query(call.id); return
+        elif action_data.startswith('petcloth_buy_'):
+            k=action_data.replace('petcloth_buy_',''); v=PET_CLOTHES.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
+            if not v: return
+            if not econ.get('pet'):
+                bot.answer_callback_query(call.id,'❌ Сначала заведите питомца!',show_alert=True); return
+            if k in econ.setdefault('pet_clothes',[]): bot.answer_callback_query(call.id,'Уже куплено!',show_alert=True); return
+            if econ['balance']<v['price']: bot.answer_callback_query(call.id,f'Нужно {v["price"]:,} 🪙!',show_alert=True); return
+            econ['balance']-=v['price']; econ['pet_clothes'].append(k); econ['equipped_pet_clothes']=k; mark_dirty(); bot.answer_callback_query(call.id,'👗 Одежда куплена и надета!'); render_pet_clothes(chat_id,user_id,user_name,call.message.message_id); return
+        elif action_data.startswith('petcloth_equip_'):
+            k=action_data.replace('petcloth_equip_',''); econ=get_user_econ(user_id,user_name,username=user_username)
+            if k in econ.setdefault('pet_clothes',[]): econ['equipped_pet_clothes']=k; mark_dirty(); bot.answer_callback_query(call.id,'👗 Одежда надета!'); render_pet_clothes(chat_id,user_id,user_name,call.message.message_id)
+            return
+        elif action_data == 'garden_seeds':
+            markup=InlineKeyboardMarkup(row_width=2)
+            for k,v in GARDEN_SEEDS.items(): markup.add(InlineKeyboardButton(f"{v['emoji']} {v['price']} 🪙",callback_data=f"garden_buy_{k}:{user_id}"))
+            bot.edit_message_text('🌱 <b>ВЫБЕРИТЕ РАСТЕНИЕ</b>',chat_id=chat_id,message_id=call.message.message_id,reply_markup=markup,parse_mode='HTML'); return
+        elif action_data.startswith('garden_buy_'):
+            k=action_data.replace('garden_buy_',''); v=GARDEN_SEEDS.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
+            slots=econ.get('garden') or []; slots=slots if isinstance(slots,list) else [slots]
+            if len(slots)>=get_garden_capacity(econ): bot.answer_callback_query(call.id,'❌ Нет свободных грядок!',show_alert=True); return
+            if not v or econ['balance']<v['price']: bot.answer_callback_query(call.id,'❌ Недостаточно коинов!',show_alert=True); return
+            econ['balance']-=v['price']; slots.append({'seed':k,'planted_at':time.time(),'water_count':0,'last_dry_calc':time.time()}); econ['garden']=slots; mark_dirty(); bot.answer_callback_query(call.id,'🌱 Растение посажено!'); render_garden_view(chat_id,user_id,user_name,call.message.message_id); return
+        elif action_data.startswith('home_buy_'):
+            k=action_data.replace('home_buy_',''); h=PERSONAL_HOUSES.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
+            if not h or econ.get('home') or econ.get('home_installment'): return
+            down=int(h['price']*0.25); remaining=h['price']-down; payment=max(1,remaining//8)
+            if econ['balance']<down: bot.answer_callback_query(call.id,f'Первый взнос: {down:,} 🪙',show_alert=True); return
+            econ['balance']-=down; econ['home_installment']={'id':k,'remaining':remaining,'payment':payment,'next_due':time.time()+2*86400,'down':down}; mark_dirty(); bot.answer_callback_query(call.id,'🏠 Дом оформлен в рассрочку!'); render_personal_home(chat_id,user_id,user_name,call.message.message_id); return
+        elif action_data == 'home_pay':
+            econ=get_user_econ(user_id,user_name,username=user_username); inst=econ.get('home_installment')
+            if not inst: return
+            if time.time()<inst.get('next_due',0): bot.answer_callback_query(call.id,'⏳ Следующий платёж ещё не наступил.',show_alert=True); return
+            pay=min(inst['payment'],inst['remaining'])
+            if econ['balance']<pay: bot.answer_callback_query(call.id,f'Нужно {pay:,} 🪙!',show_alert=True); return
+            econ['balance']-=pay; inst['remaining']-=pay; inst['next_due']=time.time()+2*86400
+            if inst['remaining']<=0: econ['home']={'id':inst['id'],'bought_at':time.time()}; econ['home_installment']=None
+            mark_dirty(); bot.answer_callback_query(call.id,'💳 Платёж внесён!'); render_personal_home(chat_id,user_id,user_name,call.message.message_id); return
+        # МОНОПОЛИЯ
+        elif action_data.startswith('mono_'):
+            gid=action_data.split(':',1)[1] if ':' in action_data else action_data.split('mono_',1)[1]
+            game=active_monopoly.get(gid)
+            if not game: bot.answer_callback_query(call.id,'Игра завершена.',show_alert=True); return
+            uid=user_id
+            if action_data.startswith('mono_join'):
+                if game['started']: return
+                if uid not in game['players'] and len(game['players'])<6: game['players'][uid]={'name':user_name,'money':30000,'pos':0}
+                render_monopoly(chat_id,game,call.message.message_id); bot.answer_callback_query(call.id); return
+            if action_data.startswith('mono_start'):
+                if len(game['players'])<2: bot.answer_callback_query(call.id,'Нужно минимум 2 игрока.',show_alert=True); return
+                game['started']=True; game['turn']=next(iter(game['players'])); render_monopoly(chat_id,game,call.message.message_id); bot.answer_callback_query(call.id,'Игра началась!'); return
+            if not game.get('started') or uid!=game['turn']: bot.answer_callback_query(call.id,'Сейчас не ваш ход.',show_alert=True); return
+            player=game['players'][uid]
+            if action_data.startswith('mono_roll'):
+                roll=random.randint(1,6); player['pos']=(player['pos']+roll)%len(MONOPOLY_BOARD); cell=MONOPOLY_BOARD[player['pos']]; owner=game['owners'].get(player['pos'])
+                msg=f'🎲 Выпало {roll}: <b>{cell[0]}</b>'
+                if owner and owner!=uid:
+                    rent=cell[2]; player['money']-=rent; game['players'][owner]['money']+=rent; msg+=f'\n💸 Аренда: {rent:,} 🪙'
+                bot.answer_callback_query(call.id,msg.replace('<b>','').replace('</b>',''),show_alert=True)
+            elif action_data.startswith('mono_buy'):
+                idx=player['pos']; cell=MONOPOLY_BOARD[idx]
+                if idx==0 or idx in game['owners']: bot.answer_callback_query(call.id,'Эту клетку купить нельзя.',show_alert=True); return
+                if player['money']<cell[1]: bot.answer_callback_query(call.id,'Недостаточно денег.',show_alert=True); return
+                player['money']-=cell[1]; game['owners'][idx]=uid; bot.answer_callback_query(call.id,f'🏠 Куплено: {cell[0]}');
+            elif action_data.startswith('mono_skip'):
+                pass
+            ids=list(game['players']); pos=ids.index(uid); game['turn']=ids[(pos+1)%len(ids)]; render_monopoly(chat_id,game,call.message.message_id); return
 
         # АПТЕКА: КНОПКИ
         elif action_data.startswith('buy_med_'):
@@ -8796,10 +8794,7 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"❌ Недостаточно средств для ставки {bet} 🪙!", show_alert=True)
                 return
 
-            # Ставка списывается только для мультиплеера.
-            if mode_num == 1:
-                bet = 0
-            elif bet > 0:
+            if bet > 0:
                 econ['balance'] -= bet
                 mark_dirty()
 
@@ -9001,14 +8996,14 @@ def callback_inline(call):
 
                 game['status_text'] = win_text
                 text, markup = render_durak_board(game_id, viewer_id=user_id)
-                try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), parse_mode='HTML')
+                try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
                 return
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), reply_markup=markup, parse_mode='HTML')
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
@@ -9019,9 +9014,6 @@ def callback_inline(call):
             game = active_durak.get(game_id)
             if not game: return
             p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
-            if p_idx is None:
-                bot.answer_callback_query(call.id, "❌ Вы не участник этой партии!", show_alert=True)
-                return
             if p_idx != game['defender_idx']:
                 bot.answer_callback_query(call.id, "Только защищающийся может взять карты!", show_alert=True)
                 return
@@ -9042,7 +9034,7 @@ def callback_inline(call):
                 durak_bot_turn(game)
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), reply_markup=markup, parse_mode='HTML')
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
@@ -9051,15 +9043,7 @@ def callback_inline(call):
         elif action_data.startswith('durak_bito_'):
             game_id = action_data.replace('durak_bito_', '')
             game = active_durak.get(game_id)
-            if not game:
-                return
-            p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
-            if p_idx != game.get('attacker_idx'):
-                bot.answer_callback_query(call.id, "❌ Только атакующий может объявить «Бито».", show_alert=True)
-                return
-            if not game.get('table') or not all(pair.get('defend') for pair in game['table']):
-                bot.answer_callback_query(call.id, "❌ Не все карты отбиты!", show_alert=True)
-                return
+            if not game: return
 
             game['table'] = []
             durak_deal_cards(game)
@@ -9071,7 +9055,7 @@ def callback_inline(call):
                 durak_bot_turn(game)
 
             text, markup = render_durak_board(game_id, viewer_id=user_id)
-            try: bot.edit_message_text(text, chat_id=game.get('chat_id', chat_id), message_id=game.get('msg_id', call.message.message_id), reply_markup=markup, parse_mode='HTML')
+            try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             sync_durak_pm(game_id)
             bot.answer_callback_query(call.id)
@@ -9326,14 +9310,16 @@ def callback_inline(call):
             if s_id in GARDEN_SEEDS:
                 seed = GARDEN_SEEDS[s_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ.get('garden'):
-                    bot.answer_callback_query(call.id, "❌ У вас уже растет растение в саду! Сначала соберите его. 😾", show_alert=True)
-                    return
+                slots=econ.get('garden') or []
+                if not isinstance(slots,list): slots=[slots]
+                if len(slots)>=get_garden_capacity(econ):
+                    bot.answer_callback_query(call.id, '❌ Нет свободной грядки!', show_alert=True); return
                 if econ['balance'] < seed['price']:
                     bot.answer_callback_query(call.id, f"❌ Нужно {seed['price']} 🪙! 😿", show_alert=True)
                     return
                 econ['balance'] -= seed['price']
-                econ['garden'] = {'seed': s_id, 'planted_at': time.time(), 'water_count': 0, 'last_dry_calc': time.time()}
+                slots.append({'seed': s_id, 'planted_at': time.time(), 'water_count': 0, 'last_dry_calc': time.time()})
+                econ['garden'] = slots
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🎉 Вы посадили {seed['name']}! Зайдите в /garden 😻", show_alert=True)
                 render_garden_view(chat_id, user_id, user_name, call.message.message_id)
@@ -9997,6 +9983,7 @@ def callback_inline(call):
                 econ['last_work_time'] = now
                 if random.randint(1, 100) <= job['chance']:
                     pay = random.randint(job['min_pay'], job['max_pay'])
+                    pay = int(pay * (1 + pet_bonus(econ, 'work_bonus')))
                     econ['balance'] += pay
                     econ['work_exp'] = econ.get('work_exp', 0) + job['exp_gain']
                     add_account_exp(user_id, user_name, job['exp_gain'], username=user_username)
