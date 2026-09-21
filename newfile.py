@@ -10,10 +10,14 @@ import random
 import re
 import threading
 import time
+import hashlib
+import hmac
+import secrets
+from urllib.parse import parse_qsl
 import telebot
 import psycopg2
 from psycopg2.extras import Json
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo
 from flask import Flask
 
 # ---------------------------------------------------------
@@ -32,6 +36,120 @@ app = Flask('')
 @app.route('/')
 def home():
     return "Nya Bot is alive and running! 😺"
+
+# ---------------------------------------------------------
+# 🐉 DRAGON — TELEGRAM MINI APP
+# ---------------------------------------------------------
+# URL can be set explicitly in Render as DRAGON_WEBAPP_URL. If omitted,
+# Render's public service URL is used automatically.
+DRAGON_WEBAPP_URL = (os.environ.get('DRAGON_WEBAPP_URL', '').strip()
+                     or (os.environ.get('RENDER_EXTERNAL_URL', '').strip().rstrip('/') + '/dragon/'))
+DRAGON_SESSIONS = {}
+DRAGON_SESSIONS_LOCK = threading.Lock()
+DRAGON_MAX_RUN_SECONDS = 10 * 60
+DRAGON_MAX_SCORE_PER_SECOND = 8.0
+DRAGON_MAX_REWARD_PER_RUN = 500
+DRAGON_DAILY_REWARD_CAP = 2000
+
+def _verify_telegram_webapp_init_data(init_data):
+    if not init_data or not TOKEN:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop('hash', None)
+        if not received_hash:
+            return None
+        data_check_string = '\n'.join(f'{k}={pairs[k]}' for k in sorted(pairs))
+        secret_key = hmac.new(b'WebAppData', TOKEN.encode('utf-8'), hashlib.sha256).digest()
+        calculated = hmac.new(secret_key, data_check_string.encode('utf-8'), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calculated, received_hash):
+            return None
+        user_raw = pairs.get('user')
+        if not user_raw:
+            return None
+        user_obj = json.loads(user_raw)
+        uid = int(user_obj['id'])
+        return {'id': uid, 'username': user_obj.get('username'),
+                'name': ((user_obj.get('first_name') or '') + ' ' + (user_obj.get('last_name') or '')).strip()
+                         or user_obj.get('username') or f'ID:{uid}'}
+    except Exception as e:
+        print(f'[DRAGON AUTH] invalid initData: {e}')
+        return None
+
+def _dragon_user_from_request(req):
+    init_data = req.headers.get('X-Telegram-Init-Data') or req.form.get('initData')
+    if not init_data and req.is_json:
+        body = req.get_json(silent=True) or {}
+        init_data = body.get('initData')
+    return _verify_telegram_webapp_init_data(init_data)
+
+@app.route('/dragon/')
+def dragon_page():
+    from flask import Response
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dragon_game', 'index.html')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return Response(f.read(), mimetype='text/html')
+    except FileNotFoundError:
+        return 'Dragon Mini App files are missing.', 500
+
+@app.route('/dragon/<path:filename>')
+def dragon_static(filename):
+    from flask import send_from_directory
+    return send_from_directory(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dragon_game'), filename)
+
+@app.route('/api/dragon/start', methods=['POST'])
+def dragon_start():
+    user = _dragon_user_from_request(__import__('flask').request)
+    if not user:
+        return {'ok': False, 'error': 'auth'}, 401
+    token = secrets.token_urlsafe(24)
+    now = time.time()
+    with DRAGON_SESSIONS_LOCK:
+        DRAGON_SESSIONS[token] = {'user_id': user['id'], 'start': now, 'finished': False}
+        # Cleanup stale sessions.
+        for k, v in list(DRAGON_SESSIONS.items()):
+            if now - v.get('start', now) > DRAGON_MAX_RUN_SECONDS + 120:
+                DRAGON_SESSIONS.pop(k, None)
+    return {'ok': True, 'session': token, 'user': user['name']}
+
+@app.route('/api/dragon/finish', methods=['POST'])
+def dragon_finish():
+    from flask import request
+    user = _dragon_user_from_request(request)
+    if not user:
+        return {'ok': False, 'error': 'auth'}, 401
+    data = request.get_json(silent=True) or {}
+    token = str(data.get('session') or '')
+    try:
+        score = max(0, int(data.get('score', 0)))
+    except (TypeError, ValueError):
+        score = 0
+    now = time.time()
+    with DRAGON_SESSIONS_LOCK:
+        session = DRAGON_SESSIONS.get(token)
+        if not session or session.get('finished') or session.get('user_id') != user['id']:
+            return {'ok': False, 'error': 'session'}, 400
+        session['finished'] = True
+        elapsed = max(1.0, min(now - session['start'], DRAGON_MAX_RUN_SECONDS))
+    plausible_score = int(elapsed * DRAGON_MAX_SCORE_PER_SECOND) + 50
+    score = min(score, plausible_score)
+    reward = min(DRAGON_MAX_REWARD_PER_RUN, score // 10)
+    econ = get_user_econ(user_id=user['id'], user_tag=user['name'], username=user.get('username'))
+    today = now_msk().strftime('%Y-%m-%d')
+    if econ.get('dragon_daily_date') != today:
+        econ['dragon_daily_date'] = today
+        econ['dragon_daily_reward'] = 0
+    remaining = max(0, DRAGON_DAILY_REWARD_CAP - int(econ.get('dragon_daily_reward', 0) or 0))
+    reward = min(reward, remaining)
+    if reward > 0:
+        econ['balance'] += reward
+        econ['dragon_daily_reward'] = int(econ.get('dragon_daily_reward', 0) or 0) + reward
+    econ['dragon_best_score'] = max(int(econ.get('dragon_best_score', 0) or 0), score)
+    econ['dragon_games'] = int(econ.get('dragon_games', 0) or 0) + 1
+    mark_dirty()
+    return {'ok': True, 'score': score, 'reward': reward, 'balance': int(econ.get('balance', 0)),
+            'daily_left': max(0, DRAGON_DAILY_REWARD_CAP - int(econ.get('dragon_daily_reward', 0) or 0))}
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -3560,6 +3678,8 @@ def send_welcome(message):
     if not can_process_user_message(message):
         return
     markup = InlineKeyboardMarkup()
+    if DRAGON_WEBAPP_URL:
+        markup.add(InlineKeyboardButton("🐉 ИГРАТЬ В DRAGON", web_app=WebAppInfo(url=DRAGON_WEBAPP_URL)))
     markup.add(
         InlineKeyboardButton("📚 ЧИТАТЬ ПОЛНЫЙ ГАЙД В TELETYPE 🌐", url="https://teletype.in/@ukrgorilka/Nya")
     )
