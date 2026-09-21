@@ -6053,6 +6053,36 @@ def cmd_profile_settings(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_profile_settings_view(message.chat.id, user_id, user_name)
 
+def _profile_gif_caption(text, max_len=1024):
+    """Подгоняет карточку профиля под лимит caption Telegram для GIF/animation.
+    Сохраняет HTML по целым строкам, чтобы не обрывать теги и не ломать parse_mode=HTML.
+    """
+    text = str(text or '')
+    if len(text) <= max_len:
+        return text
+
+    # Оставляем целые строки и резервируем место под предупреждение об усечении.
+    suffix = '\n<i>…Профиль сокращён в GIF-версии.</i>'
+    budget = max_len - len(suffix)
+    lines = text.split('\n')
+    kept = []
+    used = 0
+    for line in lines:
+        add = len(line) + (1 if kept else 0)
+        if used + add > budget:
+            break
+        kept.append(line)
+        used += add
+
+    if not kept:
+        # Крайний случай: даже первая строка слишком длинная.
+        plain = re.sub(r'<[^>]+>', '', text)
+        plain = html.escape(plain)
+        return plain[:max_len]
+
+    return '\n'.join(kept) + suffix
+
+
 def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
     econ = get_user_econ(user_id, user_tag, username=username)
     theme_key = econ.get('profile_theme', 'default')
@@ -6185,6 +6215,10 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     # Никакого отдельного сообщения с GIF больше не создаём.
     gif_key = econ.get('profile_gif')
     gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
+    # У animation caption лимит Telegram — 1024 символа. Полная карточка
+    # профиля может быть длиннее, поэтому для GIF используем безопасную
+    # HTML-версию, обрезанную только по целым строкам.
+    gif_text = _profile_gif_caption(text) if gif_info else text
 
     if message_id_to_edit:
         # Если GIF активен, сама карточка должна быть animation-сообщением.
@@ -6192,7 +6226,7 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
         # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
         if gif_info:
             try:
-                media = InputMediaAnimation(gif_info['url'], caption=text, parse_mode='HTML')
+                media = InputMediaAnimation(gif_info['url'], caption=gif_text, parse_mode='HTML')
                 bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup)
                 return
             except Exception as media_error:
@@ -6202,7 +6236,7 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
             except Exception:
                 pass
             try:
-                bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
+                bot.send_animation(chat_id, gif_info['url'], caption=gif_text, reply_markup=markup, parse_mode='HTML')
                 return
             except Exception as gif_error:
                 print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
@@ -6227,9 +6261,9 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     if gif_info:
         try:
             if message_to_reply:
-                bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML', reply_to_message_id=message_to_reply.message_id)
+                bot.send_animation(chat_id, gif_info['url'], caption=gif_text, reply_markup=markup, parse_mode='HTML', reply_to_message_id=message_to_reply.message_id)
             else:
-                bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
+                bot.send_animation(chat_id, gif_info['url'], caption=gif_text, reply_markup=markup, parse_mode='HTML')
             return
         except Exception as gif_error:
             print(f"[PROFILE GIF ERROR] {gif_error}")
