@@ -1,6 +1,7 @@
 import ast
 import csv
 import copy
+import functools
 from datetime import datetime, timedelta, timezone
 import html
 import json
@@ -252,6 +253,29 @@ PREMIUM_EMOJI_METADATA_LOADED = False
 PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
 
 
+def _valid_custom_emoji_id(emoji_id):
+    """Telegram custom_emoji_id is a 64-bit signed integer string.
+    Invalid/overflowing IDs must never be sent to Bot API.
+    """
+    try:
+        value = int(str(emoji_id))
+        return 0 < value <= 9223372036854775807
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_premium_markup_error(exc):
+    """Return True only for errors where removing tg-emoji markup is a safe retry.
+    Network/timeouts must not be retried automatically because that can duplicate a message.
+    """
+    code = getattr(exc, 'error_code', None)
+    description = str(getattr(exc, 'description', exc)).lower()
+    return code == 400 and any(token in description for token in (
+        'custom emoji', 'tg-emoji', 'emoji-id', "can't parse entities",
+        'cant parse entities', 'unsupported start tag', 'unsupported tag'
+    ))
+
+
 def load_premium_emoji_metadata():
     """Оставлено для совместимости со старым кодом.
 
@@ -269,7 +293,7 @@ def premium_emoji(name, fallback="✨"):
     """Возвращает Telegram Custom Emoji в HTML-формате с корректным alt."""
     key = PREMIUM_EMOJI_ALIASES.get(name, name)
     emoji_id = PREMIUM_EMOJI_IDS.get(key)
-    if not emoji_id:
+    if not emoji_id or not _valid_custom_emoji_id(emoji_id):
         return fallback
 
     # Метаданные загружаются лениво после создания bot.
@@ -280,7 +304,8 @@ def premium_emoji(name, fallback="✨"):
 def premium_emoji_id(name):
     """Получить raw custom_emoji_id для случаев, где нужен MessageEntity."""
     key = PREMIUM_EMOJI_ALIASES.get(name, name)
-    return PREMIUM_EMOJI_IDS.get(key)
+    emoji_id = PREMIUM_EMOJI_IDS.get(key)
+    return emoji_id if _valid_custom_emoji_id(emoji_id) else None
 
 # Единое оформление всего текстового интерфейса.
 # Кнопки Telegram не поддерживают HTML-теги custom emoji, поэтому здесь
@@ -362,7 +387,11 @@ def apply_global_premium_emojis(text):
 
 
 def _patch_telegram_text_methods():
-    """Безопасно подключает Premium Emoji слой. При отказе Telegram отправляет обычный текст."""
+    """Подключает Premium Emoji слой. Plain-text fallback используется только для ошибок markup.
+
+    Нельзя повторять отправку при сетевых/timeout ошибках: Telegram мог принять исходный запрос,
+    а клиент мог просто не получить ответ.
+    """
     original_send_message = bot.send_message
     original_reply_to = bot.reply_to
     original_edit_text = bot.edit_message_text
@@ -377,90 +406,84 @@ def _patch_telegram_text_methods():
     def send_message(chat_id, text, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
             original_text = text
-            text = _transform(text)
+            transformed = _transform(text)
             try:
-                return original_send_message(chat_id, text, *args, **kwargs)
+                return original_send_message(chat_id, transformed, *args, **kwargs)
             except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] send_message: {premium_error}")
-                return original_send_message(chat_id, original_text, *args, **kwargs)
+                if _is_premium_markup_error(premium_error):
+                    print(f"[PREMIUM EMOJI FALLBACK] send_message: {premium_error}")
+                    return original_send_message(chat_id, original_text, *args, **kwargs)
+                raise
         return original_send_message(chat_id, text, *args, **kwargs)
 
     def reply_to(message, text, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
             original_text = text
-            text = _transform(text)
+            transformed = _transform(text)
             try:
-                return original_reply_to(message, text, *args, **kwargs)
+                return original_reply_to(message, transformed, *args, **kwargs)
             except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] reply_to: {premium_error}")
-                return original_reply_to(message, original_text, *args, **kwargs)
+                if _is_premium_markup_error(premium_error):
+                    print(f"[PREMIUM EMOJI FALLBACK] reply_to: {premium_error}")
+                    return original_reply_to(message, original_text, *args, **kwargs)
+                raise
         return original_reply_to(message, text, *args, **kwargs)
 
     def edit_message_text(text, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
             original_text = text
-            text = _transform(text)
+            transformed = _transform(text)
             try:
-                return original_edit_text(text, *args, **kwargs)
+                return original_edit_text(transformed, *args, **kwargs)
             except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] edit_message_text: {premium_error}")
-                return original_edit_text(original_text, *args, **kwargs)
+                if _is_premium_markup_error(premium_error):
+                    print(f"[PREMIUM EMOJI FALLBACK] edit_message_text: {premium_error}")
+                    return original_edit_text(original_text, *args, **kwargs)
+                raise
         return original_edit_text(text, *args, **kwargs)
 
     def edit_message_caption(*args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML':
-            original_args = args
-            original_caption = kwargs.get('caption')
-            if 'caption' in kwargs:
-                kwargs['caption'] = _transform(kwargs['caption'])
-            elif args:
-                args = list(args)
-                args[0] = _transform(args[0])
+            original_args = tuple(args)
+            original_kwargs = dict(kwargs)
+            call_args = list(args)
+            call_kwargs = dict(kwargs)
+            if 'caption' in call_kwargs:
+                call_kwargs['caption'] = _transform(call_kwargs['caption'])
+            elif len(call_args) >= 1 and call_args[0] is not None:
+                # pyTelegramBotAPI: edit_message_caption(caption, chat_id=None, message_id=None, ...)
+                call_args[0] = _transform(call_args[0])
             try:
-                return original_edit_caption(*args, **kwargs)
+                return original_edit_caption(*call_args, **call_kwargs)
             except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] edit_message_caption: {premium_error}")
-                kwargs['caption'] = original_caption if original_caption is not None else kwargs.get('caption')
-                if original_caption is None and original_args:
-                    original_args = list(original_args)
-                return original_edit_caption(*(original_args if original_caption is None else args), **kwargs)
+                if _is_premium_markup_error(premium_error):
+                    print(f"[PREMIUM EMOJI FALLBACK] edit_message_caption: {premium_error}")
+                    return original_edit_caption(*original_args, **original_kwargs)
+                raise
         return original_edit_caption(*args, **kwargs)
 
-    def send_photo(chat_id, photo, *args, **kwargs):
+    def _media_sender(original, chat_id, media, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
             original_caption = kwargs['caption']
             kwargs['caption'] = _transform(original_caption)
             try:
-                return original_send_photo(chat_id, photo, *args, **kwargs)
+                return original(chat_id, media, *args, **kwargs)
             except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] send_photo: {premium_error}")
-                kwargs['caption'] = original_caption
-                return original_send_photo(chat_id, photo, *args, **kwargs)
-        return original_send_photo(chat_id, photo, *args, **kwargs)
+                if _is_premium_markup_error(premium_error):
+                    print(f"[PREMIUM EMOJI FALLBACK] media sender: {premium_error}")
+                    kwargs['caption'] = original_caption
+                    return original(chat_id, media, *args, **kwargs)
+                raise
+        return original(chat_id, media, *args, **kwargs)
+
+    def send_photo(chat_id, photo, *args, **kwargs):
+        return _media_sender(original_send_photo, chat_id, photo, *args, **kwargs)
 
     def send_animation(chat_id, animation, *args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
-            original_caption = kwargs['caption']
-            kwargs['caption'] = _transform(original_caption)
-            try:
-                return original_send_animation(chat_id, animation, *args, **kwargs)
-            except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] send_animation: {premium_error}")
-                kwargs['caption'] = original_caption
-                return original_send_animation(chat_id, animation, *args, **kwargs)
-        return original_send_animation(chat_id, animation, *args, **kwargs)
+        return _media_sender(original_send_animation, chat_id, animation, *args, **kwargs)
 
     def send_video(chat_id, video, *args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
-            original_caption = kwargs['caption']
-            kwargs['caption'] = _transform(original_caption)
-            try:
-                return original_send_video(chat_id, video, *args, **kwargs)
-            except Exception as premium_error:
-                print(f"[PREMIUM EMOJI FALLBACK] send_video: {premium_error}")
-                kwargs['caption'] = original_caption
-                return original_send_video(chat_id, video, *args, **kwargs)
-        return original_send_video(chat_id, video, *args, **kwargs)
+        return _media_sender(original_send_video, chat_id, video, *args, **kwargs)
 
     bot.send_message = send_message
     bot.reply_to = reply_to
@@ -1228,8 +1251,79 @@ user_flood_history = {}
 user_flood_muted = {}
 # Лимит команд: отдельная история, чтобы старый антиспам не очищал её.
 command_rate_history = {}
+stars_payment_lock = threading.RLock()
 last_chat_activity = {}
 BOT_STARTED_AT = time.time()
+
+
+# ---------------------------------------------------------
+# ЗАЩИТА ОТ ГОНOК / DOUBLE-CLICK / DOUBLE-SPEND
+# ---------------------------------------------------------
+# pyTelegramBotAPI обрабатывает обновления в разных worker-потоках. Поэтому
+# одного cooldown недостаточно: два одинаковых обновления могут одновременно
+# пройти проверку до списания. Действия одного пользователя сериализуются,
+# а callback-и дополнительно защищают общие игровые/рыночные структуры.
+USER_ACTION_LOCKS = {}
+USER_ACTION_LOCKS_GUARD = threading.Lock()
+CALLBACK_STATE_LOCK = threading.RLock()
+STARS_PAYMENT_LOCK = threading.RLock()
+DB_SAVE_LOCK = threading.Lock()
+QUIZ_LOCK = threading.RLock()
+TRANSFER_LOCK = threading.RLock()
+CASINO_LOCK = threading.RLock()
+GUILD_LOCK = threading.RLock()
+SAFE_LOCK = threading.RLock()
+PLAYER_MARKET_LOCK = threading.RLock()
+MEME_LOCK = threading.RLock()
+MARKET_LOCK = threading.RLock()
+
+
+def _get_user_action_lock(user_id):
+    key = int(user_id or 0)
+    with USER_ACTION_LOCKS_GUARD:
+        lock = USER_ACTION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            USER_ACTION_LOCKS[key] = lock
+        return lock
+
+
+def _extract_update_user_id(update):
+    user = getattr(update, 'from_user', None)
+    if user is not None and getattr(user, 'id', None):
+        return int(user.id)
+    msg = getattr(update, 'message', None)
+    user = getattr(msg, 'from_user', None)
+    if user is not None and getattr(user, 'id', None):
+        return int(user.id)
+    return None
+
+
+def serialize_user_action(func):
+    """Serialize registered Telegram handlers per user."""
+    @functools.wraps(func)
+    def wrapped(update, *args, **kwargs):
+        user_id = _extract_update_user_id(update)
+        if user_id is None:
+            return func(update, *args, **kwargs)
+        user_lock = _get_user_action_lock(user_id)
+        is_callback = hasattr(update, 'data') and hasattr(update, 'message') and hasattr(update, 'from_user')
+        if is_callback:
+            with CALLBACK_STATE_LOCK:
+                with user_lock:
+                    return func(update, *args, **kwargs)
+        with user_lock:
+            return func(update, *args, **kwargs)
+    return wrapped
+
+
+def serialize_stars_payment(func):
+    """Successful Stars delivery is processed one-at-a-time for idempotency."""
+    @functools.wraps(func)
+    def wrapped(update, *args, **kwargs):
+        with STARS_PAYMENT_LOCK:
+            return func(update, *args, **kwargs)
+    return wrapped
 # ---------------------------------------------------------
 # БАЗА ДАННЫХ И АТОМАРНЫЕ БЕКАПЫ
 # ---------------------------------------------------------
@@ -1397,6 +1491,10 @@ def mark_dirty():
     db_version += 1
 
 def save_data(send_backup=False):
+    with DB_SAVE_LOCK:
+        return _save_data_locked(send_backup)
+
+def _save_data_locked(send_backup=False):
     global db_dirty
     # PostgreSQL/Neon is the primary store. A local JSON snapshot is kept as a
     # safety fallback, but Telegram channel backups are optional and disabled by default.
@@ -1416,6 +1514,8 @@ def save_data(send_backup=False):
         temp_file = f"{DATA_FILE}.tmp"
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(temp_file, DATA_FILE)
 
         with db_lock:
@@ -1486,12 +1586,17 @@ def track_bot_chat(chat, status='active', touch_activity=True):
     for field, value in [('title', getattr(chat, 'title', None) or 'Без названия'), ('username', getattr(chat, 'username', None)), ('type', getattr(chat, 'type', 'group')), ('status', status)]:
         if item.get(field) != value:
             item[field] = value; changed = True
-    if item.get('last_seen') != now_ts:
-        item['last_seen'] = now_ts; changed = True
+    previous_seen = float(item.get('last_seen', 0) or 0)
+    if now_ts - previous_seen >= 60:
+        item['last_seen'] = now_ts
+        changed = True
     if touch_activity:
+        previous_activity = float(item.get('last_activity', 0) or 0)
         item['last_activity'] = now_ts
         last_chat_activity[int(chat.id)] = now_ts
-        changed = True
+        # Persist activity at most once per minute; the live cache stays exact.
+        if now_ts - previous_activity >= 60:
+            changed = True
     if changed:
         mark_dirty()
     return item
@@ -1569,6 +1674,7 @@ def setup_bot_commands():
         BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
         BotCommand('stars', '⭐️ Звёздный магазин и VIP Pass (Telegram Stars)'),
         BotCommand('profile_settings', '⚙️ Настройки тем, шрифтов и визуала профиля'),
+        BotCommand('custom_title', '🌟 Установить личный кастомный титул'),
         BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
         BotCommand('trash', '🗑 Порыться в мусорке в поисках лута'),
         BotCommand('durak', '🃏 Карточная игра Дурак (36 карт)'),
@@ -1675,9 +1781,13 @@ def get_chat_settings(chat_id):
     return db['settings'][str_chat]
 
 def get_market_data():
+    with MARKET_LOCK:
+        return _get_market_data_locked()
+
+def _get_market_data_locked():
     if 'market' not in db or not db['market']:
         db['market'] = json.loads(json.dumps(MARKET_DEFAULT))
-        save_data()
+        mark_dirty()
 
     market = db['market']
     now = time.time()
@@ -1696,7 +1806,6 @@ def get_market_data():
 
     if changed:
         mark_dirty()
-
     return market
 
 def get_global_user_key(user_id=None, user_tag=None):
@@ -1930,11 +2039,18 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         for tag_candidate in set(target_tags):
             old_tag_key = f"tag_{tag_candidate}"
             if old_tag_key in db['economy'] and old_tag_key != key:
+                old_data = db['economy'].get(old_tag_key)
+                # Never merge an old username/tag account that is already bound
+                # to a different Telegram ID: usernames can be reused.
+                old_owner = old_data.get('user_id') if isinstance(old_data, dict) else None
+                if old_owner not in (None, user_id):
+                    continue
                 old_data = db['economy'].pop(old_tag_key)
                 if key in db['economy']:
                     merge_user_econ_data(db['economy'][key], old_data)
                 else:
                     db['economy'][key] = old_data
+                mark_dirty()
 
     if key not in db['economy']:
         db['economy'][key] = {
@@ -1993,7 +2109,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
         ('daily_casino_profit', 0), ('daily_transferred', 0), ('daily_stats_date', ''),
         ('karma', 0), ('chat_ids', []), ('garden', None), ('garden_capacity', 1), ('pet_clothes', []), ('equipped_pet_clothes', None), ('public_business', None), ('public_business_workers', []), ('employer_salary', None), ('home', None), ('home_installment', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
-        ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""),
+        ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""), ('last_activity_reward_time', 0),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
         ('last_energy_drink_time', 0), ('vip_until', 0), ('vip_forever', False), ('stars_donated', 0), ('is_sheriff', False), ('jail_until', 0), ('disease', None), ('disease_immunity_until', 0), ('bp_exp', 0), ('bp_claimed_free', []), ('bp_claimed_prem', []), ('bp_premium', False), ('last_safe_try', 0), ('guild_id', None), ('season_points', 0), ('season_claimed', False), ('crafted_items', {})
@@ -2071,7 +2187,7 @@ def add_message_stat(user_id, user_tag, username=None):
     m_stats['month_count'] = m_stats.get('month_count', 0) + 1
     m_stats['total_count'] = m_stats.get('total_count', 0) + 1
 
-    add_account_exp(user_id, user_tag, 2, username)
+
 
 def add_coins(user_id=None, user_tag=None, amount=0, username=None):
     user_data = get_user_econ(user_id, user_tag, username)
@@ -2085,25 +2201,26 @@ def check_casino_limits(econ, bet, is_multiplayer=False):
 
 
 def get_chat_safe(chat_id):
-    """Return a safe state isolated per chat."""
-    safe_root = db.setdefault('safe', {})
-    # Backward compatibility: migrate legacy global safe into the current chat once.
-    if 'code' in safe_root or 'pot' in safe_root or 'tried_codes' in safe_root:
-        legacy = safe_root.copy()
-        db['safe'] = {}
-        if chat_id is not None:
-            db['safe'][str(chat_id)] = legacy
-        safe_root = db['safe']
-    key = str(chat_id)
-    safe = safe_root.setdefault(key, {
-        'code': f"{random.randint(0, 9999):04d}",
-        'pot': 30000,
-        'tried_codes': []
-    })
-    safe.setdefault('code', f"{random.randint(0, 9999):04d}")
-    safe.setdefault('pot', 30000)
-    safe.setdefault('tried_codes', [])
-    return safe
+    """Return a safe state isolated per chat and initialize/migrate it atomically."""
+    with SAFE_LOCK:
+        safe_root = db.setdefault('safe', {})
+        # Backward compatibility: migrate legacy global safe into the current chat once.
+        if 'code' in safe_root or 'pot' in safe_root or 'tried_codes' in safe_root:
+            legacy = safe_root.copy()
+            db['safe'] = {}
+            if chat_id is not None:
+                db['safe'][str(chat_id)] = legacy
+            safe_root = db['safe']
+        key = str(chat_id)
+        safe = safe_root.setdefault(key, {
+            'code': f"{random.randint(0, 9999):04d}",
+            'pot': 30000,
+            'tried_codes': []
+        })
+        safe.setdefault('code', f"{random.randint(0, 9999):04d}")
+        safe.setdefault('pot', 30000)
+        safe.setdefault('tried_codes', [])
+        return safe
 
 def add_to_safe_pot(amount, chat_id=None):
     # Если вызывающий код не передал чат, сохраняем старую совместимость через
@@ -2114,6 +2231,34 @@ def add_to_safe_pot(amount, chat_id=None):
     add_amount = max(1, int(amount * 0.5))
     safe['pot'] = safe.get('pot', 30000) + add_amount
     mark_dirty()
+
+def atomic_safe_attempt(chat_id, econ, code_entered, user_id, user_name, username, now_ts):
+    """Atomically consume a safe attempt and resolve win/miss for the shared chat safe."""
+    with SAFE_LOCK:
+        safe = get_chat_safe(chat_id)
+        pot = int(safe.get('pot', 30000) or 0)
+        tried = safe.setdefault('tried_codes', [])
+        left = cooldown_text(econ.get('last_safe_try', 0), 1200, econ)
+        if left:
+            return ('cooldown', left, pot)
+        if code_entered in tried:
+            return ('duplicate', None, pot)
+        econ['last_safe_try'] = now_ts
+        if code_entered == safe.get('code'):
+            won_pot = pot
+            econ['balance'] += won_pot
+            add_account_exp(user_id, user_name, 200, username=username)
+            change_karma(user_id, user_name, 5)
+            safe['code'] = f"{random.randint(0, 9999):04d}"
+            safe['pot'] = 15000
+            safe['tried_codes'] = []
+            mark_dirty()
+            return ('win', won_pot, pot)
+        tried.append(code_entered)
+        add_account_exp(user_id, user_name, 5, username=username)
+        mark_dirty()
+        return ('miss', None, pot)
+
 
 def update_family_house_income(marriage_data):
     if not marriage_data or not isinstance(marriage_data, dict):
@@ -2177,28 +2322,51 @@ def try_infect_user(user_id, user_tag, disease_id=None, chance=0.03):
     return None
 
 def process_casino_bet(bet, chat_id=None):
-    db['casino_pool'] = max(10000, db.get('casino_pool', 1000000) + max(0, bet))
-    add_to_safe_pot(bet, chat_id=chat_id)
-    mark_dirty()
+    bet = int(bet or 0)
+    if bet <= 0:
+        return
+    with CASINO_LOCK:
+        db['casino_pool'] = max(10000, db.get('casino_pool', 1000000) + bet)
+        add_to_safe_pot(bet, chat_id=chat_id)
+        mark_dirty()
 
 def reverse_casino_bet(bet, chat_id=None):
     bet = int(bet or 0)
     if bet <= 0:
         return
-    db['casino_pool'] = max(10000, db.get('casino_pool', 1000000) - bet)
-    if chat_id is not None:
-        safe = get_chat_safe(chat_id)
-        safe['pot'] = max(0, int(safe.get('pot', 0) or 0) - bet)
-    mark_dirty()
+    with CASINO_LOCK:
+        pool = db.get('casino_pool', 1000000)
+        db['casino_pool'] = max(10000, int(pool) - bet)
+        if chat_id is not None:
+            safe = get_chat_safe(chat_id)
+            safe_add = max(1, int(bet * 0.5))
+            safe['pot'] = max(0, int(safe.get('pot', 0) or 0) - safe_add)
+        mark_dirty()
 
 def process_casino_win(win):
     if win <= 0:
         return 0
-    pool = max(10000, db.get('casino_pool', 1000000))
-    actual_win = max(1, min(win, pool))
-    db['casino_pool'] = max(10000, pool - actual_win)
-    mark_dirty()
-    return actual_win
+    with CASINO_LOCK:
+        pool = max(10000, db.get('casino_pool', 1000000))
+        actual_win = max(1, min(int(win), pool))
+        db['casino_pool'] = max(10000, pool - actual_win)
+        mark_dirty()
+        return actual_win
+
+
+
+# Все slash-команды и русские алиасы для единого антифлуда.
+REGISTERED_COMMAND_ALIASES = frozenset(['21', 'achievements', 'activity', 'backpack', 'bail', 'balance', 'ball', 'bank', 'basketball', 'battle_pass', 'biz', 'bj', 'blackjack', 'bowling', 'bp', 'brick', 'business', 'case', 'catch', 'chance', 'chest', 'chromosomes', 'collect', 'collection', 'cook', 'crash', 'crypto', 'csaper', 'daily_heroes', 'darts', 'dashboard', 'detector', 'dick', 'divorce', 'donate', 'durak', 'economystats', 'escape', 'fact_vd', 'family', 'fanfic', 'fap', 'fat', 'findgroup', 'foot', 'football', 'gamestats', 'garage', 'garden', 'gear', 'gift', 'gift_stars', 'give', 'give_gif', 'grant', 'groupinfo', 'groups', 'guild', 'help', 'history', 'home', 'house', 'info', 'inventory', 'iq', 'jail', 'jobs', 'loan', 'lottery', 'market', 'marry', 'meme', 'memes', 'menu', 'miner', 'mines', 'minesweeper', 'monopoly', 'pass', 'pet', 'pet_fight', 'petclothes', 'pharmacy', 'pmarket', 'portfolio', 'profile', 'profile_settings', 'promo', 'raid', 'repay', 'resources', 'rps', 'safe', 'salary', 'season', 'sell', 'set_profile', 'settings', 'sheriff', 'shop', 'stars', 'start', 'stats', 'status', 'story', 'stream', 'tasks', 'top', 'top_daily', 'top_weekly', 'train', 'trash', 'user', 'vd_fact', 'vip', 'walk', 'wheel', 'work', 'world', 'активность', 'аптека', 'ачивки', 'баланс', 'банк', 'баскетбол', 'бизнес', 'бизнесы', 'биржа', 'битвы_питомцев', 'блэкджек', 'бой_питомцев', 'больница', 'боулинг', 'брак', 'вакансии', 'выдать', 'выдать_gif', 'гараж', 'герои_дня', 'гильдия', 'группы', 'гулять', 'дартс', 'депозит', 'детектор', 'дом', 'донат', 'дроч', 'дурак', 'жилье', 'жильё', 'задания', 'залог', 'замер', 'зарплата', 'звезды', 'игрыстат', 'инв', 'инвентарь', 'инвентарь_баффов', 'инфогруппы', 'история', 'история_дня', 'карта', 'квесты', 'кейс', 'кирпич', 'клан', 'колесо', 'коллекция', 'кпз', 'краш', 'кредит', 'крипта', 'кулинария', 'лотерея', 'магазин', 'майнер', 'майнинг', 'мем', 'мемы', 'мины', 'мир', 'монополия', 'мусорка', 'найтигруппу', 'настройки', 'настройки_профиля', 'одежда_питомца', 'опыт', 'панель', 'пасс', 'пенальти',
+ 'пет', 'писюн', 'питомец', 'побег', 'погасить', 'подарить_звезды', 'подарок', 'подарок_звезды', 'подрочить', 'поймать', 'пользователь', 'помойка', 'портфель', 'правда', 'прибыль', 'приготовить', 'продать', 'промо', 'промокод', 'профиль', 'работа', 'развод', 'ракета', 'рейд', 'рейтинг_сезона', 'ресурсы', 'рулетка', 'рынок_игроков', 'рюкзак', 'сад', 'сапер', 'сапер_классик', 'сапёр_классик', 'сезон', 'сейф', 'семья', 'снасти', 'статистика', 'статус', 'стрим', 'сундук', 'топ', 'топ_день', 'топ_неделя', 'тюрьма', 'ударники', 'ферма', 'футбол', 'хеллоуин', 'хромосома', 'хромосомы', 'цуефа', 'чест', 'шанс', 'шар', 'шериф', 'экономика', 'юзер']) | frozenset({'custom_title', 'кастомный_титул'})
+
+
+
+def is_registered_command_text(text):
+    text = str(text or '').strip().lower()
+    if not text:
+        return False
+    token = text.split()[0].split('@', 1)[0].lstrip('/')
+    return token in REGISTERED_COMMAND_ALIASES
 
 def can_process_user_message(message):
     if message and getattr(message, 'chat', None):
@@ -2243,7 +2411,7 @@ def can_process_user_message(message):
     # Настройка действует только в конкретной группе/супергруппе.
     is_private_chat = getattr(message.chat, 'type', '') == 'private'
     text = str(getattr(message, 'text', '') or '').strip()
-    if not is_private_chat and text.startswith('/') and not is_super_admin:
+    if not is_private_chat and is_registered_command_text(text) and not is_super_admin:
         chat_settings = get_chat_settings(message.chat.id)
         is_owner = is_chat_owner(message.chat.id, user_id)
         is_admin_user = is_admin(message.chat.id, user_id)
@@ -2256,7 +2424,7 @@ def can_process_user_message(message):
             now_ts = time.time()
             cmd_hist = [t for t in command_rate_history.get(flood_key, []) if now_ts - t < 3600]
 
-            if len(cmd_hist) >= 5:
+            if len(cmd_hist) > 4:
                 command_rate_history[flood_key] = cmd_hist
                 remaining = max(1, int(3600 - (now_ts - cmd_hist[0])))
                 mins = max(1, (remaining + 59) // 60)
@@ -2800,6 +2968,8 @@ def parse_duration_to_seconds(duration_str, chat_id=None):
             if target_dt < now and not match_date.group(3):
                 target_dt = datetime(year + 1, month, day, 23, 59, 59, tzinfo=MSK_TZ)
             diff = (target_dt - now).total_seconds()
+            if diff <= 0 and match_date.group(3):
+                return -1
             return max(diff, 0)
         except ValueError:
             pass
@@ -2884,12 +3054,14 @@ def rest_manager_worker():
 
 def apply_rest(chat_id, user_name, duration_text, reason='Не указана', target_user_id=None):
     str_chat = str(chat_id)
-    if str_chat not in db['rests']:
-        db['rests'][str_chat] = {}
     clean_user = clean_tag(user_name)
     seconds = parse_duration_to_seconds(duration_text, chat_id)
+    if seconds == -1:
+        return False, None
+    if str_chat not in db['rests']:
+        db['rests'][str_chat] = {}
     is_indefinite = any(marker in duration_text.lower() for marker in ('на неопределённый срок', 'бессрочно', 'навсегда'))
-    end_time = (time.time() + seconds) if seconds else None
+    end_time = (time.time() + seconds) if seconds is not None else None
     display_duration = 'на неопределённый срок' if is_indefinite else duration_text
     rest_key = str(target_user_id) if target_user_id else clean_user
 
@@ -2943,47 +3115,55 @@ def memory_and_debt_worker():
         time.sleep(15)  # Проверка каждые 15 сек для точного таймера лобби
         now = time.time()
         try:
-            # Авто-удаление лобби Дурака через 10 минут (600 секунд) если игра не собралась
-            for d_k in list(active_durak.keys()):
-                d_game = active_durak[d_k]
-                if not d_game.get('started') and (now - d_game.get('start_time', now) > 600):
-                    chat_id_lobby = d_game.get('chat_id')
-                    msg_id_lobby = d_game.get('msg_id')
-                    bet_lobby = d_game.get('bet', 0)
-                    for pl in d_game.get('players', []):
-                        if pl['id'] != 'bot' and bet_lobby > 0:
-                            add_coins(pl['id'], pl.get('name'), bet_lobby)
-                    if chat_id_lobby and msg_id_lobby:
-                        try: bot.delete_message(chat_id_lobby, msg_id_lobby)
-                        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-                    del active_durak[d_k]
+            # Авто-удаление лобби и просроченных игр выполняется под общим callback lock,
+            # чтобы таймер не мог одновременно удалить/вернуть ту же игру, что и callback.
+            with CALLBACK_STATE_LOCK:
+                # Авто-удаление лобби Дурака через 10 минут (600 секунд) если игра не собралась
+                for d_k in list(active_durak.keys()):
+                    d_game = active_durak[d_k]
+                    if not d_game.get('started') and (now - d_game.get('start_time', now) > 600):
+                        chat_id_lobby = d_game.get('chat_id')
+                        msg_id_lobby = d_game.get('msg_id')
+                        bet_lobby = d_game.get('bet', 0)
+                        for pl in d_game.get('players', []):
+                            if pl['id'] != 'bot' and bet_lobby > 0:
+                                add_coins(pl['id'], pl.get('name'), bet_lobby)
+                        if chat_id_lobby and msg_id_lobby:
+                            try: bot.delete_message(chat_id_lobby, msg_id_lobby)
+                            except Exception as e: print(f"[NONFATAL ERROR] {e}")
+                        del active_durak[d_k]
 
-            for dict_ref in [active_crash, active_mines, active_bj_games, active_rps_games, active_brick, active_c_mines, active_durak]:
-                for k in list(dict_ref.keys()):
-                    game_obj = dict_ref[k]
-                    if now - game_obj.get('start_time', now) > 900:
-                        bet_amt = game_obj.get('bet', 0)
-                        if bet_amt > 0 and not game_obj.get('finished', False):
-                            if dict_ref is active_rps_games:
-                                if game_obj.get('p1_id'): add_coins(game_obj['p1_id'], game_obj.get('p1_tag'), bet_amt)
-                                if game_obj.get('p2_id'): add_coins(game_obj['p2_id'], game_obj.get('p2_tag'), bet_amt)
-                            elif dict_ref is active_durak:
-                                for p in game_obj.get('players', []):
-                                    if p.get('id') and p['id'] != 'bot':
-                                        add_coins(p['id'], p.get('name'), bet_amt)
-                            elif game_obj.get('user_id'):
-                                add_coins(game_obj['user_id'], game_obj.get('user_name') or game_obj.get('user_tag'), bet_amt)
-                                if dict_ref is active_crash or dict_ref is active_mines or dict_ref is active_bj_games or dict_ref is active_brick:
-                                    reverse_casino_bet(bet_amt, chat_id=game_obj.get('chat_id'))
-                        del dict_ref[k]
+                for dict_ref in [active_crash, active_mines, active_bj_games, active_rps_games, active_brick, active_c_mines, active_durak]:
+                    for k in list(dict_ref.keys()):
+                        game_obj = dict_ref[k]
+                        if now - game_obj.get('start_time', now) > 900:
+                            bet_amt = game_obj.get('bet', 0)
+                            if bet_amt > 0 and not game_obj.get('finished', False):
+                                if dict_ref is active_rps_games:
+                                    if game_obj.get('p1_id'): add_coins(game_obj['p1_id'], game_obj.get('p1_tag'), bet_amt)
+                                    if game_obj.get('p2_id'): add_coins(game_obj['p2_id'], game_obj.get('p2_tag'), bet_amt)
+                                elif dict_ref is active_durak:
+                                    for p in game_obj.get('players', []):
+                                        if p.get('id') and p['id'] != 'bot':
+                                            add_coins(p['id'], p.get('name'), bet_amt)
+                                elif game_obj.get('user_id'):
+                                    add_coins(game_obj['user_id'], game_obj.get('user_name') or game_obj.get('user_tag'), bet_amt)
+                                    if dict_ref is active_crash or dict_ref is active_mines or dict_ref is active_bj_games or dict_ref is active_brick:
+                                        reverse_casino_bet(bet_amt, chat_id=game_obj.get('chat_id'))
+                            del dict_ref[k]
 
             for k in list(pending_marriages.keys()):
                 if now - pending_marriages[k].get('start_time', now) > 900:
                     del pending_marriages[k]
 
-            for k in list(active_drops.keys()):
-                if now - int(k.split('_')[1]) > 1800:
-                    del active_drops[k]
+            with CALLBACK_STATE_LOCK:
+                for k in list(active_drops.keys()):
+                    try:
+                        drop_ts = int(str(k).split('_')[1])
+                    except (IndexError, ValueError):
+                        drop_ts = 0
+                    if drop_ts and now - drop_ts > 1800:
+                        del active_drops[k]
 
             # Очистка устаревших записей антифлуда (защита от утечки памяти)
             for uid in list(user_flood_muted.keys()):
@@ -2999,25 +3179,26 @@ def memory_and_debt_worker():
                     command_rate_history.pop(key, None)
 
             # Коллекторы по кредитам (исправлено списание депозита)
-            for key, econ in list(db.get('economy', {}).items()):
-                loan = econ.get('loan')
-                if loan and loan.get('amount', 0) > 0 and now > loan.get('due', 0) and not loan.get('defaulted'):
-                    amount = loan['amount']
-                    pocket = econ.get('balance', 0)
-                    bank_dep = econ.get('bank_deposit', 0)
-                    total_funds = pocket + bank_dep
-                    if total_funds >= amount:
-                        from_pocket = min(pocket, amount)
-                        econ['balance'] -= from_pocket
-                        econ['bank_deposit'] = max(0, bank_dep - (amount - from_pocket))
-                        econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
-                    else:
-                        econ['loan']['amount'] = max(0, amount - total_funds)
-                        econ['balance'] = 0
-                        econ['bank_deposit'] = 0
-                        econ['loan']['defaulted'] = True
-                        econ['karma'] = max(-100, econ.get('karma', 0) - 20)
-                    mark_dirty()
+            with TRANSFER_LOCK:
+                for key, econ in list(db.get('economy', {}).items()):
+                    loan = econ.get('loan')
+                    if loan and loan.get('amount', 0) > 0 and now > loan.get('due', 0) and not loan.get('defaulted'):
+                        amount = max(0, int(loan.get('amount', 0) or 0))
+                        pocket = max(0, int(econ.get('balance', 0) or 0))
+                        bank_dep = max(0, int(econ.get('bank_deposit', 0) or 0))
+                        total_funds = pocket + bank_dep
+                        if total_funds >= amount:
+                            from_pocket = min(pocket, amount)
+                            econ['balance'] -= from_pocket
+                            econ['bank_deposit'] = max(0, bank_dep - (amount - from_pocket))
+                            econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
+                        else:
+                            econ['loan']['amount'] = max(0, amount - total_funds)
+                            econ['balance'] = 0
+                            econ['bank_deposit'] = 0
+                            econ['loan']['defaulted'] = True
+                            econ['karma'] = max(-100, econ.get('karma', 0) - 20)
+                        mark_dirty()
         except Exception as e:
             print(f"[MEMORY WORKER ERROR] {e}")
 
@@ -3082,7 +3263,8 @@ def random_chat_drops_worker():
             target_chat = int(random.choice(active_chats))
             reward = random.randint(60, 250)
             drop_id = f"drop_{int(time.time())}_{random.randint(100, 999)}"
-            active_drops[drop_id] = {'chat_id': target_chat, 'reward': reward, 'claimed': False}
+            with CALLBACK_STATE_LOCK:
+                active_drops[drop_id] = {'chat_id': target_chat, 'reward': reward, 'claimed': False}
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🎁 Забрать подарок! 😻", callback_data=f"claim_{drop_id}"))
             msg_text = (
@@ -3105,19 +3287,20 @@ def market_news_worker():
     while True:
         time.sleep(random.randint(7200, 14400))
         try:
-            market = get_market_data()
-            ticker = random.choice(list(market.keys()))
-            asset = market[ticker]
-            template, mode, min_pct, max_pct = random.choice(news_templates)
-            pct = random.uniform(min_pct, max_pct)
-            old_p = asset['price']
-            if mode == 'pump': new_p = round(min(asset.get('max_price', 3500.0), old_p * (1 + pct)), 2)
-            else: new_p = round(max(asset.get('min_price', 1.0), old_p * (1 - pct)), 2)
-            asset['old_price'] = old_p
-            asset['price'] = new_p
-            asset['last_update'] = time.time()
-            mark_dirty()
-            news_text = template.format(name=asset['name']) + f"\n\n📊 Новый курс <b>{ticker}</b>: <b>{new_p:.2f} 🪙</b> (Было: {old_p:.2f} 🪙) 😸"
+            with MARKET_LOCK:
+                market = _get_market_data_locked()
+                ticker = random.choice(list(market.keys()))
+                asset = market[ticker]
+                template, mode, min_pct, max_pct = random.choice(news_templates)
+                pct = random.uniform(min_pct, max_pct)
+                old_p = asset['price']
+                if mode == 'pump': new_p = round(min(asset.get('max_price', 3500.0), old_p * (1 + pct)), 2)
+                else: new_p = round(max(asset.get('min_price', 1.0), old_p * (1 - pct)), 2)
+                asset['old_price'] = old_p
+                asset['price'] = new_p
+                asset['last_update'] = time.time()
+                mark_dirty()
+                news_text = template.format(name=asset['name']) + f"\n\n📊 Новый курс <b>{ticker}</b>: <b>{new_p:.2f} 🪙</b> (Было: {old_p:.2f} 🪙) 😸"
             active_chats = [cid for cid in db.get('settings', {}).keys() if int(cid) < 0]
             for str_chat_id in active_chats:
                 try:
@@ -3147,7 +3330,8 @@ def chat_quiz_worker():
             if not active_chats: continue
             target_chat = int(random.choice(active_chats))
             q_data = random.choice(quiz_questions)
-            current_quiz[target_chat] = {'question': q_data[0], 'answer': q_data[1].lower().strip(), 'reward': q_data[2], 'chat_id': target_chat}
+            with QUIZ_LOCK:
+                current_quiz[target_chat] = {'question': q_data[0], 'answer': q_data[1].lower().strip(), 'reward': q_data[2], 'chat_id': target_chat}
             msg_text = (
                 "⚡️ <b>ЭКСПРЕСС-ВИКТОРИНА В ЧАТЕ!</b> 😺\n"
                 "──────────────────────\n"
@@ -3180,7 +3364,23 @@ def chat_silence_worker():
                     bot.send_message(cid, random.choice(silence_prompts), parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
+BACKGROUND_THREADS_STARTED = False
+BACKGROUND_THREADS_LOCK = threading.Lock()
+
+_background_threads_started = False
+_background_threads_start_lock = threading.Lock()
+
 def start_background_threads():
+    global _background_threads_started
+    with _background_threads_start_lock:
+        if _background_threads_started:
+            return
+        _background_threads_started = True
+    global BACKGROUND_THREADS_STARTED
+    with BACKGROUND_THREADS_LOCK:
+        if BACKGROUND_THREADS_STARTED:
+            return
+        BACKGROUND_THREADS_STARTED = True
     leave_banned_chats()
     threading.Thread(target=vd_facts_worker, daemon=True).start()
     threading.Thread(target=gold_rush_worker, daemon=True).start()
@@ -3198,6 +3398,7 @@ def start_background_threads():
 # ПРИВЕТСТВИЕ И ПРОЩАНИЕ
 # ---------------------------------------------------------
 @bot.my_chat_member_handler()
+@serialize_user_action
 def handle_bot_chat_membership(update):
     try:
         chat = getattr(update, 'chat', None)
@@ -3219,6 +3420,7 @@ def handle_bot_chat_membership(update):
         print(f'[MY CHAT MEMBER ERROR] {e}')
 
 @bot.message_handler(content_types=['new_chat_members'])
+@serialize_user_action
 def welcome_new_members(message):
     if not can_process_user_message(message):
         return
@@ -3247,6 +3449,7 @@ def welcome_new_members(message):
 # ГЛАВНОЕ МЕНЮ И СПРАВОЧНИК
 # ---------------------------------------------------------
 @bot.message_handler(commands=['start', 'help', 'menu', 'info'])
+@serialize_user_action
 def send_welcome(message):
     if not can_process_user_message(message):
         return
@@ -3283,6 +3486,7 @@ def send_welcome(message):
 # ОБРАБОТЧИК ФАКТОВ VIOLENCE DISTRICT
 # ---------------------------------------------------------
 @bot.message_handler(commands=['fact_vd', 'vd_fact'])
+@serialize_user_action
 def cmd_fact_vd(message):
     if not can_process_user_message(message):
         return
@@ -3316,6 +3520,7 @@ TRASH_LOOT = [
 ]
 
 @bot.message_handler(commands=['trash', 'мусорка', 'помойка'])
+@serialize_user_action
 def cmd_trash(message):
     if not can_process_user_message(message):
         return
@@ -3358,6 +3563,7 @@ def cmd_trash(message):
 # ПРОМОКОДЫ (/promo FIX)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['promo', 'промо', 'промокод'])
+@serialize_user_action
 def cmd_promo(message):
     if not can_process_user_message(message):
         return
@@ -3412,6 +3618,7 @@ def cmd_promo(message):
 # ИГРА КИРПИЧ (/brick)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['brick', 'кирпич'])
+@serialize_user_action
 def cmd_brick(message):
     if not can_process_user_message(message):
         return
@@ -3469,16 +3676,22 @@ def cmd_brick(message):
 # ---------------------------------------------------------
 def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, crash_point):
     steps = [1.03, 1.08, 1.15, 1.25, 1.38, 1.55, 1.75, 2.00, 2.35, 2.80, 3.40, 4.20, 5.20, 6.50, 8.00, 10.00]
-    
+
     for mult in steps:
         time.sleep(1.2)
-        game = active_crash.get(game_id)
-        if not game or game.get('cashed_out') or game.get('exploded'):
-            return
+        with CALLBACK_STATE_LOCK:
+            game = active_crash.get(game_id)
+            if not game or game.get('cashed_out') or game.get('exploded'):
+                return
+            if mult >= crash_point:
+                game['exploded'] = True
+                game['finished'] = True
+                should_explode = True
+            else:
+                game['current_mult'] = mult
+                should_explode = False
 
-        if mult >= crash_point:
-            game['exploded'] = True
-            game['finished'] = True
+        if should_explode:
             try:
                 bot.edit_message_text(
                     f"💥 <b>КРАШ! РАКЕТА ВЗОРВАЛАСЬ НА {crash_point:.2f}x!</b> 🙀\n\n"
@@ -3490,10 +3703,10 @@ def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, cra
                 )
             except Exception:
                 pass
-            active_crash.pop(game_id, None)
+            with CALLBACK_STATE_LOCK:
+                active_crash.pop(game_id, None)
             return
 
-        game['current_mult'] = mult
         cashout_amt = int(bet * mult)
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(f"💰 Забрать куш ({cashout_amt} 🪙 | {mult:.2f}x) 😻", callback_data=f"crash_cashout_{game_id}:{user_id}"))
@@ -3520,6 +3733,7 @@ def crash_game_thread(game_id, chat_id, message_id, user_id, user_name, bet, cra
             pass
 
 @bot.message_handler(commands=['crash', 'краш', 'ракета'])
+@serialize_user_action
 def cmd_crash(message):
     if not can_process_user_message(message):
         return
@@ -3665,26 +3879,38 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         sponsor_bonus = random.randint(100, 500) * max(1, stream_level)
         donates += sponsor_bonus
     new_followers = max(1, int(viewers * random.uniform(0.03, 0.10)))
-    old_followers = followers
-    followers += new_followers
-    econ['stream_followers'] = followers
-    econ['stream_streams'] = int(econ.get('stream_streams', 0) or 0) + 1
-    econ['stream_viewers_total'] = int(econ.get('stream_viewers_total', 0) or 0) + viewers
-    econ['stream_donates_total'] = int(econ.get('stream_donates_total', 0) or 0) + donates
     if 'Трэш-ток' in genre.title(): karma_diff = -2
     else: karma_diff = 1
-        
-    change_karma(user_id, user_name, karma_diff)
-    econ['balance'] += donates
-    mark_dirty()
-    
+
+    # This worker runs outside the message handler. Re-read the live account
+    # under the per-user lock so concurrent /work, /bonus, /collect, etc. cannot
+    # overwrite stream earnings/followers with a stale dictionary snapshot.
+    with _get_user_action_lock(user_id):
+        live_econ = get_user_econ(user_id, user_name)
+        live_followers = int(live_econ.get('stream_followers', 0) or 0)
+        live_streams = int(live_econ.get('stream_streams', 0) or 0) + 1
+        live_viewers_total = int(live_econ.get('stream_viewers_total', 0) or 0) + viewers
+        live_donates_total = int(live_econ.get('stream_donates_total', 0) or 0) + donates
+        live_followers += new_followers
+        live_econ['stream_followers'] = live_followers
+        live_econ['stream_streams'] = live_streams
+        live_econ['stream_viewers_total'] = live_viewers_total
+        live_econ['stream_donates_total'] = live_donates_total
+        live_econ['balance'] = max(0, int(live_econ.get('balance', 0) or 0)) + max(0, donates)
+        change_karma(user_id, user_name, karma_diff)
+        mark_dirty()
+
+    followers = live_followers
+    stream_total = live_streams
+    viewers_total = live_viewers_total
+
     k_sign = "+" if karma_diff > 0 else ""
     text += (
         f"\n\n🏁 <b>СТРИМ ЗАВЕРШЕН!</b> 😺\n"
         f"──────────────────────\n"
         f"💸 Заработано донатов: <b>+{donates} 🪙</b> 😻\n"
         f"👥 Новых подписчиков: <b>+{new_followers}</b> (всего {followers})\n"
-        f"📺 Всего стримов: <b>{econ['stream_streams']}</b> | 👁 Просмотров: <b>{econ['stream_viewers_total']}</b>\n"
+        f"📺 Всего стримов: <b>{stream_total}</b> | 👁 Просмотров: <b>{viewers_total}</b>\n"
         f"🏅 Уровень: <b>{stream_title}</b>\n"
         f"⚖️ Влияние на Карму: <b>{k_sign}{karma_diff}</b> 😸"
     )
@@ -3692,6 +3918,7 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['stream', 'стрим'])
+@serialize_user_action
 def cmd_stream(message):
     if not can_process_user_message(message):
         return
@@ -3795,6 +4022,7 @@ def render_public_jobs(chat_id, user_id, user_name, message_id=None):
     else: bot.send_message(chat_id,text,reply_markup=markup,parse_mode='HTML')
 
 @bot.message_handler(commands=['salary','зарплата'])
+@serialize_user_action
 def cmd_public_salary(message):
     if not can_process_user_message(message): return
     uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
@@ -3809,13 +4037,22 @@ def cmd_public_salary(message):
         econ['employer_salary']=None; mark_dirty(); bot.reply_to(message,'❌ Бизнес больше не существует.'); return
     salary=int(pb.get('salary_per_worker',100)*(1+pet_bonus(owner,'business_bonus')))
     profit=max(1,int(salary*0.25))
-    if owner.get('balance',0)<salary:
-        bot.reply_to(message,'⏳ У владельца пока недостаточно средств для выплаты зарплаты.'); return
-    owner['balance']-=salary; econ['balance']+=salary; owner['balance']+=profit
-    es['next_due']=time.time()+3*86400; econ['employer_salary']=es; mark_dirty()
+    with TRANSFER_LOCK:
+        # Повторно получаем записи под общим локом перед переводом денег.
+        owner = get_user_econ(es['owner_id'])
+        pb = owner.get('public_business')
+        if not pb:
+            econ['employer_salary']=None; mark_dirty(); bot.reply_to(message,'❌ Бизнес больше не существует.'); return
+        salary=int(pb.get('salary_per_worker',100)*(1+pet_bonus(owner,'business_bonus')))
+        profit=max(1,int(salary*0.25))
+        if owner.get('balance',0)<salary:
+            bot.reply_to(message,'⏳ У владельца пока недостаточно средств для выплаты зарплаты.'); return
+        owner['balance']-=salary; econ['balance']+=salary; owner['balance']+=profit
+        es['next_due']=time.time()+3*86400; econ['employer_salary']=es; mark_dirty()
     bot.reply_to(message,f'💵 <b>Зарплата получена!</b> +{salary:,} 🪙\n🏢 Владелец получил прибыль +{profit:,} 🪙.',parse_mode='HTML')
 
 @bot.message_handler(commands=['jobs', 'вакансии'])
+@serialize_user_action
 def cmd_public_jobs(message):
     if not can_process_user_message(message): return
     name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
@@ -3896,12 +4133,15 @@ def render_monopoly(chat_id,game,message_id=None):
     else: bot.send_message(chat_id,monopoly_text(game),reply_markup=markup,parse_mode='HTML')
 
 @bot.message_handler(commands=['monopoly','монополия'])
+@serialize_user_action
 def cmd_monopoly(message):
     if not can_process_user_message(message): return
-    gid=f"mono_{message.chat.id}_{int(time.time()*1000)}"
     uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    active_monopoly[gid]={'id':gid,'chat_id':message.chat.id,'started':False,'turn':uid,'players':{uid:{'name':name,'money':30000,'pos':0}},'owners':{}}
-    render_monopoly(message.chat.id,active_monopoly[gid])
+    with CALLBACK_STATE_LOCK:
+        gid=f"mono_{message.chat.id}_{time.time_ns()}"
+        active_monopoly[gid]={'id':gid,'chat_id':message.chat.id,'started':False,'turn':uid,'players':{uid:{'name':name,'money':30000,'pos':0}},'owners':{}}
+        game = active_monopoly[gid]
+    render_monopoly(message.chat.id,game)
 
 # ---------------------------------------------------------
 # САД БОНСАЙ (/garden)
@@ -3939,6 +4179,7 @@ def render_garden_view(chat_id, user_id, user_name, message_id=None):
     else: bot.send_message(chat_id,"\n".join(lines),reply_markup=markup,parse_mode='HTML')
 
 @bot.message_handler(commands=['garden', 'сад'])
+@serialize_user_action
 def cmd_garden(message):
     if not can_process_user_message(message):
         return
@@ -3950,6 +4191,7 @@ def cmd_garden(message):
 # КРЕДИТЫ (НЯ-БАНК)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['loan', 'кредит'])
+@serialize_user_action
 def cmd_loan(message):
     if not can_process_user_message(message):
         return
@@ -3994,6 +4236,7 @@ def cmd_loan(message):
     bot.reply_to(message, f"✅ <b>КРЕДИТ ОДОБРЕН!</b> 😸\n\nВы получили <b>{amount} 🪙</b>.\nВам нужно вернуть <b>{repay_amount} 🪙</b> в течение 24 часов (команда <code>/repay</code>), иначе вмешаются коллекторы! 🙀", parse_mode='HTML')
 
 @bot.message_handler(commands=['repay', 'погасить'])
+@serialize_user_action
 def cmd_repay(message):
     if not can_process_user_message(message):
         return
@@ -4034,105 +4277,129 @@ def process_sport_dice_game(message, game_type, bet):
         bot.reply_to(message, f"❌ Недостаточно средств! У вас: <b>{econ['balance']} 🪙</b> 😿", parse_mode='HTML')
         return
 
-    econ['balance'] -= bet
-    process_casino_bet(bet, chat_id)
+    with _get_user_action_lock(user_id):
+        # Re-read the balance immediately before the external Telegram call.
+        econ = get_user_econ(user_id, user_name, username=user_username)
+        if int(econ.get('balance', 0) or 0) < bet:
+            bot.reply_to(message, f"❌ Недостаточно средств! У вас: <b>{econ.get('balance', 0)} 🪙</b> 😿", parse_mode='HTML')
+            return
+        econ['balance'] -= bet
+        process_casino_bet(bet, chat_id)
 
     emoji_map = {'football': '⚽', 'basketball': '🏀', 'darts': '🎯', 'bowling': '🎳'}
     dice_emoji = emoji_map.get(game_type, '🎲')
-    dice_msg = bot.send_dice(chat_id, emoji=dice_emoji)
-    val = dice_msg.dice.value
+    try:
+        dice_msg = bot.send_dice(chat_id, emoji=dice_emoji)
+        val = dice_msg.dice.value
+    except Exception as e:
+        # The stake was already reserved. Refund it if Telegram could not
+        # create the dice message, otherwise a transient API error becomes a
+        # permanent loss with no game/result.
+        with _get_user_action_lock(user_id):
+            live_econ = get_user_econ(user_id, user_name, username=user_username)
+            live_econ['balance'] = max(0, int(live_econ.get('balance', 0) or 0)) + bet
+            reverse_casino_bet(bet, chat_id)
+            mark_dirty()
+        print(f"[SPORT DICE SEND ERROR] {e}")
+        try:
+            bot.reply_to(message, '❌ Не удалось запустить бросок. Ставка возвращена. 😿', parse_mode='HTML')
+        except Exception:
+            pass
+        return
 
     def resolve_dice_async():
         time.sleep(3.5)
-        try:
-            has_clover = (econ.get('luck_clover_until', 0) > time.time())
-            clover_str = " (🍀 Бонус клевера)" if has_clover else ""
-            result_text = ""
+        with _get_user_action_lock(user_id):
+            try:
+                has_clover = (econ.get('luck_clover_until', 0) > time.time())
+                clover_str = " (🍀 Бонус клевера)" if has_clover else ""
+                result_text = ""
             
-            pool = db.get('casino_pool', 1000000)
-            actual_val = val
-            if pool < bet * 3:
-                actual_val = 1
+                pool = db.get('casino_pool', 1000000)
+                actual_val = val
+                if pool < bet * 3:
+                    actual_val = 1
 
-            if game_type == 'football':
-                if actual_val in [3, 4, 5]:
-                    mult = 1.35 if not has_clover else 1.45
-                    win_amount = int(bet * mult)
-                    win_amount = process_casino_win(win_amount)
-                    econ['balance'] += win_amount
-                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                    result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
-                elif actual_val == 2:
-                    result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b> 🙀\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
-                else:
-                    result_text = f"💨 <b>МИМО ВОРОТ!</b> 😿\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
+                if game_type == 'football':
+                    if actual_val in [3, 4, 5]:
+                        mult = 1.35 if not has_clover else 1.45
+                        win_amount = int(bet * mult)
+                        win_amount = process_casino_win(win_amount)
+                        econ['balance'] += win_amount
+                        econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                        econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                        result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
+                    elif actual_val == 2:
+                        result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b> 🙀\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
+                    else:
+                        result_text = f"💨 <b>МИМО ВОРОТ!</b> 😿\n💸 Мяч улетел на трибуны. Проигрыш <b>{bet} 🪙</b>."
 
-            elif game_type == 'basketball':
-                if actual_val in [4, 5]:
-                    mult = 1.65 if not has_clover else 1.75
-                    win_amount = int(bet * mult)
-                    win_amount = process_casino_win(win_amount)
-                    econ['balance'] += win_amount
-                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                    result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
-                elif actual_val == 3:
-                    result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b> 🙀\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
-                else:
-                    result_text = f"💨 <b>МИМО ЩИТА!</b> 😿\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
+                elif game_type == 'basketball':
+                    if actual_val in [4, 5]:
+                        mult = 1.65 if not has_clover else 1.75
+                        win_amount = int(bet * mult)
+                        win_amount = process_casino_win(win_amount)
+                        econ['balance'] += win_amount
+                        econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                        econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                        result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                    elif actual_val == 3:
+                        result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b> 🙀\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
+                    else:
+                        result_text = f"💨 <b>МИМО ЩИТА!</b> 😿\n💸 Промах мимо корзины. Проигрыш <b>{bet} 🪙</b>."
 
-            elif game_type == 'darts':
-                if actual_val == 6:
-                    mult = 2.5 if not has_clover else 2.8
-                    win_amount = int(bet * mult)
-                    win_amount = process_casino_win(win_amount)
-                    econ['balance'] += win_amount
-                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                    result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 Куш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
-                elif actual_val == 5:
-                    mult = 1.25
-                    win_amount = int(bet * mult)
-                    win_amount = process_casino_win(win_amount)
-                    econ['balance'] += win_amount
-                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                    result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
-                else:
-                    result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
+                elif game_type == 'darts':
+                    if actual_val == 6:
+                        mult = 2.5 if not has_clover else 2.8
+                        win_amount = int(bet * mult)
+                        win_amount = process_casino_win(win_amount)
+                        econ['balance'] += win_amount
+                        econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                        econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                        result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 Куш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                    elif actual_val == 5:
+                        mult = 1.25
+                        win_amount = int(bet * mult)
+                        win_amount = process_casino_win(win_amount)
+                        econ['balance'] += win_amount
+                        econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                        econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                        result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
+                    else:
+                        result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
-            elif game_type == 'bowling':
-                if actual_val == 6:
-                    mult = 2.2 if not has_clover else 2.4
-                    win_amount = int(bet * mult)
-                    win_amount = process_casino_win(win_amount)
-                    econ['balance'] += win_amount
-                    econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
-                    econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                    result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Точный бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
-                elif actual_val in [4, 5]:
-                    win_amount = int(bet * 0.85)
-                    win_amount = process_casino_win(win_amount)
-                    econ['balance'] += win_amount
-                    result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Часть кеглей устояла. 😸\n✅ Кэшбек: <b>+{win_amount} 🪙</b> (x0.85)."
-                else:
-                    result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
+                elif game_type == 'bowling':
+                    if actual_val == 6:
+                        mult = 2.2 if not has_clover else 2.4
+                        win_amount = int(bet * mult)
+                        win_amount = process_casino_win(win_amount)
+                        econ['balance'] += win_amount
+                        econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
+                        econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
+                        result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Точный бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                    elif actual_val in [4, 5]:
+                        win_amount = int(bet * 0.85)
+                        win_amount = process_casino_win(win_amount)
+                        econ['balance'] += win_amount
+                        result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Часть кеглей устояла. 😸\n✅ Кэшбек: <b>+{win_amount} 🪙</b> (x0.85)."
+                    else:
+                        result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
-            add_account_exp(user_id, user_name, 5, username=user_username)
-            check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
-            mark_dirty()
+                add_account_exp(user_id, user_name, 5, username=user_username)
+                check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
+                mark_dirty()
 
-            u_link = make_link(chat_id, user_name, user_id, ping=True)
-            bot.reply_to(message, f"👤 Игрок: {u_link}\n{result_text}\n💰 Баланс: <b>{econ['balance']} Ня-коинов 🪙</b> 😸", parse_mode='HTML')
-        except Exception as e:
-            print(f"[SPORT DICE ERROR] {e}")
+                u_link = make_link(chat_id, user_name, user_id, ping=True)
+                bot.reply_to(message, f"👤 Игрок: {u_link}\n{result_text}\n💰 Баланс: <b>{econ['balance']} Ня-коинов 🪙</b> 😸", parse_mode='HTML')
+            except Exception as e:
+                print(f"[SPORT DICE ERROR] {e}")
 
     th = threading.Thread(target=resolve_dice_async)
     th.daemon = True
     th.start()
 
 @bot.message_handler(commands=['football', 'футбол', 'пенальти'])
+@serialize_user_action
 def cmd_football(message):
     if not can_process_user_message(message):
         return
@@ -4141,6 +4408,7 @@ def cmd_football(message):
     process_sport_dice_game(message, 'football', bet)
 
 @bot.message_handler(commands=['basketball', 'баскетбол'])
+@serialize_user_action
 def cmd_basketball(message):
     if not can_process_user_message(message):
         return
@@ -4149,6 +4417,7 @@ def cmd_basketball(message):
     process_sport_dice_game(message, 'basketball', bet)
 
 @bot.message_handler(commands=['darts', 'дартс'])
+@serialize_user_action
 def cmd_darts(message):
     if not can_process_user_message(message):
         return
@@ -4157,6 +4426,7 @@ def cmd_darts(message):
     process_sport_dice_game(message, 'darts', bet)
 
 @bot.message_handler(commands=['bowling', 'боулинг'])
+@serialize_user_action
 def cmd_bowling(message):
     if not can_process_user_message(message):
         return
@@ -4177,6 +4447,7 @@ BALL_RESPONSES = [
 ]
 
 @bot.message_handler(commands=['ball', 'шар'])
+@serialize_user_action
 def cmd_magic_ball(message):
     if not can_process_user_message(message):
         return
@@ -4188,6 +4459,7 @@ def cmd_magic_ball(message):
     bot.reply_to(message, f"🔮 <b>Вопрос:</b> <i>«{html.escape(q)}»</i>\n\n{ans} 😺", parse_mode='HTML')
 
 @bot.message_handler(commands=['chance', 'шанс'])
+@serialize_user_action
 def cmd_chance(message):
     if not can_process_user_message(message):
         return
@@ -4205,6 +4477,7 @@ def cmd_chance(message):
     bot.reply_to(message, f"📊 <b>АНАЛИЗ ВЕРОЯТНОСТИ СОБЫТИЯ:</b> 😸\n<i>«{html.escape(q)}»</i>\n──────────────────────\nШанс: <b>{pct}%</b> [{bar}]\n💡 Вердикт: <i>{verdict}</i>\n──────────────────────", parse_mode='HTML')
 
 @bot.message_handler(commands=['detector', 'детектор', 'правда'])
+@serialize_user_action
 def cmd_detector(message):
     if not can_process_user_message(message):
         return
@@ -4226,6 +4499,7 @@ def cmd_detector(message):
 # УДАРНИКИ И ГЕРОИ ДНЯ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['daily_heroes', 'герои_дня', 'ударники'])
+@serialize_user_action
 def cmd_daily_heroes(message):
     if not can_process_user_message(message):
         return
@@ -4312,6 +4586,7 @@ def render_backpack_view(chat_id, user_id, user_name, message_id=None):
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['backpack', 'рюкзак', 'инвентарь_баффов'])
+@serialize_user_action
 def cmd_backpack(message):
     if not can_process_user_message(message):
         return
@@ -4322,6 +4597,7 @@ def cmd_backpack(message):
 # КОЛЕСО ФОРТУНЫ (/wheel)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['wheel', 'рулетка', 'колесо'])
+@serialize_user_action
 def cmd_wheel(message):
     if not can_process_user_message(message):
         return
@@ -4438,6 +4714,7 @@ def render_mines_board(game_id):
     return text, markup
 
 @bot.message_handler(commands=['mines', 'мины', 'сапер'])
+@serialize_user_action
 def cmd_mines(message):
     if not can_process_user_message(message):
         return
@@ -4591,6 +4868,7 @@ def render_classic_mines_board(game_id):
     return text, markup
 
 @bot.message_handler(commands=['minesweeper', 'csaper', 'сапер_классик', 'сапёр_классик'])
+@serialize_user_action
 def cmd_classic_mines(message):
     if not can_process_user_message(message):
         return
@@ -4852,6 +5130,7 @@ def render_durak_board(game_id, viewer_id=None):
     return "\n".join(lines), markup
 
 @bot.message_handler(commands=['durak', 'дурак'])
+@serialize_user_action
 def cmd_durak(message):
     if not can_process_user_message(message):
         return
@@ -4894,6 +5173,7 @@ def cmd_durak(message):
 # МЕМНЫЕ СИМУЛЯТОРЫ: ПИСЮН И ФАП
 # ---------------------------------------------------------
 @bot.message_handler(commands=['dick', 'писюн', 'замер'])
+@serialize_user_action
 def cmd_dick(message):
     if not can_process_user_message(message):
         return
@@ -4947,6 +5227,7 @@ def cmd_dick(message):
     )
 
 @bot.message_handler(commands=['fap', 'дроч', 'подрочить'])
+@serialize_user_action
 def cmd_fap(message):
     if not can_process_user_message(message):
         return
@@ -5045,6 +5326,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
         pass
 
 @bot.message_handler(commands=['garage', 'гараж'])
+@serialize_user_action
 def cmd_garage(message):
     if not can_process_user_message(message):
         return
@@ -5056,6 +5338,7 @@ def cmd_garage(message):
 # КУЛИНАРИЯ (/cook)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['cook', 'кулинария', 'приготовить'])
+@serialize_user_action
 def cmd_cook(message):
     if not can_process_user_message(message):
         return
@@ -5147,6 +5430,7 @@ def render_pet_view(chat_id, user_id, user_name, message_id=None):
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['pet', 'питомец', 'пет'])
+@serialize_user_action
 def cmd_pet(message):
     if not can_process_user_message(message):
         return
@@ -5217,6 +5501,7 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
         pass
 
 @bot.message_handler(commands=['walk', 'гулять'])
+@serialize_user_action
 def cmd_walk_pet(message):
     if not can_process_user_message(message):
         return
@@ -5228,6 +5513,7 @@ def cmd_walk_pet(message):
 # МАГАЗИН СНАСТЕЙ (/gear)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['gear', 'снасти'])
+@serialize_user_action
 def cmd_gear(message):
     if not can_process_user_message(message):
         return
@@ -5301,6 +5587,7 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
+@serialize_user_action
 def cmd_business(message):
     if not can_process_user_message(message):
         return
@@ -5309,6 +5596,7 @@ def cmd_business(message):
     render_business_view(message.chat.id, user_id, user_name)
 
 @bot.message_handler(commands=['miner', 'майнер', 'майнинг', 'ферма'])
+@serialize_user_action
 def cmd_miner(message):
     if not can_process_user_message(message):
         return
@@ -5356,6 +5644,7 @@ def cmd_miner(message):
     bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['collect', 'прибыль'])
+@serialize_user_action
 def cmd_collect(message):
     if not can_process_user_message(message):
         return
@@ -5476,6 +5765,7 @@ def render_bank_view(chat_id, user_id, user_name, message_id=None):
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['bank', 'банк', 'депозит'])
+@serialize_user_action
 def cmd_bank(message):
     if not can_process_user_message(message):
         return
@@ -5483,6 +5773,7 @@ def cmd_bank(message):
     render_bank_view(message.chat.id, message.from_user.id, user_name)
 
 @bot.message_handler(commands=['case', 'кейс', 'сундук', 'chest', 'чест'])
+@serialize_user_action
 def cmd_case(message):
     if not can_process_user_message(message):
         return
@@ -5575,6 +5866,7 @@ def render_lottery_view(chat_id, user_id, user_name, message_id=None):
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['lottery', 'лотерея'])
+@serialize_user_action
 def cmd_lottery(message):
     if not can_process_user_message(message):
         return
@@ -5585,6 +5877,7 @@ def cmd_lottery(message):
 # ИСТОРИЯ РЕСТОВ И НАСТРОЙКИ ЧАТА
 # ---------------------------------------------------------
 @bot.message_handler(commands=['history', 'история'])
+@serialize_user_action
 def cmd_history(message):
     if not can_process_user_message(message):
         return
@@ -5652,6 +5945,7 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['settings', 'настройки'])
+@serialize_user_action
 def cmd_settings(message):
     if not can_process_user_message(message):
         return
@@ -5705,7 +5999,53 @@ def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
+@bot.message_handler(commands=['custom_title', 'кастомный_титул'])
+@serialize_user_action
+def cmd_custom_title(message):
+    if not can_process_user_message(message):
+        return
+    user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
+    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+    if not econ.get('has_custom_title_cert'):
+        bot.reply_to(message, '❌ У вас нет сертификата кастомного титула. Его можно получить в разделе <code>/stars</code>.', parse_mode='HTML')
+        return
+
+    parts = (message.text or '').split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        current = econ.get('custom_title')
+        active = econ.get('active_title')
+        current_text = html.escape(str(current)) if current else 'не установлен'
+        active_text = html.escape(str(TITLES.get(active, {}).get('name', active))) if active else 'нет'
+        bot.reply_to(
+            message,
+            f"🌟 <b>КАСТОМНЫЙ ТИТУЛ</b>\n──────────────────────\n"
+            f"Текущий кастомный: <b>{current_text}</b>\n"
+            f"Активный обычный титул: <b>{active_text}</b>\n\n"
+            f"Использование: <code>/custom_title Ваш титул</code>\n"
+            f"Снять кастомный: <code>/custom_title off</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    title = ' '.join(parts[1].split())
+    if title.lower() in {'off', 'none', 'remove', 'снять', 'удалить', '-'}:
+        econ['custom_title'] = None
+        mark_dirty()
+        bot.reply_to(message, '✅ Кастомный титул снят. Вы можете снова надеть обычный титул через настройки профиля.', parse_mode='HTML')
+        return
+    if len(title) < 2 or len(title) > 40:
+        bot.reply_to(message, '❌ Кастомный титул должен содержать от 2 до 40 символов.')
+        return
+
+    econ['custom_title'] = title
+    econ['active_title'] = None
+    mark_dirty()
+    bot.reply_to(message, f"🌟 Кастомный титул установлен: <b>{html.escape(title)}</b>", parse_mode='HTML')
+
+
 @bot.message_handler(commands=['profile_settings', 'set_profile', 'настройки_профиля'])
+@serialize_user_action
 def cmd_profile_settings(message):
     if not can_process_user_message(message):
         return
@@ -5977,7 +6317,7 @@ def stars_item_owned(econ, kind, item_key):
         if t == 'theme':
             return item.get('theme_id') in econ.get('purchased_themes', ['default'])
         if t == 'badge':
-            return item.get('emoji') in econ.get('inventory', [])
+            return item_key in econ.get('paid_stars_items', [])
         if t == 'pet':
             return item_key in econ.get('paid_stars_items', [])
         if t == 'gif':
@@ -6133,6 +6473,7 @@ def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
 # БРАКИ, СЕМЬЯ И ПОДАРКИ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['marry', 'брак'])
+@serialize_user_action
 def cmd_marry(message):
     if not can_process_user_message(message):
         return
@@ -6151,6 +6492,10 @@ def cmd_marry(message):
 
     if not target_user:
         bot.reply_to(message, "❌ Укажите пользователя! 😾\nПример: <code>брак @username</code> или ответом на сообщение.", parse_mode='HTML')
+        return
+
+    if not target_user_id or int(target_user_id) <= 0:
+        bot.reply_to(message, "❌ Не удалось определить Telegram ID соперника. Ответьте на его сообщение или укажите @username. 😾", parse_mode='HTML')
         return
 
     if target_user_id == user_id:
@@ -6209,12 +6554,23 @@ def cmd_marry(message):
     rings = econ.get('rings', [])
     chosen_ring = rings[0] if rings else 'copper'
 
-    prop_id = f"{user_id}_{target_user_id or 0}_{int(time.time())}"
-    pending_marriages[prop_id] = {
-        'from_id': user_id, 'from_tag': user_name,
-        'to_id': target_user_id, 'to_tag': target_user,
-        'ring': chosen_ring, 'start_time': time.time()
-    }
+    prop_id = f"{user_id}_{target_user_id}_{time.time_ns()}"
+    with CALLBACK_STATE_LOCK:
+        # Recheck both sides before storing the proposal. Two parallel proposals
+        # to one target must not be able to create inconsistent marriages later.
+        fresh_from = get_user_econ(user_id, user_name, username=message.from_user.username)
+        fresh_to = get_user_econ(target_user_id, target_user)
+        if fresh_from.get('marriage'):
+            bot.reply_to(message, "❌ Вы уже состоите в браке! 😿")
+            return
+        if fresh_to.get('marriage'):
+            bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> уже состоит в браке! 😿", parse_mode='HTML')
+            return
+        pending_marriages[prop_id] = {
+            'from_id': user_id, 'from_tag': user_name,
+            'to_id': target_user_id, 'to_tag': target_user,
+            'ring': chosen_ring, 'start_time': time.time()
+        }
 
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -6236,6 +6592,7 @@ def cmd_marry(message):
     )
 
 @bot.message_handler(commands=['family', 'семья'])
+@serialize_user_action
 def cmd_family(message):
     if not can_process_user_message(message):
         return
@@ -6271,6 +6628,7 @@ def cmd_family(message):
     bot.reply_to(message, text, parse_mode='HTML')
 
 @bot.message_handler(commands=['gift', 'подарок'])
+@serialize_user_action
 def cmd_gift(message):
     if not can_process_user_message(message):
         return
@@ -6287,15 +6645,19 @@ def cmd_gift(message):
     p_tag = m.get('partner_name')
 
     cost = 100
-    if econ['balance'] < cost:
-        bot.reply_to(message, f"❌ На роскошный букет нужно <b>{cost} 🪙</b>! 😿")
+    if not p_id or int(p_id) < 0:
+        bot.reply_to(message, "❌ Не удалось определить супруга для подарка. Попробуйте открыть /family. 😿")
         return
 
-    econ['balance'] -= cost
-    p_econ = get_user_econ(p_id, p_tag)
-    p_econ['balance'] += 80
-    change_karma(user_id, user_name, 3)
-    mark_dirty()
+    with TRANSFER_LOCK:
+        if int(econ.get('balance', 0) or 0) < cost:
+            bot.reply_to(message, f"❌ На роскошный букет нужно <b>{cost} 🪙</b>! 😿")
+            return
+        econ['balance'] -= cost
+        p_econ = get_user_econ(p_id, p_tag)
+        p_econ['balance'] += 80
+        change_karma(user_id, user_name, 3)
+        mark_dirty()
 
     sender_l = make_link(message.chat.id, user_name, user_id, ping=True)
     partner_l = make_link(message.chat.id, p_tag, p_id, ping=True)
@@ -6309,6 +6671,7 @@ def cmd_gift(message):
     )
 
 @bot.message_handler(commands=['divorce', 'развод'])
+@serialize_user_action
 def cmd_divorce(message):
     if not can_process_user_message(message):
         return
@@ -6320,19 +6683,25 @@ def cmd_divorce(message):
         bot.reply_to(message, "❌ Вы не состоите в браке! 😿")
         return
 
-    m = econ['marriage']
-    p_id = m.get('partner_id')
-    p_tag = m.get('partner_name')
-    p_econ = get_user_econ(p_id, p_tag)
-
-    vault = m.get('vault', 0)
-    split_coins = vault // 2
-    econ['balance'] += split_coins
-    if p_id != 0:
-        p_econ['balance'] += (vault - split_coins)
-        p_econ['marriage'] = None
-    econ['marriage'] = None
-    mark_dirty()
+    with CALLBACK_STATE_LOCK:
+        m = econ.get('marriage')
+        if not m:
+            bot.reply_to(message, "❌ Вы больше не состоите в браке! 😿")
+            return
+        p_id = m.get('partner_id')
+        p_tag = m.get('partner_name')
+        vault = max(0, int(m.get('vault', 0) or 0))
+        split_coins = vault // 2
+        with TRANSFER_LOCK:
+            econ['balance'] = max(0, int(econ.get('balance', 0) or 0)) + split_coins
+            if p_id is not None and int(p_id) >= 0:
+                p_econ = get_user_econ(p_id, p_tag)
+                p_econ['balance'] = max(0, int(p_econ.get('balance', 0) or 0)) + (vault - split_coins)
+                p_marriage = p_econ.get('marriage')
+                if isinstance(p_marriage, dict) and p_marriage.get('partner_id') == user_id:
+                    p_econ['marriage'] = None
+            econ['marriage'] = None
+            mark_dirty()
 
     bot.reply_to(message, f"💔 <b>Брак расторгнут.</b> 😿\nСемейный сейф ({vault} 🪙) разделен поровну между бывшими супругами (+{split_coins} 🪙 каждому).", parse_mode='HTML')
 
@@ -6392,6 +6761,7 @@ def process_bj_game(message, bet):
     )
 
 @bot.message_handler(commands=['bj', 'blackjack', 'блэкджек', '21'])
+@serialize_user_action
 def cmd_bj(message):
     if not can_process_user_message(message):
         return
@@ -6400,6 +6770,7 @@ def cmd_bj(message):
     process_bj_game(message, bet)
 
 @bot.message_handler(commands=['rps', 'цуефа'])
+@serialize_user_action
 def cmd_rps(message):
     if not can_process_user_message(message):
         return
@@ -6427,25 +6798,26 @@ def cmd_rps(message):
         bot.reply_to(message, "❌ Минимальная ставка — 30 Ня-коинов! 😾")
         return
 
-    target_econ = get_user_econ(target_user_id, target_user)
-    if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ У вас недостаточно Ня-коинов! Ваш баланс: {econ['balance']} 🪙 😿")
-        return
-    if target_econ['balance'] < bet:
-        bot.reply_to(message, f"❌ У соперника недостаточно коинов для ставки ({target_econ['balance']} / {bet} 🪙)! 😿")
-        return
-
-    econ['balance'] -= bet
-    target_econ['balance'] -= bet
-    mark_dirty()
-
     game_id = f"rps_{user_id}_{target_user_id}_{time.time_ns()}"
-    active_rps_games[game_id] = {
+    with TRANSFER_LOCK:
+        target_econ = get_user_econ(target_user_id, target_user)
+        my_balance = int(econ.get('balance', 0) or 0)
+        target_balance = int(target_econ.get('balance', 0) or 0)
+        if my_balance < bet:
+            bot.reply_to(message, f"❌ У вас недостаточно Ня-коинов! Ваш баланс: {my_balance} 🪙 😿")
+            return
+        if target_balance < bet:
+            bot.reply_to(message, f"❌ У соперника недостаточно коинов для ставки ({target_balance} / {bet} 🪙)! 😿")
+            return
+        econ['balance'] = my_balance - bet
+        target_econ['balance'] = target_balance - bet
+        active_rps_games[game_id] = {
         'p1_id': user_id, 'p1_tag': user_name,
         'p2_id': target_user_id, 'p2_tag': target_user,
-        'bet': bet, 'p1_choice': None, 'p2_choice': None,
-        'start_time': time.time(), 'finished': False
-    }
+            'bet': bet, 'p1_choice': None, 'p2_choice': None,
+            'start_time': time.time(), 'finished': False
+        }
+        mark_dirty()
 
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -6468,6 +6840,7 @@ def cmd_rps(message):
 # КРИПТО-БИРЖА И ТОРГОВЛЯ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['market', 'биржа', 'crypto', 'крипта'])
+@serialize_user_action
 def cmd_market(message):
     if not can_process_user_message(message):
         return
@@ -6490,6 +6863,7 @@ def cmd_market(message):
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
 @bot.message_handler(commands=['portfolio', 'портфель'])
+@serialize_user_action
 def cmd_portfolio(message):
     if not can_process_user_message(message):
         return
@@ -6600,6 +6974,7 @@ def train_work_exp(user_id, user_tag, username=None):
     return True, f"🎓 Вы усердно позанимались! 😸\nПолучено: <b>+{gain} EXP</b> опыта работы (Всего: <b>{econ['work_exp']} EXP</b>)."
 
 @bot.message_handler(commands=['work', 'работа'])
+@serialize_user_action
 def cmd_work(message):
     if not can_process_user_message(message):
         return
@@ -6626,6 +7001,7 @@ def cmd_work(message):
     bot.reply_to(message, "\n".join(lines), reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['train', 'опыт'])
+@serialize_user_action
 def cmd_train(message):
     if not can_process_user_message(message):
         return
@@ -6635,6 +7011,7 @@ def cmd_train(message):
     bot.reply_to(message, text_resp, parse_mode='HTML')
 
 @bot.message_handler(commands=['sell', 'продать'])
+@serialize_user_action
 def cmd_sell(message):
     if not can_process_user_message(message):
         return
@@ -6675,6 +7052,7 @@ def cmd_sell(message):
     bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned} Ня-коинов 🪙</b>{rush_note}! 😻\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
 
 @bot.message_handler(commands=['profile', 'профиль'])
+@serialize_user_action
 def cmd_profile(message):
     if not can_process_user_message(message):
         return
@@ -6682,6 +7060,7 @@ def cmd_profile(message):
     send_user_profile(message.chat.id, user_name, message.from_user.id, message_to_reply=message, username=message.from_user.username)
 
 @bot.message_handler(commands=['achievements', 'ачивки'])
+@serialize_user_action
 def cmd_achievements(message):
     if not can_process_user_message(message):
         return
@@ -6699,6 +7078,7 @@ def cmd_achievements(message):
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
 @bot.message_handler(commands=['balance', 'баланс'])
+@serialize_user_action
 def cmd_balance(message):
     if not can_process_user_message(message):
         return
@@ -6709,6 +7089,7 @@ def cmd_balance(message):
 
 
 @bot.message_handler(commands=['stars', 'donate', 'vip', 'донат', 'звезды', 'пасс'])
+@serialize_user_action
 def cmd_stars(message):
     if not can_process_user_message(message):
         return
@@ -6718,6 +7099,7 @@ def cmd_stars(message):
 
 
 @bot.message_handler(commands=['inventory','инвентарь','инв'])
+@serialize_user_action
 def cmd_inventory(message):
     if not can_process_user_message(message): return
     uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
@@ -6727,6 +7109,7 @@ def cmd_inventory(message):
     bot.reply_to(message,'\n'.join(lines),parse_mode='HTML')
 
 @bot.message_handler(commands=['shop', 'магазин'])
+@serialize_user_action
 def cmd_shop(message):
     if not can_process_user_message(message):
         return
@@ -6734,6 +7117,7 @@ def cmd_shop(message):
     send_shop_menu(message.chat.id, message.from_user.id, user_name)
 
 @bot.message_handler(commands=['tasks', 'задания', 'квесты'])
+@serialize_user_action
 def cmd_tasks(message):
     if not can_process_user_message(message):
         return
@@ -6744,6 +7128,7 @@ def cmd_tasks(message):
 # БИОМЕТРИЯ: IQ, ЖИР, ПЯТКА, ХРОМОСОМЫ
 # ---------------------------------------------------------
 @bot.message_handler(commands=['iq'])
+@serialize_user_action
 def cmd_iq(message):
     if not can_process_user_message(message):
         return
@@ -6769,6 +7154,7 @@ def cmd_iq(message):
     for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
 
 @bot.message_handler(commands=['fat'])
+@serialize_user_action
 def cmd_fat(message):
     if not can_process_user_message(message):
         return
@@ -6794,6 +7180,7 @@ def cmd_fat(message):
     for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
 
 @bot.message_handler(commands=['foot'])
+@serialize_user_action
 def cmd_foot(message):
     if not can_process_user_message(message):
         return
@@ -6817,6 +7204,7 @@ def cmd_foot(message):
     bot.reply_to(message, f"🦶 {make_link(chat_id, user_name, user_id, ping=True)}, размер пятки: <b>{econ['foot_size']} см ({sign}{change} см) 🦶</b> 😺", parse_mode='HTML')
 
 @bot.message_handler(commands=['chromosomes', 'хромосомы', 'хромосома'])
+@serialize_user_action
 def cmd_chromosomes(message):
     if not can_process_user_message(message):
         return
@@ -6945,14 +7333,17 @@ def render_activity_leaderboard(chat_id, period='day'):
     bot.send_message(chat_id,'\n'.join(lines),parse_mode='HTML')
 
 @bot.message_handler(commands=['top_daily','топ_день'])
+@serialize_user_action
 def cmd_top_daily(message):
     if can_process_user_message(message): render_activity_leaderboard(message.chat.id,'day')
 
 @bot.message_handler(commands=['top_weekly','топ_неделя'])
+@serialize_user_action
 def cmd_top_weekly(message):
     if can_process_user_message(message): render_activity_leaderboard(message.chat.id,'week')
 
 @bot.message_handler(commands=['top', 'топ'])
+@serialize_user_action
 def cmd_top(message):
     if not can_process_user_message(message):
         return
@@ -6966,6 +7357,7 @@ def cmd_top(message):
 # ИГРА СЕЙФ (ВЗЛОМ 4-ЗНАЧНОГО ШИФРА)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['safe', 'сейф'])
+@serialize_user_action
 def cmd_safe(message):
     if not can_process_user_message(message):
         return
@@ -7005,34 +7397,19 @@ def cmd_safe(message):
         return
 
     now = time.time()
-    last_try = econ.get('last_safe_try', 0)
-    cooldown = 1200
-    left = cooldown_text(last_try, cooldown, econ)
-    if left:
-        bot.reply_to(message, f"⏳ Руки дрожат от отмычек! Следующая попытка через: <b>{left}</b>. 😿", parse_mode='HTML')
-        return
-
-    if code_entered in tried:
-        bot.reply_to(message, f"❌ <b>Этот код уже писали!</b> Комбинацию <code>{code_entered}</code> уже кто-то вводил, и она оказалась неверной. Попробуйте другой код! 😿\n💰 В сейфе: <b>{pot:,} 🪙</b>", parse_mode='HTML')
-        return
-
-    econ['last_safe_try'] = now
     u_link = make_link(chat_id, user_name, user_id, ping=True)
-
-    if code_entered == safe.get('code'):
-        won_pot = pot
-        econ['balance'] += won_pot
-        add_account_exp(user_id, user_name, 200, username=message.from_user.username)
-        change_karma(user_id, user_name, 5)
-
-        new_code = f"{random.randint(0, 9999):04d}"
-        safe['code'] = new_code
-        safe['pot'] = 15000
-        safe['tried_codes'] = []
-        mark_dirty()
-
+    result, value, pot_after = atomic_safe_attempt(
+        chat_id, econ, code_entered, user_id, user_name, message.from_user.username, now
+    )
+    if result == 'cooldown':
+        bot.reply_to(message, f"⏳ Руки дрожат от отмычек! Следующая попытка через: <b>{value}</b>. 😿", parse_mode='HTML')
+        return
+    if result == 'duplicate':
+        bot.reply_to(message, f"❌ <b>Этот код уже писали!</b> Комбинацию <code>{code_entered}</code> уже кто-то вводил, и она оказалась неверной. Попробуйте другой код! 😿\n💰 В сейфе: <b>{pot_after:,} 🪙</b>", parse_mode='HTML')
+        return
+    if result == 'win':
+        won_pot = int(value or 0)
         log_event('СЕЙФ ВЗЛОМАН', f'Игрок {u_link} подобрал шифр <b>{code_entered}</b> и сорвал джекпот <b>{won_pot:,} 🪙</b>!')
-
         win_msg = (
             f"🎉💥🔓 <b>СЕЙФ УСПЕШНО ВЗЛОМАН!</b> 😻\n"
             f"──────────────────────\n"
@@ -7044,18 +7421,17 @@ def cmd_safe(message):
             f"<i>Замки заменены на новые, в сейф заложен стартовый фонд 15,000 🪙! Охота продолжается!</i> 😸"
         )
         bot.send_message(chat_id, win_msg, parse_mode='HTML')
-    else:
-        tried.append(code_entered)
-        add_account_exp(user_id, user_name, 5, username=message.from_user.username)
-        mark_dirty()
-        bot.reply_to(
-            message,
-            f"❌ <b>Щёлк! Код {code_entered} не подошёл!</b> 😿\n"
-            f"Этот код добавлен в список неудачных попыток.\n"
-            f"💰 Текущий банк сейфа: <b>{pot:,} Ня-коинов 🪙</b> (ждёт своего победителя!)\n"
-            f"⏳ Повторная попытка доступна через 20 минут.",
-            parse_mode='HTML'
-        )
+        return
+
+    bot.reply_to(
+        message,
+        f"❌ <b>Щёлк! Код {code_entered} не подошёл!</b> 😿\n"
+        f"Этот код добавлен в список неудачных попыток.\n"
+        f"💰 Текущий банк сейфа: <b>{pot_after:,} 🪙</b> (ждёт своего победителя!)\n"
+        f"⏳ Повторная попытка доступна через 20 минут.",
+        parse_mode='HTML'
+    )
+
 
 # ---------------------------------------------------------
 # СЕМЕЙНЫЙ ДОМ И ОБУСТРОЙСТВО (/house, /дом)
@@ -7128,18 +7504,21 @@ def render_house_view(chat_id, user_id, user_name, message_id=None):
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['home','жильё','жилье'])
+@serialize_user_action
 def cmd_personal_home(message):
     if not can_process_user_message(message): return
     name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_personal_home(message.chat.id,message.from_user.id,name)
 
 @bot.message_handler(commands=['petclothes','одежда_питомца'])
+@serialize_user_action
 def cmd_pet_clothes(message):
     if not can_process_user_message(message): return
     name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_pet_clothes(message.chat.id,message.from_user.id,name)
 
 @bot.message_handler(commands=['house', 'дом'])
+@serialize_user_action
 def cmd_house(message):
     if not can_process_user_message(message):
         return
@@ -7155,6 +7534,7 @@ def cmd_house(message):
 # КРИМИНАЛ И ПОЛИЦИЯ ЧАТА (ШЕРИФ, РОЗЫСК, КПЗ, ПОБЕГ, ЗАЛОГ)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['sheriff', 'шериф'])
+@serialize_user_action
 def cmd_sheriff(message):
     if not can_process_user_message(message):
         return
@@ -7190,6 +7570,7 @@ def cmd_sheriff(message):
     )
 
 @bot.message_handler(commands=['catch', 'поймать'])
+@serialize_user_action
 def cmd_catch(message):
     if not can_process_user_message(message):
         return
@@ -7220,51 +7601,51 @@ def cmd_catch(message):
         return
 
     now = time.time()
-    wanted_info = active_wanted.get((chat_id, target_user_id))
-    if not wanted_info or wanted_info.get('expire', 0) < now:
-        bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> сейчас не находится в оперативном розыске! 😾", parse_mode='HTML')
-        return
-
-    t_econ = get_user_econ(target_user_id, target_user)
     u_link = make_link(chat_id, user_name, user_id, ping=True)
     t_link = make_link(chat_id, target_user, target_user_id, ping=True)
 
-    # Шанс задержания 75%
-    if random.random() < 0.75:
-        fine = min(t_econ.get('balance', 0), 200)
-        t_econ['balance'] = max(0, t_econ.get('balance', 0) - fine)
-        t_econ['jail_until'] = now + 900  # 15 минут КПЗ
+    # Шанс задержания 75%. The wanted entry is consumed atomically so two
+    # different sheriffs cannot both receive the reward for one fugitive.
+    with CALLBACK_STATE_LOCK:
+        wanted_info = active_wanted.get((chat_id, target_user_id))
+        if not wanted_info or wanted_info.get('expire', 0) < now:
+            bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> сейчас не находится в оперативном розыске! 😾", parse_mode='HTML')
+            return
+        t_econ = get_user_econ(target_user_id, target_user)
+        if random.random() < 0.75:
+            with TRANSFER_LOCK:
+                fine = min(max(0, int(t_econ.get('balance', 0) or 0)), 200)
+                t_econ['balance'] = max(0, int(t_econ.get('balance', 0) or 0) - fine)
+                t_econ['jail_until'] = now + 900
+                reward = 250
+                econ['balance'] = max(0, int(econ.get('balance', 0) or 0)) + reward
+                active_wanted.pop((chat_id, target_user_id), None)
+                add_account_exp(user_id, user_name, 35, username=message.from_user.username)
+                change_karma(user_id, user_name, 3)
+                mark_dirty()
 
-        reward = 250
-        econ['balance'] += reward
-        add_account_exp(user_id, user_name, 35, username=message.from_user.username)
-        change_karma(user_id, user_name, 3)
-
-        active_wanted.pop((chat_id, target_user_id), None)
-        mark_dirty()
-
-        log_event('ПОЛИЦИЯ: АРЕСТ', f'Шериф {u_link} задержал вора {t_link}! Вор отправлен в КПЗ на 15 мин.')
-
-        bot.send_message(
-            chat_id,
-            f"🚨🚔 <b>ГРАБИТЕЛЬ ОБЕЗВРЕЖЕН И ЗАДЕРЖАН!</b> 👮‍♂️\n"
-            f"──────────────────────\n"
-            f"Шериф {u_link} мастерски скрутил вора {t_link}! 💥\n"
-            f"⚖️ С вора списан штраф: <b>-{fine} 🪙</b>\n"
-            f"🔒 Вор отправлен в КПЗ на <b>15 минут</b> (команды заработка заблокированы)!\n"
-            f"💰 Награда шерифу за службу: <b>+{reward} 🪙</b> (+35 EXP, +3 Кармы)! 😻\n"
-            f"──────────────────────",
-            parse_mode='HTML'
-        )
-    else:
-        bot.send_message(
-            chat_id,
-            f"💨 <b>ОПЕРАЦИЯ ПРОВАЛЕНА!</b> 🙀\n\n"
-            f"Вор {t_link} бросил дымовую шашку под ноги шерифу {u_link} и ловко скрылся во дворах! Погоня продолжается!",
-            parse_mode='HTML'
-        )
+            log_event('ПОЛИЦИЯ: АРЕСТ', f'Шериф {u_link} задержал вора {t_link}! Вор отправлен в КПЗ на 15 мин.')
+            bot.send_message(
+                chat_id,
+                f"🚨🚔 <b>ГРАБИТЕЛЬ ОБЕЗВРЕЖЕН И ЗАДЕРЖАН!</b> 👮‍♂️\n"
+                f"──────────────────────\n"
+                f"Шериф {u_link} мастерски скрутил вора {t_link}! 💥\n"
+                f"⚖️ С вора списан штраф: <b>-{fine} 🪙</b>\n"
+                f"🔒 Вор отправлен в КПЗ на <b>15 минут</b> (команды заработка заблокированы)!\n"
+                f"💰 Награда шерифу за службу: <b>+{reward} 🪙</b> (+35 EXP, +3 Кармы)! 😻\n"
+                f"──────────────────────",
+                parse_mode='HTML'
+            )
+        else:
+            bot.send_message(
+                chat_id,
+                f"💨 <b>ОПЕРАЦИЯ ПРОВАЛЕНА!</b> 🙀\n\n"
+                f"Вор {t_link} бросил дымовую шашку под ноги шерифу {u_link} и ловко скрылся во дворах! Погоня продолжается!",
+                parse_mode='HTML'
+            )
 
 @bot.message_handler(commands=['jail', 'кпз', 'тюрьма'])
+@serialize_user_action
 def cmd_jail(message):
     if not can_process_user_message(message):
         return
@@ -7292,6 +7673,7 @@ def cmd_jail(message):
     bot.reply_to(message, text, parse_mode='HTML')
 
 @bot.message_handler(commands=['escape', 'побег'])
+@serialize_user_action
 def cmd_escape(message):
     if not can_process_user_message(message):
         return
@@ -7326,6 +7708,7 @@ def cmd_escape(message):
         )
 
 @bot.message_handler(commands=['bail', 'залог'])
+@serialize_user_action
 def cmd_bail(message):
     if not can_process_user_message(message):
         return
@@ -7348,15 +7731,18 @@ def cmd_bail(message):
         return
 
     bail_cost = 300
-    if econ['balance'] < bail_cost:
-        bot.reply_to(message, f"❌ На внесение залога нужно <b>{bail_cost} 🪙</b>! У вас: {econ['balance']} 🪙. 😿", parse_mode='HTML')
-        return
-
-    econ['balance'] -= bail_cost
-    t_econ = get_user_econ(target_user_id, target_user)
-    t_econ['jail_until'] = 0
-    change_karma(user_id, user_name, 2)
-    mark_dirty()
+    with TRANSFER_LOCK:
+        if int(econ.get('balance', 0) or 0) < bail_cost:
+            bot.reply_to(message, f"❌ На внесение залога нужно <b>{bail_cost} 🪙</b>! У вас: {econ.get('balance', 0)} 🪙. 😿", parse_mode='HTML')
+            return
+        t_econ = get_user_econ(target_user_id, target_user)
+        if t_econ.get('jail_until', 0) <= time.time():
+            bot.reply_to(message, f"❌ Пользователь <b>{html.escape(target_user)}</b> уже вышел из КПЗ! 😸", parse_mode='HTML')
+            return
+        econ['balance'] -= bail_cost
+        t_econ['jail_until'] = 0
+        change_karma(user_id, user_name, 2)
+        mark_dirty()
 
     u_link = make_link(chat_id, user_name, user_id, ping=True)
     t_link = make_link(chat_id, target_user, target_user_id, ping=True)
@@ -7371,6 +7757,7 @@ def cmd_bail(message):
 # ПОДПОЛЬНЫЕ БОИ ПИТОМЦЕВ (/pet_fight, /бой)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['pet_fight', 'бой_питомцев', 'битвы_питомцев'])
+@serialize_user_action
 def cmd_pet_fight(message):
     if not can_process_user_message(message):
         return
@@ -7413,16 +7800,17 @@ def cmd_pet_fight(message):
         bot.reply_to(message, "❌ Минимальная ставка — 30 Ня-коинов! 😾", parse_mode='HTML')
         return
 
-    if econ['balance'] < bet:
-        bot.reply_to(message, f"❌ У вас недостаточно коинов! Ваш баланс: {econ['balance']} 🪙. 😿", parse_mode='HTML')
-        return
-    if t_econ['balance'] < bet:
-        bot.reply_to(message, f"❌ У соперника недостаточно коинов ({t_econ['balance']}/{bet} 🪙)! 😿", parse_mode='HTML')
-        return
-
-    econ['balance'] -= bet
-    t_econ['balance'] -= bet
-    mark_dirty()
+    with TRANSFER_LOCK:
+        my_balance = int(econ.get('balance', 0) or 0)
+        opp_balance = int(t_econ.get('balance', 0) or 0)
+        if my_balance < bet:
+            bot.reply_to(message, f"❌ У вас недостаточно коинов! Ваш баланс: {my_balance} 🪙. 😿", parse_mode='HTML')
+            return
+        if opp_balance < bet:
+            bot.reply_to(message, f"❌ У соперника недостаточно коинов ({opp_balance}/{bet} 🪙)! 😿", parse_mode='HTML')
+            return
+        econ['balance'] = my_balance - bet
+        t_econ['balance'] = opp_balance - bet
 
     # Расчет боевой мощи
     p1_pow = pet1.get('power', 15) + (pet1.get('pet_exp', 0) // 20) + random.randint(1, 15)
@@ -7454,12 +7842,13 @@ def cmd_pet_fight(message):
         rounds_log.append(f"3️⃣ 🔥 <b>УЛЬТИМЕЙТ!</b> {pet2['name']} проводит решающий коронный приём!")
 
     total_pot = int(bet * 2 * 0.95)
-    w_econ = get_user_econ(winner_id, winner_name)
-    w_econ['balance'] += total_pot
-    win_pet['pet_exp'] = win_pet.get('pet_exp', 0) + 40
-    win_pet['fights_won'] = win_pet.get('fights_won', 0) + 1
-    loser_pet['pet_exp'] = loser_pet.get('pet_exp', 0) + 15
-    mark_dirty()
+    with TRANSFER_LOCK:
+        w_econ = get_user_econ(winner_id, winner_name)
+        w_econ['balance'] += total_pot
+        win_pet['pet_exp'] = win_pet.get('pet_exp', 0) + 40
+        win_pet['fights_won'] = win_pet.get('fights_won', 0) + 1
+        loser_pet['pet_exp'] = loser_pet.get('pet_exp', 0) + 15
+        mark_dirty()
 
     w_link = make_link(chat_id, winner_name, winner_id, ping=True)
     rounds_log.append("──────────────────────")
@@ -7476,6 +7865,10 @@ def cmd_pet_fight(message):
 # ---------------------------------------------------------
 def finalize_meme_contests(current_date=None):
     current_date = current_date or daily_task_date()
+    with MEME_LOCK:
+        return _finalize_meme_contests_locked(current_date)
+
+def _finalize_meme_contests_locked(current_date):
     memes = db.setdefault('daily_memes', [])
     winners = db.setdefault('meme_winners', [])
     changed = False
@@ -7504,6 +7897,10 @@ def finalize_meme_contests(current_date=None):
     if changed: mark_dirty()
 
 def record_meme_vote(meme_id, user_id, is_like):
+    with MEME_LOCK:
+        return _record_meme_vote_locked(meme_id, user_id, is_like)
+
+def _record_meme_vote_locked(meme_id, user_id, is_like):
     meme = active_memes.get(meme_id)
     if not meme: return False, 'Мем устарел!'
     if user_id == meme.get('author_id'): return False, 'Автор не может голосовать за свой мем!'
@@ -7522,6 +7919,7 @@ def record_meme_vote(meme_id, user_id, is_like):
     return True, 'Ваш голос учтён! 😸'
 
 @bot.message_handler(commands=['memes', 'мемы'])
+@serialize_user_action
 def cmd_memes(message):
     if not can_process_user_message(message): return
     finalize_meme_contests()
@@ -7538,6 +7936,7 @@ def cmd_memes(message):
     bot.reply_to(message,'\n'.join(lines),parse_mode='HTML')
 
 @bot.message_handler(commands=['meme', 'мем'])
+@serialize_user_action
 def cmd_meme(message):
     if not can_process_user_message(message):
         return
@@ -7562,8 +7961,9 @@ def cmd_meme(message):
     caption_text = f"🎭 <b>МЕМ ЧАТА</b> | Автор: {u_link}\n<i>Голосуйте реакциями ниже! Автор лучшего мема дня получит 1,500 🪙!</i> 😸"
 
     meme_entry = {'meme_id': meme_id, 'author_id': user_id, 'author_name': user_name, 'chat_id': chat_id, 'likes': [], 'dislikes': [], 'date': daily_task_date(), 'winner_paid': False}
-    active_memes[meme_id] = {**meme_entry, 'likes': set(), 'dislikes': set()}
-    db.setdefault('daily_memes', []).append(meme_entry)
+    with MEME_LOCK:
+        active_memes[meme_id] = {**meme_entry, 'likes': set(), 'dislikes': set()}
+        db.setdefault('daily_memes', []).append(meme_entry)
     mark_dirty()
 
     add_bp_exp(user_id, user_name, 10, username=message.from_user.username)
@@ -7581,6 +7981,7 @@ STORY_TEMPLATES = [
 ]
 
 @bot.message_handler(commands=['story', 'fanfic', 'история_дня'])
+@serialize_user_action
 def cmd_story(message):
     if not can_process_user_message(message):
         return
@@ -7646,6 +8047,7 @@ def render_halloween_bp_view(chat_id, user_id, user_name, message_id=None):
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['pass', 'bp', 'хеллоуин', 'battle_pass'])
+@serialize_user_action
 def cmd_halloween_pass(message):
     if not can_process_user_message(message):
         return
@@ -7689,6 +8091,7 @@ def render_pharmacy_view(chat_id, user_id, user_name, message_id=None):
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['pharmacy', 'аптека', 'больница'])
+@serialize_user_action
 def cmd_pharmacy(message):
     if not can_process_user_message(message):
         return
@@ -7700,6 +8103,7 @@ def cmd_pharmacy(message):
 # ПОДАРОК УСЛУГИ TELEGRAM STARS ДРУГУ (/gift_stars)
 # ---------------------------------------------------------
 @bot.message_handler(commands=['gift_stars', 'подарить_звезды', 'подарок_звезды'])
+@serialize_user_action
 def cmd_gift_stars(message):
     if not can_process_user_message(message):
         return
@@ -7922,6 +8326,7 @@ def _admin_grant(message):
     return True
 
 @bot.message_handler(commands=['groups', 'группы'])
+@serialize_user_action
 def cmd_groups(message):
     if not _owner_only(message): return
     items = _bot_chat_items(False); active = [x for x in items if x.get('status') == 'active']; inactive = [x for x in items if x.get('status') != 'active']
@@ -7959,6 +8364,7 @@ def cmd_groups(message):
     bot.send_message(message.chat.id,'\n'.join(lines),parse_mode='HTML')
 
 @bot.message_handler(commands=['findgroup', 'найтигруппу'])
+@serialize_user_action
 def cmd_find_group(message):
     if not _owner_only(message): return
     parts = (message.text or '').split(maxsplit=1)
@@ -7978,6 +8384,7 @@ def cmd_find_group(message):
     bot.reply_to(message, f'🔎 <b>ГРУППА НАЙДЕНА</b>\n──────────────────────\n📌 <b>{title}</b>\n🆔 <code>{chat_id}</code>\n{uname}\n📡 Тип: <b>{_chat_type_label(item.get("type", "group"))}</b>\n{mem}\n🤖 Статус бота: <b>{status}</b>\n📅 Обнаружена: <b>{_fmt_seen(item.get("first_seen"))}</b>\n🕐 Последняя активность: <b>{_fmt_seen(item.get("last_activity", item.get("last_seen")))}</b>', parse_mode='HTML')
 
 @bot.message_handler(commands=['activity', 'активность'])
+@serialize_user_action
 def cmd_activity(message):
     if not _owner_only(message): return
     items=_bot_chat_items(True)[:20]
@@ -7988,6 +8395,7 @@ def cmd_activity(message):
     bot.reply_to(message,'\n'.join(lines) if items else '📈 <b>Активность</b>\n\nАктивных групп пока нет.',parse_mode='HTML')
 
 @bot.message_handler(commands=['user', 'юзер', 'пользователь'])
+@serialize_user_action
 def cmd_user_lookup(message):
     if not _owner_only(message): return
     parts=(message.text or '').split(maxsplit=1)
@@ -8003,12 +8411,14 @@ def cmd_user_lookup(message):
     bot.reply_to(message,f'🔎 <b>ПОЛЬЗОВАТЕЛЬ НАЙДЕН</b>\n──────────────────────\n👤 <b>{name}</b> · {uname}\n🆔 <code>{found_id}</code>\n🪙 Баланс: <b>{int(econ.get("balance",0) or 0):,}</b>\n🏦 Банк: <b>{int(econ.get("bank_deposit",0) or 0):,}</b>\n🎮 Игр: <b>{int(stats.get("games",0) or 0):,}</b>\n🏆 Достижений: <b>{len(econ.get("achievements",[]) or [])}</b>\n⭐ Донатов Stars: <b>{int(econ.get("stars_donated",0) or 0):,}</b>',parse_mode='HTML')
 
 @bot.message_handler(commands=['stats', 'статистика'])
+@serialize_user_action
 def cmd_global_stats(message):
     if not _owner_only(message): return
     total,users=_global_message_stats(); active=len(_bot_chat_items(True)); all_groups=len(db.get('bot_chats',{})); profiles=len(db.get('economy',{}))
     bot.reply_to(message,f"📊 <b>ОБЩАЯ СТАТИСТИКА БОТА</b>\n──────────────────────\n🟢 Активных групп: <b>{active}</b>\n📋 Сохранённых групп: <b>{all_groups}</b>\n👤 Профилей: <b>{profiles}</b>\n💬 Сообщений в учёте: <b>{total:,}</b>\n👥 Пользователей с активностью: <b>{users}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
 
 @bot.message_handler(commands=['economystats', 'экономика'])
+@serialize_user_action
 def cmd_economy_stats(message):
     if not _owner_only(message): return
     total_coins=total_bank=total_stars=0
@@ -8017,6 +8427,7 @@ def cmd_economy_stats(message):
     bot.reply_to(message,f'💰 <b>ЭКОНОМИКА БОТА</b>\n──────────────────────\n🪙 Монет на руках: <b>{total_coins:,}</b>\n🏦 Монет в банках: <b>{total_bank:,}</b>\n💎 Stars в статистике донатов: <b>{total_stars:,}</b>',parse_mode='HTML')
 
 @bot.message_handler(commands=['gamestats', 'игрыстат'])
+@serialize_user_action
 def cmd_game_stats(message):
     if not _owner_only(message): return
     totals={k:0 for k in ('games','wheel_spins','cases_opened','mines_wins','fish','hunt')}
@@ -8027,18 +8438,21 @@ def cmd_game_stats(message):
     bot.reply_to(message,f'🎮 <b>СТАТИСТИКА ИГР</b>\n──────────────────────\n🎲 Всего игр: <b>{totals["games"]:,}</b>\n🎡 Колесо: <b>{totals["wheel_spins"]:,}</b>\n📦 Кейсов: <b>{totals["cases_opened"]:,}</b>\n💣 Побед в сапёре: <b>{totals["mines_wins"]:,}</b>\n🎣 Рыбалка: <b>{totals["fish"]:,}</b>\n🏹 Охота: <b>{totals["hunt"]:,}</b>',parse_mode='HTML')
 
 @bot.message_handler(commands=['status', 'статус'])
+@serialize_user_action
 def cmd_bot_status(message):
     if not _owner_only(message): return
     bot_state='🟢 работает' if db.get('bot_active',True) else '🔴 спящий режим'; neon='🟢 подключена' if DATABASE_URL else '🟡 локальный fallback'
     bot.reply_to(message,f"🟢 <b>СТАТУС БОТА</b>\n──────────────────────\n🤖 Состояние: <b>{bot_state}</b>\n📡 Активных групп: <b>{len(_bot_chat_items(True))}</b>\n💾 Neon: <b>{neon}</b>\n💾 Несохранённых изменений: <b>{'да' if db_dirty else 'нет'}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
 
 @bot.message_handler(commands=['dashboard', 'панель'])
+@serialize_user_action
 def cmd_dashboard(message):
     if not _owner_only(message): return
     total,_=_global_message_stats(); active=len(_bot_chat_items(True)); all_groups=len(db.get('bot_chats',{}))
     bot.reply_to(message,f"📊 <b>ПАНЕЛЬ МОНИТОРИНГА</b>\n──────────────────────\n🟢 Групп сейчас: <b>{active}</b>\n📋 Записей групп: <b>{all_groups}</b>\n💬 Сообщений: <b>{total:,}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>\n\n📋 /groups — все группы\n📈 /activity — активность\n📊 /stats — статистика\n🟢 /status — состояние\n🔎 /findgroup ID — найти группу\n👤 /user ID — найти пользователя\n💰 /economystats — экономика\n🎮 /gamestats — игры\n🔎 /groupinfo — текущая группа",parse_mode='HTML')
 
 @bot.message_handler(commands=['groupinfo', 'инфогруппы'])
+@serialize_user_action
 def cmd_group_info(message):
     if not _owner_only(message): return
     chat=message.chat
@@ -8059,6 +8473,7 @@ def cmd_group_info(message):
     bot.reply_to(message,f"🔎 <b>ИНФОРМАЦИЯ О ГРУППЕ</b>\n──────────────────────\n📌 <b>{title}</b>\n🆔 <code>{chat.id}</code>\n{uname}\n{mem}\n📡 Тип: <b>{_chat_type_label(getattr(chat,'type','group'))}</b>\n🟢 Бот: <b>активен</b>\n🛡 Антифлуд: <b>{flood}</b>\n👋 Приветствия: <b>{welcome}</b>\n🕐 Последняя активность: <b>{_fmt_seen(item.get('last_activity'))}</b>",parse_mode='HTML')
 
 @bot.message_handler(commands=['give_gif', 'выдать_gif'])
+@serialize_user_action
 def admin_give_gif_command(message):
     if not _is_owner_admin(message):
         return
@@ -8089,10 +8504,12 @@ def admin_give_gif_command(message):
     bot.reply_to(message, f"✅ Выдан GIF <b>{html.escape(gif['name'])}</b> пользователю <b>{html.escape(str(target_name))}</b>.\n🎞 GIF сразу установлен в профиль.", parse_mode='HTML')
 
 @bot.message_handler(commands=['give', 'выдать', 'grant'])
+@serialize_user_action
 def admin_give_command(message):
     _admin_grant(message)
 
 @bot.message_handler(commands=['resources', 'ресурсы', 'collection', 'коллекция'])
+@serialize_user_action
 def cmd_resources_command(message):
     command_token = (message.text or '').split()[0].lower() if message.text else ''
     if command_token in ('/collection', '/коллекция'):
@@ -8104,22 +8521,27 @@ def cmd_resources_command(message):
         render_resources_view(message.chat.id, uid, name)
 
 @bot.message_handler(commands=['guild', 'гильдия', 'клан'])
+@serialize_user_action
 def cmd_guild_command(message):
     cmd_guild(message)
 
 @bot.message_handler(commands=['pmarket', 'рынок_игроков'])
+@serialize_user_action
 def cmd_player_market_command(message):
     cmd_player_market(message)
 
 @bot.message_handler(commands=['raid', 'рейд'])
+@serialize_user_action
 def cmd_raid_command(message):
     cmd_raid(message)
 
 @bot.message_handler(commands=['season', 'сезон', 'рейтинг_сезона'])
+@serialize_user_action
 def cmd_season_command(message):
     cmd_season(message)
 
 @bot.message_handler(commands=['world', 'мир', 'карта'])
+@serialize_user_action
 def cmd_world_command(message):
     cmd_world(message)
 
@@ -8127,6 +8549,7 @@ def cmd_world_command(message):
 # ОБРАБОТКА CALLBACK КНОПОК
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda message: True)
+@serialize_user_action
 def handle_messages(message):
     if not message or not getattr(message, 'from_user', None):
         return
@@ -8154,7 +8577,8 @@ def handle_messages(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
     text_lower = text.lower()
     now_ts = time.time()
-    quiz = current_quiz.get(chat_id)
+    with QUIZ_LOCK:
+        quiz = copy.deepcopy(current_quiz.get(chat_id))
 
     is_super_admin = (user_id == ADMIN_ID)
 
@@ -8197,10 +8621,45 @@ def handle_messages(message):
 
     chat_settings = get_chat_settings(chat_id)
 
+    # Ставим тот же часовой лимит перед текстовыми экономическими роутерами,
+    # которые Telegram не передаёт в отдельный command-handler (например,
+    # «кости 100», «перевод @user 100», «ограбить @user», «семейный сейф положить 100»).
+    raw_rate_limited_prefixes = (
+        'бонус', 'коин', 'взять бонус', 'кости', 'кубик', 'слоты', 'казино',
+        'рыбалка', 'рыба', 'охота', 'продать ', 'ограбить', 'перевод ',
+        'передать ', 'отправить ', 'скинуть ', 'банк положить', 'банк снять',
+        'депозит ', 'семейный сейф ', 'передать', '/pay '
+    )
+    raw_needs_rate_limit = any(text_lower == p.rstrip() or text_lower.startswith(p) for p in raw_rate_limited_prefixes)
+    if raw_needs_rate_limit and not is_super_admin:
+        # Перенаправляем в общий антифлуд только для обычных пользователей;
+        # can_process_user_message не выполняется повторно для самого handle_messages.
+        flood_key = f"{chat_id}:{user_id}"
+        is_owner = is_chat_owner(chat_id, user_id)
+        is_admin_user = is_admin(chat_id, user_id)
+        admins_allowed = chat_settings.get('flood_admins', False)
+        flood_applies = (not is_owner) and (not is_admin_user or admins_allowed)
+        if flood_applies and chat_settings.get('flood_protection', False):
+            now_flood = time.time()
+            hist = [t for t in command_rate_history.get(flood_key, []) if now_flood - t < 3600]
+            if len(hist) >= 5:
+                remaining = max(1, int(3600 - (now_flood - hist[0])))
+                mins = max(1, (remaining + 59) // 60)
+                command_rate_history[flood_key] = hist
+                bot.send_message(chat_id, f"🛡 <b>Антифлуд</b>: лимит 5 игровых/экономических команд в час исчерпан. Осталось примерно {mins} мин.", parse_mode='HTML')
+                return
+            hist.append(now_flood)
+            command_rate_history[flood_key] = hist
+
     # Старый короткий антиспам оставляем только для одинаковых экономических команд.
 
     add_message_stat(user_id, user_name, username=user_username)
-    add_bp_exp(user_id, user_name, 2, username=user_username)
+    activity_reward_allowed = (now_ts - float(econ.get('last_activity_reward_time', 0) or 0)) >= 5.0
+    if activity_reward_allowed:
+        econ['last_activity_reward_time'] = now_ts
+        add_account_exp(user_id, user_name, 2, username=user_username)
+        add_bp_exp(user_id, user_name, 2, username=user_username)
+        mark_dirty()
     # МЕМНЫЕ БОЛЕЗНИ (СЛУЧАЙНОЕ ЗАРАЖЕНИЕ 2%)
     if random.random() < 0.02:
         d_got = try_infect_user(user_id, user_name, chance=1.0)
@@ -8240,15 +8699,23 @@ def handle_messages(message):
             return
 
     # ВИКТОРИНА
-    if quiz and quiz.get('answer') and quiz.get('chat_id') == chat_id:
-        if text_lower == quiz['answer']:
-            reward = quiz['reward']
-            quiz['answer'] = None
+    if quiz and quiz.get('answer') and quiz.get('chat_id') == chat_id and text_lower == quiz['answer']:
+        # quiz is a global per-chat prize. The old code modified only a deepcopy,
+        # so several users could answer the same question and all receive the prize.
+        with QUIZ_LOCK:
+            live_quiz = current_quiz.get(chat_id)
+            if not live_quiz or not live_quiz.get('answer') or live_quiz.get('chat_id') != chat_id or text_lower != live_quiz.get('answer'):
+                return
+            reward = max(0, int(live_quiz.get('reward', 0) or 0))
+            current_quiz.pop(chat_id, None)
+            if reward <= 0:
+                return
             add_coins(user_id, user_name, reward, username=user_username)
             add_account_exp(user_id, user_name, 20, username=user_username)
-            u_link = make_link(chat_id, user_name, user_id, ping=True)
-            bot.reply_to(message, f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b> 😻\n\nПервым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!", parse_mode='HTML')
-            return
+            mark_dirty()
+        u_link = make_link(chat_id, user_name, user_id, ping=True)
+        bot.reply_to(message, f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b> 😻\n\nПервым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!", parse_mode='HTML')
+        return
 
     # КОМАНДЫ СОЗДАТЕЛЯ
     if is_super_admin:
@@ -8422,37 +8889,57 @@ def handle_messages(message):
         if not econ.get('marriage'):
             bot.reply_to(message, "❌ Вы не состоите в браке! 😿")
             return
-        m = econ['marriage']
-        p_id = m.get('partner_id')
-        p_tag = m.get('partner_name')
-        p_econ = get_user_econ(p_id, p_tag)
         m_amt = re.search(r'(\d+)', text_lower)
         if 'положить' in text_lower and m_amt:
             amt = int(m_amt.group(1))
-            if amt <= 0 or econ['balance'] < amt:
-                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙 😿")
+            if amt <= 0:
+                bot.reply_to(message, "❌ Сумма должна быть положительной. 😿")
                 return
-            econ['balance'] -= amt
-            m['vault'] = m.get('vault', 0) + amt
-            if p_econ.get('marriage'): p_econ['marriage']['vault'] = m['vault']
-            mark_dirty()
+            with CALLBACK_STATE_LOCK:
+                m = econ.get('marriage')
+                if not m:
+                    bot.reply_to(message, "❌ Брак уже расторгнут! 😿")
+                    return
+                update_family_house_income(m)
+                p_id = m.get('partner_id'); p_tag = m.get('partner_name')
+                p_econ = get_user_econ(p_id, p_tag) if p_id is not None else {}
+                with TRANSFER_LOCK:
+                    if int(econ.get('balance', 0) or 0) < amt:
+                        bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ.get('balance', 0)} 🪙 😿")
+                        return
+                    econ['balance'] -= amt
+                    m['vault'] = max(0, int(m.get('vault', 0) or 0)) + amt
+                    if isinstance(p_econ.get('marriage'), dict): p_econ['marriage']['vault'] = m['vault']
+                    mark_dirty()
             bot.reply_to(message, f"💍 Вы положили <b>{amt} 🪙</b> в семейный сейф!\nВ сейфе: <b>{m['vault']} 🪙</b> 😻", parse_mode='HTML')
             return
         elif 'снять' in text_lower and m_amt:
             amt = int(m_amt.group(1))
-            cur_vault = m.get('vault', 0)
-            if amt <= 0 or cur_vault < amt:
-                bot.reply_to(message, f"❌ В сейфе недостаточно коинов! Накоплено: {cur_vault} 🪙 😿")
+            if amt <= 0:
+                bot.reply_to(message, "❌ Сумма должна быть положительной. 😿")
                 return
-            m['vault'] -= amt
-            if p_econ.get('marriage'): p_econ['marriage']['vault'] = m['vault']
-            econ['balance'] += amt
-            mark_dirty()
+            with CALLBACK_STATE_LOCK:
+                m = econ.get('marriage')
+                if not m:
+                    bot.reply_to(message, "❌ Брак уже расторгнут! 😿")
+                    return
+                update_family_house_income(m)
+                p_id = m.get('partner_id'); p_tag = m.get('partner_name')
+                p_econ = get_user_econ(p_id, p_tag) if p_id is not None else {}
+                cur_vault = max(0, int(m.get('vault', 0) or 0))
+                if cur_vault < amt:
+                    bot.reply_to(message, f"❌ В сейфе недостаточно коинов! Накоплено: {cur_vault} 🪙 😿")
+                    return
+                with TRANSFER_LOCK:
+                    m['vault'] = cur_vault - amt
+                    if isinstance(p_econ.get('marriage'), dict): p_econ['marriage']['vault'] = m['vault']
+                    econ['balance'] = max(0, int(econ.get('balance', 0) or 0)) + amt
+                    mark_dirty()
             bot.reply_to(message, f"💸 Вы взяли <b>{amt} 🪙</b> из семейного сейфа!\nОстаток: <b>{m['vault']} 🪙</b> 😸", parse_mode='HTML')
             return
 
     # КВЕСТ СООБЩЕНИЙ
-    completed_tasks = track_daily_task(user_id, user_name, 'messages', 1, chat_id, username=user_username)
+    completed_tasks = track_daily_task(user_id, user_name, 'messages', 1, chat_id, username=user_username) if activity_reward_allowed else []
     if completed_tasks:
         for task_name, reward in completed_tasks:
             try: bot.send_message(chat_id, f'🎉 {make_link(chat_id, user_name, user_id, ping=True)} выполнил(а) задание: <b>{task_name}</b>! +{reward} 🪙 😻', parse_mode='HTML')
@@ -8501,13 +8988,15 @@ def handle_messages(message):
 
         t_bp = t_econ.setdefault('backpack', {})
         if t_bp.get('alarm_system', 0) > 0:
-            t_bp['alarm_system'] -= 1
-            fine = min(econ['balance'], 150)
-            econ['balance'] -= fine
-            t_econ['balance'] += fine
+            with TRANSFER_LOCK:
+                t_bp['alarm_system'] = max(0, int(t_bp.get('alarm_system', 0)) - 1)
+                fine = min(max(0, int(econ.get('balance', 0) or 0)), 150)
+                econ['balance'] -= fine
+                t_econ['balance'] += fine
+                mark_dirty()
             change_karma(user_id, user_name, -5)
-            active_wanted[(chat_id, user_id)] = {'name': user_name, 'expire': now + 900, 'reason': 'ограбление'}
-            mark_dirty()
+            with CALLBACK_STATE_LOCK:
+                active_wanted[(chat_id, user_id)] = {'name': user_name, 'expire': now + 900, 'reason': 'ограбление'}
             u_link = make_link(chat_id, user_name, user_id)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
             bot.send_message(chat_id, f"🚨🔊 <b>СИГНАЛИЗАЦИЯ СРАБОТАЛА!</b> 🙀\n\n{u_link} попытался проникнуть в карман {t_link}, но сработала <b>Охранная сигнализация</b>!\nВор оглушен электрошокером и выплатил компенсацию <b>-{fine} 🪙</b> в пользу жертвы! (Карма -5)", parse_mode='HTML')
@@ -8517,21 +9006,29 @@ def handle_messages(message):
         if econ.get('pet') and econ['pet'].get('id') == 'raccoon': rob_chance += 0.20
 
         if random.random() <= rob_chance:
-            stolen = max(10, min(500, int(t_pocket * random.uniform(0.08, 0.18))))
-            t_econ['balance'] -= stolen
-            econ['balance'] += stolen
+            with TRANSFER_LOCK:
+                # Повторно проверяем баланс внутри лока: цель могла потратить деньги
+                # между первоначальной проверкой и моментом списания.
+                t_pocket = max(0, int(t_econ.get('balance', 0) or 0))
+                if t_pocket < 1:
+                    bot.reply_to(message, "❌ У жертвы уже нет денег на руках! 😿")
+                    return
+                stolen = min(t_pocket, max(1, min(500, int(t_pocket * random.uniform(0.08, 0.18)))))
+                t_econ['balance'] -= stolen
+                econ['balance'] += stolen
+                mark_dirty()
             change_karma(user_id, user_name, -5)
-            mark_dirty()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
             bot.send_message(chat_id, f"🥷 <b>УДАЧНОЕ ОГРАБЛЕНИЕ!</b> 😼\n\n{u_link} ловко украл у {t_link} <b>{stolen} Ня-коинов 🪙</b>! (Карма -5)", parse_mode='HTML')
         else:
-            fine = min(econ['balance'], random.randint(30, 90))
-            if econ.get('active_title') == 'shadow_ninja': fine = int(fine * 0.5)
-            econ['balance'] -= fine
-            t_econ['balance'] += fine
+            with TRANSFER_LOCK:
+                fine = min(max(0, int(econ.get('balance', 0) or 0)), random.randint(30, 90))
+                if econ.get('active_title') == 'shadow_ninja': fine = int(fine * 0.5)
+                econ['balance'] -= fine
+                t_econ['balance'] += fine
+                mark_dirty()
             change_karma(user_id, user_name, -3)
-            mark_dirty()
             u_link = make_link(chat_id, user_name, user_id, ping=True)
             t_link = make_link(chat_id, target_user, target_user_id, ping=True)
             bot.send_message(chat_id, f"🚨 <b>ПРОВАЛ ОГРАБЛЕНИЯ!</b> 😿\n\n{u_link} попался с поличным и выплатил {t_link} компенсацию: <b>-{fine} 🪙</b>! (Карма -3)", parse_mode='HTML')
@@ -8685,19 +9182,27 @@ def handle_messages(message):
         if amount <= 0 or not target_u:
             bot.reply_to(message, "❌ Формат: <code>передать @username 10000</code> или ответом на сообщение: <code>передать 10000</code>. 😾", parse_mode='HTML')
             return
+        if not target_id or int(target_id) <= 0:
+            bot.reply_to(message, "❌ Получатель не найден. Укажите реального пользователя: <code>@username</code>, ID или ответьте на его сообщение.", parse_mode='HTML')
+            return
         if target_id == user_id:
             bot.reply_to(message, "❌ Нельзя переводить коины самому себе! 🙀")
             return
-        sender_econ = get_user_econ(user_id, user_name, username=user_username)
-        if sender_econ['balance'] < amount:
-            bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
-            return
-        tax = max(1, int(amount * 0.03))
-        receive_amount = amount - tax
-        sender_econ['balance'] -= amount
-        sender_econ['daily_transferred'] = sender_econ.get('daily_transferred', 0) + amount
-        add_coins(user_id=target_id, user_tag=target_u, amount=receive_amount)
-        mark_dirty()
+        with TRANSFER_LOCK:
+            sender_econ = get_user_econ(user_id, user_name, username=user_username)
+            if sender_econ['balance'] < amount:
+                bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
+                return
+            tax = max(1, int(amount * 0.03))
+            receive_amount = amount - tax
+            if receive_amount <= 0:
+                bot.reply_to(message, "❌ Слишком маленькая сумма для перевода.")
+                return
+            sender_econ['balance'] -= amount
+            sender_econ['daily_transferred'] = sender_econ.get('daily_transferred', 0) + amount
+            target_econ = get_user_econ(user_id=int(target_id), user_tag=target_u)
+            target_econ['balance'] += receive_amount
+            mark_dirty()
         target_link = make_link(chat_id, target_u, target_id, ping=True)
         bot.reply_to(message, f"💸 <b>Перевод выполнен!</b>\n\n👤 Получатель: {target_link}\n💰 Отправлено: <b>{amount:,} 🪙</b>\n🧾 Комиссия 3%: <b>{tax:,} 🪙</b>\n📥 Получит: <b>{receive_amount:,} 🪙</b>\n💳 Остаток: <b>{sender_econ['balance']:,} 🪙</b> 😸", parse_mode='HTML')
         return
@@ -9039,24 +9544,31 @@ def handle_messages(message):
             bot.reply_to(message, "❌ Формат: <code>передать @username 10000</code> или ответом на сообщение: <code>передать 10000</code>. 😾", parse_mode='HTML')
             return
 
+        if not target_id or int(target_id) <= 0:
+            bot.reply_to(message, "❌ Получатель не найден. Укажите реального пользователя: <code>@username</code>, ID или ответьте на его сообщение.", parse_mode='HTML')
+            return
         if target_id == user_id:
             bot.reply_to(message, "❌ Нельзя переводить коины самому себе! 🙀")
             return
 
-        sender_econ = get_user_econ(user_id, user_name, username=user_username)
-        if sender_econ['balance'] < amount:
-            bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
-            return
+        with TRANSFER_LOCK:
+            sender_econ = get_user_econ(user_id, user_name, username=user_username)
+            if sender_econ['balance'] < amount:
+                bot.reply_to(message, f"❌ Недостаточно Ня-коинов! У вас: <b>{sender_econ['balance']} 🪙</b> 😿", parse_mode='HTML')
+                return
 
-        tax = max(1, int(amount * 0.03))
-        receive_amount = amount - tax
+            tax = max(1, int(amount * 0.03))
+            receive_amount = amount - tax
+            if receive_amount <= 0:
+                bot.reply_to(message, "❌ Слишком маленькая сумма для перевода.")
+                return
 
-        sender_econ['balance'] -= amount
-        sender_econ['daily_transferred'] = sender_econ.get('daily_transferred', 0) + amount
-
-        add_coins(user_id=target_id, user_tag=target_u, amount=receive_amount)
+            sender_econ['balance'] -= amount
+            sender_econ['daily_transferred'] = sender_econ.get('daily_transferred', 0) + amount
+            target_econ = get_user_econ(user_id=target_id, user_tag=target_u)
+            target_econ['balance'] += receive_amount
+            mark_dirty()
         change_karma(user_id, user_name, 1)
-        mark_dirty()
         check_achievements(user_id, user_name, 'transfers', 1, chat_id, username=user_username)
         track_daily_task(user_id, user_name, 'transfer', 1, chat_id, username=user_username)
 
@@ -9076,6 +9588,9 @@ def handle_messages(message):
         target_name, target_id, duration_text, reason = parse_rest_command(message)
         if target_name and duration_text:
             reward_given, count = apply_rest(chat_id, target_name, duration_text, reason, target_id)
+            if count is None:
+                bot.reply_to(message, '❌ Указанная дата уже прошла. Рест с прошедшей датой не создаётся.', parse_mode='HTML')
+                return
             user_link = make_link(chat_id, target_name, target_id, ping=True)
             bot.reply_to(message, f'✅ Рест для {user_link} добавлен на {duration_text} (Причина: {reason})! 😺', parse_mode='HTML')
 
@@ -9374,33 +9889,45 @@ def cmd_guild(message):
         return
     action = args[0].lower()
     if action in ('создать', 'create') and len(args) >= 2:
-        if econ.get('guild_id'):
-            bot.reply_to(message, '❌ Вы уже состоите в гильдии.'); return
-        if econ.get('balance', 0) < 5000:
-            bot.reply_to(message, '❌ Создание гильдии стоит 5,000 🪙.'); return
         gname = args[1][:32].strip()
         if len(gname) < 2:
             bot.reply_to(message, '❌ Название слишком короткое.'); return
-        gid = _guild_code()
-        db.setdefault('guilds', {})[gid] = {'name': gname, 'owner_id': uid, 'members': [uid], 'bank': 0, 'exp': 0, 'created_at': time.time()}
-        econ['balance'] -= 5000
-        econ['guild_id'] = gid
-        mark_dirty()
+        with GUILD_LOCK:
+            econ = get_user_econ(uid, name, username=message.from_user.username)
+            if econ.get('guild_id'):
+                bot.reply_to(message, '❌ Вы уже состоите в гильдии.'); return
+            if econ.get('balance', 0) < 5000:
+                bot.reply_to(message, '❌ Создание гильдии стоит 5,000 🪙.'); return
+            gid = _guild_code()
+            guilds = db.setdefault('guilds', {})
+            while gid in guilds:
+                gid = _guild_code()
+            guilds[gid] = {'name': gname, 'owner_id': uid, 'members': [uid], 'bank': 0, 'exp': 0, 'created_at': time.time()}
+            econ['balance'] -= 5000
+            econ['guild_id'] = gid
+            mark_dirty()
         bot.reply_to(message, f'🏰 Гильдия <b>{gname}</b> создана!\nКод: <code>{gid}</code>', parse_mode='HTML')
         return
     if action in ('вступить', 'join') and len(args) >= 2:
-        if econ.get('guild_id'):
-            bot.reply_to(message, '❌ Вы уже состоите в гильдии.'); return
         gid = args[1].upper()
-        guild = db.setdefault('guilds', {}).get(gid)
-        if not guild:
-            bot.reply_to(message, '❌ Гильдия не найдена.'); return
-        if len(guild.get('members', [])) >= 30:
-            bot.reply_to(message, '❌ В гильдии уже 30 участников.'); return
-        guild.setdefault('members', []).append(uid)
-        econ['guild_id'] = gid
-        guild['exp'] = int(guild.get('exp', 0)) + 25
-        mark_dirty()
+        with GUILD_LOCK:
+            econ = get_user_econ(uid, name, username=message.from_user.username)
+            if econ.get('guild_id'):
+                bot.reply_to(message, '❌ Вы уже состоите в гильдии.'); return
+            guild = db.setdefault('guilds', {}).get(gid)
+            if not guild:
+                bot.reply_to(message, '❌ Гильдия не найдена.'); return
+            members = guild.setdefault('members', [])
+            if len(members) >= 30:
+                bot.reply_to(message, '❌ В гильдии уже 30 участников.'); return
+            if uid in members:
+                econ['guild_id'] = gid
+                mark_dirty()
+            else:
+                members.append(uid)
+                econ['guild_id'] = gid
+                guild['exp'] = int(guild.get('exp', 0)) + 25
+                mark_dirty()
         bot.reply_to(message, f'✅ Вы вступили в <b>{html.escape(guild.get("name", "Гильдию"))}</b>!', parse_mode='HTML')
         return
     bot.reply_to(message, 'Формат: <code>/guild</code>, <code>/guild создать Название</code> или <code>/guild вступить NYA-1234</code>.', parse_mode='HTML')
@@ -9450,14 +9977,15 @@ def cmd_player_market(message):
         if catalog is None or not (0 <= idx < len(catalog)) or total_price <= 0:
             bot.reply_to(message, '❌ Укажи fish/hunt, номер ресурса и цену.'); return
         item_name = catalog[idx][0]
-        if int(inv.get(item_name, 0) or 0) <= 0:
-            bot.reply_to(message, '❌ У вас нет этого ресурса. Откройте /resources.'); return
-        lid = str(random.randint(100000, 999999))
-        while lid in db.setdefault('player_market', {}): lid = str(random.randint(100000, 999999))
-        inv[item_name] -= 1
-        if inv[item_name] <= 0: inv.pop(item_name, None)
-        db['player_market'][lid] = {'seller_id': uid, 'seller_name': name, 'kind': kind, 'item_name': item_name, 'name': item_name, 'qty': 1, 'price': total_price, 'created_at': time.time()}
-        mark_dirty()
+        with PLAYER_MARKET_LOCK:
+            if int(inv.get(item_name, 0) or 0) <= 0:
+                bot.reply_to(message, '❌ У вас нет этого ресурса. Откройте /resources.'); return
+            lid = str(random.randint(100000, 999999))
+            while lid in db.setdefault('player_market', {}): lid = str(random.randint(100000, 999999))
+            inv[item_name] -= 1
+            if inv[item_name] <= 0: inv.pop(item_name, None)
+            db['player_market'][lid] = {'seller_id': uid, 'seller_name': name, 'kind': kind, 'item_name': item_name, 'name': item_name, 'qty': 1, 'price': total_price, 'created_at': time.time()}
+            mark_dirty()
         bot.reply_to(message, f'🛒 Объявление <code>#{lid}</code> создано: {html.escape(item_name)} за <b>{total_price:,} 🪙</b>.', parse_mode='HTML')
         return
     bot.reply_to(message, 'Формат: <code>/pmarket</code> или <code>/pmarket sell fish 1 500</code>.', parse_mode='HTML')
@@ -9552,6 +10080,7 @@ def cmd_world(message):
 
 
 @bot.callback_query_handler(func=lambda call: True)
+@serialize_user_action
 def callback_inline(call):
     try:
         if not call or not getattr(call, 'from_user', None) or not getattr(call, 'message', None):
@@ -10988,7 +11517,9 @@ def callback_inline(call):
             if not game:
                 bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
                 return
-
+            if user_id != game.get('user_id'):
+                bot.answer_callback_query(call.id, '❌ Это не ваша игра! 😾', show_alert=True)
+                return
             game['size'] = chosen_size
             markup = InlineKeyboardMarkup(row_width=3)
             mines_options = [1, 2, 3, 5] if chosen_size == 3 else [2, 3, 5, 8] if chosen_size == 4 else [3, 5, 8, 12, 18]
@@ -11018,6 +11549,9 @@ def callback_inline(call):
             if not game:
                 bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
                 return
+            if user_id != game.get('user_id'):
+                bot.answer_callback_query(call.id, '❌ Это не ваша игра! 😾', show_alert=True)
+                return
 
             total_cells = game['size'] * game['size']
             game['bombs'] = set(random.sample(range(total_cells), mines_count))
@@ -11039,6 +11573,9 @@ def callback_inline(call):
                 return
 
             total_cells = game['size'] * game['size']
+            if cell_idx < 0 or cell_idx >= total_cells:
+                bot.answer_callback_query(call.id, '❌ Некорректная клетка.', show_alert=True)
+                return
             mines_count = len(game['bombs'])
 
             if cell_idx in game['bombs']:
@@ -11187,6 +11724,9 @@ def callback_inline(call):
             total_cells = cols * rows
 
             cell_idx = int(cell_arg)
+            if cell_idx < 0 or cell_idx >= total_cells:
+                bot.answer_callback_query(call.id, '❌ Некорректная клетка.', show_alert=True)
+                return
 
             if game.get('mode') == 'flag':
                 if cell_idx in game['revealed']: return
@@ -11503,8 +12043,11 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "❌ Этот подарок уже кто-то забрал! 😿", show_alert=True)
                 return
 
+            if int(drop.get('chat_id', 0) or 0) != int(chat_id):
+                bot.answer_callback_query(call.id, "❌ Этот подарок принадлежит другому чату! 😾", show_alert=True)
+                return
             drop['claimed'] = True
-            reward = drop['reward']
+            reward = max(0, int(drop.get('reward', 0) or 0))
             add_coins(user_id, user_name, reward, username=user_username)
             add_account_exp(user_id, user_name, 15, username=user_username)
 
@@ -12080,43 +12623,62 @@ def callback_inline(call):
             bot.edit_message_text('\n'.join(lines), chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML', reply_markup=back_markup)
             bot.answer_callback_query(call.id); return
         elif action_data == 'guild_deposit':
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            guild = get_user_guild(econ)
-            if not guild or guild.get('owner_id') != user_id:
-                bot.answer_callback_query(call.id, '❌ Только владелец гильдии.', show_alert=True); return
-            if econ.get('balance', 0) < 1000:
-                bot.answer_callback_query(call.id, '❌ Нужно 1,000 🪙.', show_alert=True); return
-            econ['balance'] -= 1000; guild['bank'] = int(guild.get('bank', 0)) + 1000; guild['exp'] = int(guild.get('exp', 0)) + 100
-            mark_dirty(); bot.answer_callback_query(call.id, '💰 +1,000 🪙 в казну!'); render_guild_view(chat_id, user_id, user_name, call.message.message_id); return
+            with GUILD_LOCK:
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                guild = get_user_guild(econ)
+                if not guild or guild.get('owner_id') != user_id:
+                    bot.answer_callback_query(call.id, '❌ Только владелец гильдии.', show_alert=True); return
+                if econ.get('balance', 0) < 1000:
+                    bot.answer_callback_query(call.id, '❌ Нужно 1,000 🪙.', show_alert=True); return
+                econ['balance'] -= 1000; guild['bank'] = int(guild.get('bank', 0)) + 1000; guild['exp'] = int(guild.get('exp', 0)) + 100
+                mark_dirty()
+            bot.answer_callback_query(call.id, '💰 +1,000 🪙 в казну!'); render_guild_view(chat_id, user_id, user_name, call.message.message_id); return
         elif action_data == 'guild_leave':
-            econ = get_user_econ(user_id, user_name, username=user_username); gid = econ.get('guild_id'); guild = db.get('guilds', {}).get(gid) if gid else None
-            if guild and guild.get('owner_id') != user_id:
-                guild['members'] = [x for x in guild.get('members', []) if x != user_id]; econ['guild_id'] = None; mark_dirty(); bot.answer_callback_query(call.id, '🚪 Вы вышли из гильдии.'); render_guild_view(chat_id, user_id, user_name, call.message.message_id); return
+            with GUILD_LOCK:
+                econ = get_user_econ(user_id, user_name, username=user_username); gid = econ.get('guild_id'); guild = db.get('guilds', {}).get(gid) if gid else None
+                if guild and guild.get('owner_id') != user_id:
+                    guild['members'] = [x for x in guild.get('members', []) if x != user_id]; econ['guild_id'] = None; mark_dirty()
+                    left_ok = True
+                else:
+                    left_ok = False
+            if left_ok:
+                bot.answer_callback_query(call.id, '🚪 Вы вышли из гильдии.'); render_guild_view(chat_id, user_id, user_name, call.message.message_id); return
             bot.answer_callback_query(call.id, '❌ Владелец не может просто выйти — распустите гильдию.', show_alert=True); return
         elif action_data == 'guild_disband':
-            econ = get_user_econ(user_id, user_name, username=user_username); gid = econ.get('guild_id'); guild = db.get('guilds', {}).get(gid) if gid else None
-            if guild and guild.get('owner_id') == user_id:
-                for mid in guild.get('members', []):
-                    me = get_user_econ(mid, str(mid)); me['guild_id'] = None
-                db['guilds'].pop(gid, None); mark_dirty(); bot.answer_callback_query(call.id, '🗑 Гильдия распущена.'); render_guild_view(chat_id, user_id, user_name, call.message.message_id); return
+            with GUILD_LOCK:
+                econ = get_user_econ(user_id, user_name, username=user_username); gid = econ.get('guild_id'); guild = db.get('guilds', {}).get(gid) if gid else None
+                if guild and guild.get('owner_id') == user_id:
+                    for mid in list(guild.get('members', [])):
+                        me = get_user_econ(mid, str(mid)); me['guild_id'] = None
+                    db['guilds'].pop(gid, None); mark_dirty(); disbanded = True
+                else:
+                    disbanded = False
+            if disbanded:
+                bot.answer_callback_query(call.id, '🗑 Гильдия распущена.'); render_guild_view(chat_id, user_id, user_name, call.message.message_id); return
             bot.answer_callback_query(call.id, '❌ Только владелец может распустить гильдию.', show_alert=True); return
         elif action_data == 'pmarket_view':
             render_player_market(chat_id, user_id, user_name, call.message.message_id); bot.answer_callback_query(call.id); return
         elif action_data.startswith('pmarket_buy_'):
-            lid = action_data.replace('pmarket_buy_', '', 1); listing = db.get('player_market', {}).get(lid)
-            if not listing:
-                bot.answer_callback_query(call.id, '❌ Объявление уже продано или удалено.', show_alert=True); return
-            if int(listing.get('seller_id', 0)) == user_id:
-                bot.answer_callback_query(call.id, '❌ Нельзя купить собственное объявление.', show_alert=True); return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            price = int(listing.get('price', 0)); seller_id = int(listing.get('seller_id', 0))
-            if econ.get('balance', 0) < price:
-                bot.answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙.', show_alert=True); return
-            seller = get_user_econ(seller_id, listing.get('seller_name', 'Игрок'))
-            econ['balance'] -= price; seller['balance'] += price
-            inv = econ.setdefault('fish_inventory', {}) if listing.get('kind') == 'fish' else econ.setdefault('hunt_inventory', {})
-            inv[listing['item_name']] = int(inv.get(listing['item_name'], 0)) + int(listing.get('qty', 1))
-            db['player_market'].pop(lid, None); mark_dirty()
+            lid = action_data.replace('pmarket_buy_', '', 1)
+            with PLAYER_MARKET_LOCK:
+                listing = db.get('player_market', {}).get(lid)
+                if not listing:
+                    bot.answer_callback_query(call.id, '❌ Объявление уже продано или удалено.', show_alert=True); return
+                if int(listing.get('seller_id', 0)) == user_id:
+                    bot.answer_callback_query(call.id, '❌ Нельзя купить собственное объявление.', show_alert=True); return
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                price = int(listing.get('price', 0)); seller_id = int(listing.get('seller_id', 0))
+                if price <= 0:
+                    db['player_market'].pop(lid, None); mark_dirty()
+                    bot.answer_callback_query(call.id, '❌ Повреждённое объявление удалено.', show_alert=True); return
+                if econ.get('balance', 0) < price:
+                    bot.answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙.', show_alert=True); return
+                seller = get_user_econ(seller_id, listing.get('seller_name', 'Игрок'))
+                qty = max(1, int(listing.get('qty', 1) or 1))
+                econ['balance'] -= price; seller['balance'] += price
+                inv = econ.setdefault('fish_inventory', {}) if listing.get('kind') == 'fish' else econ.setdefault('hunt_inventory', {})
+                inv[listing['item_name']] = int(inv.get(listing['item_name'], 0)) + qty
+                db['player_market'].pop(lid, None); mark_dirty()
             bot.answer_callback_query(call.id, '🛒 Покупка совершена!'); render_player_market(chat_id, user_id, user_name, call.message.message_id); return
         elif action_data == 'raid_view':
             render_raid(chat_id, user_id, user_name, call.message.message_id); bot.answer_callback_query(call.id); return
@@ -12207,8 +12769,13 @@ def callback_inline(call):
 # ---------------------------------------------------------
 # ОБРАБОТЧИКИ ОПЛАТЫ TELEGRAM STARS (PRE-CHECKOUT & SUCCESS)
 # ---------------------------------------------------------
-def validate_stars_payload(payload, amount, buyer_id):
+def validate_stars_payload(payload, amount, buyer_id, currency='XTR'):
     try:
+        if str(currency or '').upper() != 'XTR':
+            return False, 'Неверная валюта платежа.'
+        buyer_id = int(buyer_id)
+        if buyer_id <= 0:
+            return False, 'Некорректный плательщик.'
         raw_payload = str(payload or '')
         if raw_payload.startswith('gift2|'):
             g = raw_payload.split('|')
@@ -12227,8 +12794,8 @@ def validate_stars_payload(payload, amount, buyer_id):
                 return False, 'Некорректный пользователь в подарке.'
             if payload_buyer != int(buyer_id):
                 return False, 'Плательщик не совпадает с владельцем счёта.'
-            if target_id == payload_buyer:
-                return False, 'Нельзя подарить товар самому себе.'
+            if target_id <= 0 or target_id == payload_buyer:
+                return False, 'Некорректный или совпадающий получатель.'
             target_econ = get_user_econ(user_id=target_id)
             if gift_kind == 'pass':
                 err = stars_purchase_error(target_econ, 'vippass', item_key)
@@ -12291,9 +12858,15 @@ def validate_stars_payload(payload, amount, buyer_id):
         return False, 'Некорректный платёжный payload.'
 
 @bot.pre_checkout_query_handler(func=lambda query: True)
+@serialize_user_action
 def process_stars_pre_checkout(pre_checkout_query):
     try:
-        ok, reason = validate_stars_payload(pre_checkout_query.invoice_payload, pre_checkout_query.total_amount, pre_checkout_query.from_user.id)
+        ok, reason = validate_stars_payload(
+            pre_checkout_query.invoice_payload,
+            pre_checkout_query.total_amount,
+            pre_checkout_query.from_user.id,
+            getattr(pre_checkout_query, 'currency', 'XTR')
+        )
         bot.answer_pre_checkout_query(pre_checkout_query.id, ok=ok, error_message=None if ok else reason)
     except Exception as e:
         print(f"[PRE-CHECKOUT ERROR] {e}")
@@ -12313,13 +12886,20 @@ def mark_stars_charge_processed(charge_id):
 
 
 @bot.message_handler(content_types=['successful_payment'])
+@serialize_user_action
+@serialize_stars_payment
 def process_stars_successful_payment(message):
     try:
         sp = message.successful_payment
         payload = sp.invoice_payload
         stars_amount = sp.total_amount
 
-        ok, reason = validate_stars_payload(payload, stars_amount, message.from_user.id)
+        ok, reason = validate_stars_payload(
+            payload,
+            stars_amount,
+            message.from_user.id,
+            getattr(sp, 'currency', 'XTR')
+        )
         if not ok:
             print(f"[STARS SECURITY] rejected payment: {reason}; payload={payload!r}")
             return
@@ -12396,6 +12976,20 @@ def process_stars_successful_payment(message):
             target_name = target_econ.get('display_name', f"ID:{target_id}")
             t_link = make_link(chat_id, target_name, target_id, ping=True)
 
+            # Re-check one-time entitlements at delivery time: the target can
+            # have bought the same item after pre-checkout but before payment
+            # delivery. Coins/temporary VIP may still be gifted repeatedly.
+            if gift_kind == 'pass':
+                duplicate_error = stars_purchase_error(target_econ, 'vippass', actual_prod)
+            elif gift_kind == 'cosm':
+                duplicate_error = stars_purchase_error(target_econ, 'cosm', actual_prod)
+            else:
+                duplicate_error = None
+            if duplicate_error:
+                print(f"[STARS SECURITY] gift delivery blocked after target ownership changed: target={target_id} item={actual_prod}")
+                mark_stars_charge_processed(charge_id)
+                return
+
             # Начисление подарка
             if actual_prod in STARS_COIN_PACKS:
                 pack = STARS_COIN_PACKS[actual_prod]
@@ -12452,6 +13046,9 @@ def process_stars_successful_payment(message):
                         target_econ['profile_theme'] = theme_id
                 elif c_type == 'badge':
                     badge_emoji = cosm.get('emoji')
+                    target_econ.setdefault('paid_stars_items', [])
+                    if actual_prod not in target_econ['paid_stars_items']:
+                        target_econ['paid_stars_items'].append(actual_prod)
                     if badge_emoji:
                         inv = target_econ.setdefault('inventory', [])
                         if badge_emoji not in inv:
@@ -12631,6 +13228,9 @@ def process_stars_successful_payment(message):
                     return
                 elif c_type == 'badge':
                     badge_emoji = cosm['emoji']
+                    econ.setdefault('paid_stars_items', [])
+                    if cosm_id not in econ['paid_stars_items']:
+                        econ['paid_stars_items'].append(cosm_id)
                     inv = econ.setdefault('inventory', [])
                     if badge_emoji not in inv:
                         inv.append(badge_emoji)
@@ -12696,11 +13296,9 @@ def process_stars_successful_payment(message):
                     mark_stars_charge_processed(charge_id)
                     return
 
-        # Дефолтная благодарность если что-то иное
-        econ['balance'] += stars_amount * 35000
-        mark_dirty()
-        bot.reply_to(message, f"🎉 Спасибо за поддержку в размере <b>{stars_amount} ⭐️</b>! Начислено <b>+{stars_amount * 35000:,} Ня-коинов 🪙</b>! 😻", parse_mode='HTML')
-        mark_stars_charge_processed(charge_id)
+        # Неизвестный/неподдерживаемый товар нельзя превращать в коины.
+        print(f"[STARS SECURITY] unsupported product rejected: {prod_type_key!r}")
+        bot.reply_to(message, "❌ Неизвестный товар. Платёж не был автоматически преобразован в коины.", parse_mode='HTML')
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
