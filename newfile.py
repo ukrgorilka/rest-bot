@@ -753,7 +753,7 @@ PROFILE_GIFS = {
     },
     'mogger': {
         'name': '😎 Могер',
-        'price': 10,
+        'price': 5,
         'url': 'https://media1.tenor.com/m/sFC5l-YzoQAAAAAd/nikitas-venizelos.gif',
         'source_url': 'https://tenor.com/piGyaE6af6a.gif',
     },
@@ -810,7 +810,7 @@ STARS_COSMETICS = {
     # GIF-профили теперь покупаются только за Telegram Stars. Числа сохранены как цена в ⭐️.
     'gif_gulya': {'name': '🌸 GIF профиля: Гуль', 'stars': 4, 'type': 'gif', 'gif_id': 'gulya', 'desc': 'Анимация, прикреплённая к карточке профиля'},
     'gif_sakura': {'name': '🌸 GIF профиля: Сакура', 'stars': 3, 'type': 'gif', 'gif_id': 'sakura_gif', 'desc': 'Анимация, прикреплённая к карточке профиля'},
-    'gif_mogger': {'name': '😎 GIF профиля: Могер', 'stars': 10, 'type': 'gif', 'gif_id': 'mogger', 'desc': 'Анимация, прикреплённая к карточке профиля'},
+    'gif_mogger': {'name': '😎 GIF профиля: Могер', 'stars': 5, 'type': 'gif', 'gif_id': 'mogger', 'desc': 'Анимация, прикреплённая к карточке профиля'},
     'gif_cat': {'name': '🐈 GIF профиля: Кот', 'stars': 2, 'type': 'gif', 'gif_id': 'cat', 'desc': 'Анимация, прикреплённая к карточке профиля'}
 }
 
@@ -6181,7 +6181,8 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
 
     text = apply_font(raw_text, font_key)
 
-    # GIF — это сама карточка профиля: анимация отправляется с текстом профиля в caption.
+    # GIF отправляется отдельным сообщением, поэтому полный профиль всегда
+    # отправляется обычным текстом без обрезания и без caption-лимита.
     # ВАЖНО: Telegram ограничивает caption animation 1024 символами. Поэтому
     # мы НЕ обрезаем готовый профиль. Для GIF строится компактная версия,
     # в которой сохраняются все поля профиля, но убираются повторяющиеся
@@ -6189,69 +6190,29 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     gif_key = econ.get('profile_gif')
     gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
     gif_text = text
-    if gif_info and len(gif_text) > 1024:
-        compact_lines = [
-            f"{header}",
-            f"{premium_emoji('profile', '🐱')} 👤 {make_link(chat_id, user_tag, user_id, ping=False)}",
-            f"{premium_emoji('star', '⭐')} LVL <b>{lvl}</b> [{bar}] <b>{cur_exp}/{next_exp} EXP</b>",
-            f"🪖 Дурак: <b>{durak_rank}</b> | {durak_wins}W/{durak_losses}L",
-            f"⚖️ Карма: <b>{karma}</b> ({karma_title})",
-        ]
-        if vip_line:
-            compact_lines.append(vip_line.rstrip('\n'))
-        if stars_line:
-            compact_lines.append(stars_line.rstrip('\n'))
-        compact_lines.extend([
-            f"🔥 Стрик: <b>{streak_days} дн.</b> (x{min(2.0, 1.0 + (streak_days * 0.15)):.1f})",
-            f"💰 Кошелёк: <b>{econ['balance']} 🪙</b> | 🏦 Банк: <b>{econ.get('bank_deposit', 0)} 🪙</b>{loan_str}",
-            f"🚘 Гараж: <b>{veh_str}</b> | 💼 Работа: <b>{econ.get('work_exp', 0)} EXP</b>",
-            f"💍 Семья: <b>{marriage_info}</b> | 🏢 Бизнесы: <b>{biz_str}</b>",
-            f"🐾 Питомец: <b>{pet_info}</b>",
-            f"🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b> (/achievements)",
-            f"📊 Биометрия: 🍆 <b>{econ.get('dick_size', 15)} см</b> | 💦 <b>{econ.get('fap_count', 0)}</b> | 🧬 <b>{econ.get('chromosomes', 46)}</b> | 🧠 IQ <b>{econ.get('iq', 100)}</b>",
-            f"🥩 Жир: <b>{econ.get('fat', 20)}%</b> | 🦶 Пятка: <b>{econ.get('foot_size', 25)} см</b>",
-            f"📊 Сообщения: {msg_stats_str.replace(chr(10), ' | ')}",
-            f"😎 Могнул: <b>{econ.get('mog_count', 0)}</b>",
-            f"📈 Крипто: {portfolio_str}",
-            f"🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>",
-            f"🎒 Значки: {inv_str}",
-            f"🐟 Рыба: {fish_inv} | 🏹 Дичь: {hunt_inv}",
-        ])
-        gif_text = '\n'.join(compact_lines)
-
-        # Если пользовательские списки всё равно сделали caption слишком большим,
-        # это нельзя исправить обрезанием: Telegram физически не примет такой caption.
-        # В этом редком случае отправляем GIF без caption, а полный профиль —
-        # отдельным сообщением, чтобы информация никогда не терялась.
-        if len(gif_text) > 1024:
-            gif_text = None
 
     def _send_profile_gif(reply_to=None):
-        kwargs = {'reply_markup': markup, 'parse_mode': 'HTML'}
-        if gif_text is not None:
-            kwargs['caption'] = gif_text
-        if reply_to is not None:
-            kwargs['reply_to_message_id'] = reply_to
-        return bot.send_animation(chat_id, gif_info['url'], **kwargs)
+        # GIF отправляется отдельным сообщением, а карточка профиля — отдельно.
+        # Поэтому Telegram caption limit для animation больше не влияет на профиль.
+        if message_to_reply is not None:
+            card_msg = bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
+        else:
+            card_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        bot.send_animation(chat_id, gif_info['url'], parse_mode='HTML')
+        return card_msg
 
     if message_id_to_edit:
         # Если GIF активен, сама карточка должна быть animation-сообщением.
         # Сначала пытаемся изменить media (если старое сообщение уже GIF),
         # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
         if gif_info:
-            try:
-                media_kwargs = {'parse_mode': 'HTML'}
-                if gif_text is not None:
-                    media_kwargs['caption'] = gif_text
-                media = InputMediaAnimation(gif_info['url'], **media_kwargs)
-                bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup)
-                return
-            except Exception as media_error:
-                print(f"[PROFILE GIF MEDIA EDIT] {media_error}")
+            # Раньше GIF пытался стать самой карточкой через caption. Теперь
+            # карточка и GIF — два отдельных сообщения, поэтому при обновлении
+            # просто заменяем старую карточку новой и отправляем GIF отдельно.
             try:
                 bot.delete_message(chat_id, message_id_to_edit)
-            except Exception:
-                pass
+            except Exception as delete_error:
+                print(f"[PROFILE GIF CARD DELETE] {delete_error}")
             try:
                 _send_profile_gif()
                 return
