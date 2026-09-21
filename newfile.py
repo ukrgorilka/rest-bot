@@ -6053,36 +6053,6 @@ def cmd_profile_settings(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_profile_settings_view(message.chat.id, user_id, user_name)
 
-def _profile_gif_caption(text, max_len=1024):
-    """Подгоняет карточку профиля под лимит caption Telegram для GIF/animation.
-    Сохраняет HTML по целым строкам, чтобы не обрывать теги и не ломать parse_mode=HTML.
-    """
-    text = str(text or '')
-    if len(text) <= max_len:
-        return text
-
-    # Оставляем целые строки и резервируем место под предупреждение об усечении.
-    suffix = '\n<i>…Профиль сокращён в GIF-версии.</i>'
-    budget = max_len - len(suffix)
-    lines = text.split('\n')
-    kept = []
-    used = 0
-    for line in lines:
-        add = len(line) + (1 if kept else 0)
-        if used + add > budget:
-            break
-        kept.append(line)
-        used += add
-
-    if not kept:
-        # Крайний случай: даже первая строка слишком длинная.
-        plain = re.sub(r'<[^>]+>', '', text)
-        plain = html.escape(plain)
-        return plain[:max_len]
-
-    return '\n'.join(kept) + suffix
-
-
 def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
     econ = get_user_econ(user_id, user_tag, username=username)
     theme_key = econ.get('profile_theme', 'default')
@@ -6212,13 +6182,57 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     text = apply_font(raw_text, font_key)
 
     # GIF — это сама карточка профиля: анимация отправляется с текстом профиля в caption.
-    # Никакого отдельного сообщения с GIF больше не создаём.
+    # ВАЖНО: Telegram ограничивает caption animation 1024 символами. Поэтому
+    # мы НЕ обрезаем готовый профиль. Для GIF строится компактная версия,
+    # в которой сохраняются все поля профиля, но убираются повторяющиеся
+    # декоративные разделители и лишние подписи.
     gif_key = econ.get('profile_gif')
     gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
-    # У animation caption лимит Telegram — 1024 символа. Полная карточка
-    # профиля может быть длиннее, поэтому для GIF используем безопасную
-    # HTML-версию, обрезанную только по целым строкам.
-    gif_text = _profile_gif_caption(text) if gif_info else text
+    gif_text = text
+    if gif_info and len(gif_text) > 1024:
+        compact_lines = [
+            f"{header}",
+            f"{premium_emoji('profile', '🐱')} 👤 {make_link(chat_id, user_tag, user_id, ping=False)}",
+            f"{premium_emoji('star', '⭐')} LVL <b>{lvl}</b> [{bar}] <b>{cur_exp}/{next_exp} EXP</b>",
+            f"🪖 Дурак: <b>{durak_rank}</b> | {durak_wins}W/{durak_losses}L",
+            f"⚖️ Карма: <b>{karma}</b> ({karma_title})",
+        ]
+        if vip_line:
+            compact_lines.append(vip_line.rstrip('\n'))
+        if stars_line:
+            compact_lines.append(stars_line.rstrip('\n'))
+        compact_lines.extend([
+            f"🔥 Стрик: <b>{streak_days} дн.</b> (x{min(2.0, 1.0 + (streak_days * 0.15)):.1f})",
+            f"💰 Кошелёк: <b>{econ['balance']} 🪙</b> | 🏦 Банк: <b>{econ.get('bank_deposit', 0)} 🪙</b>{loan_str}",
+            f"🚘 Гараж: <b>{veh_str}</b> | 💼 Работа: <b>{econ.get('work_exp', 0)} EXP</b>",
+            f"💍 Семья: <b>{marriage_info}</b> | 🏢 Бизнесы: <b>{biz_str}</b>",
+            f"🐾 Питомец: <b>{pet_info}</b>",
+            f"🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b> (/achievements)",
+            f"📊 Биометрия: 🍆 <b>{econ.get('dick_size', 15)} см</b> | 💦 <b>{econ.get('fap_count', 0)}</b> | 🧬 <b>{econ.get('chromosomes', 46)}</b> | 🧠 IQ <b>{econ.get('iq', 100)}</b>",
+            f"🥩 Жир: <b>{econ.get('fat', 20)}%</b> | 🦶 Пятка: <b>{econ.get('foot_size', 25)} см</b>",
+            f"📊 Сообщения: {msg_stats_str.replace(chr(10), ' | ')}",
+            f"😎 Могнул: <b>{econ.get('mog_count', 0)}</b>",
+            f"📈 Крипто: {portfolio_str}",
+            f"🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>",
+            f"🎒 Значки: {inv_str}",
+            f"🐟 Рыба: {fish_inv} | 🏹 Дичь: {hunt_inv}",
+        ])
+        gif_text = '\n'.join(compact_lines)
+
+        # Если пользовательские списки всё равно сделали caption слишком большим,
+        # это нельзя исправить обрезанием: Telegram физически не примет такой caption.
+        # В этом редком случае отправляем GIF без caption, а полный профиль —
+        # отдельным сообщением, чтобы информация никогда не терялась.
+        if len(gif_text) > 1024:
+            gif_text = None
+
+    def _send_profile_gif(reply_to=None):
+        kwargs = {'reply_markup': markup, 'parse_mode': 'HTML'}
+        if gif_text is not None:
+            kwargs['caption'] = gif_text
+        if reply_to is not None:
+            kwargs['reply_to_message_id'] = reply_to
+        return bot.send_animation(chat_id, gif_info['url'], **kwargs)
 
     if message_id_to_edit:
         # Если GIF активен, сама карточка должна быть animation-сообщением.
@@ -6226,7 +6240,10 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
         # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
         if gif_info:
             try:
-                media = InputMediaAnimation(gif_info['url'], caption=gif_text, parse_mode='HTML')
+                media_kwargs = {'parse_mode': 'HTML'}
+                if gif_text is not None:
+                    media_kwargs['caption'] = gif_text
+                media = InputMediaAnimation(gif_info['url'], **media_kwargs)
                 bot.edit_message_media(media=media, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup)
                 return
             except Exception as media_error:
@@ -6236,7 +6253,7 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
             except Exception:
                 pass
             try:
-                bot.send_animation(chat_id, gif_info['url'], caption=gif_text, reply_markup=markup, parse_mode='HTML')
+                _send_profile_gif()
                 return
             except Exception as gif_error:
                 print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
@@ -6261,9 +6278,9 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     if gif_info:
         try:
             if message_to_reply:
-                bot.send_animation(chat_id, gif_info['url'], caption=gif_text, reply_markup=markup, parse_mode='HTML', reply_to_message_id=message_to_reply.message_id)
+                _send_profile_gif(message_to_reply)
             else:
-                bot.send_animation(chat_id, gif_info['url'], caption=gif_text, reply_markup=markup, parse_mode='HTML')
+                _send_profile_gif()
             return
         except Exception as gif_error:
             print(f"[PROFILE GIF ERROR] {gif_error}")
