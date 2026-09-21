@@ -791,6 +791,18 @@ VIP_BADGES = {
     'vip_badge_dragon': {'name': 'Дракон Империи', 'emoji': '🐲', 'stars': 5, 'desc': 'Мощь древнего дракона'}
 }
 
+DONOR_VEHICLES = {
+    'donor_lambo': {'name': '🏎 Lamborghini Aventador SVJ VIP', 'short': '🏎 Lambo VIP', 'stars': 8, 'cd_cut': 0.34, 'desc': '-34% ко всем таймерам', 'tier': 15, 'donor_only': True},
+    'donor_batmobile': {'name': '🦇 Batmobile Nya Edition', 'short': '🦇 Batmobile', 'stars': 12, 'cd_cut': 0.42, 'desc': '-42% ко всем таймерам', 'tier': 16, 'donor_only': True},
+    'donor_ufo': {'name': '🛸 НЛО Императора Ня', 'short': '🛸 НЛО', 'stars': 18, 'cd_cut': 0.50, 'desc': '-50% ко всем таймерам', 'tier': 17, 'donor_only': True},
+}
+
+DONOR_BUSINESSES = {
+    'donor_nightclub': {'name': '💎 VIP Ночной клуб', 'stars': 8, 'base_income': 4500, 'desc': 'Премиальный бизнес: 4,500 🪙/ч'},
+    'donor_casino': {'name': '🎰 Императорское казино', 'stars': 12, 'base_income': 8000, 'desc': 'Премиальный бизнес: 8,000 🪙/ч'},
+    'donor_spacecorp': {'name': '🚀 Космическая корпорация', 'stars': 18, 'base_income': 14000, 'desc': 'Премиальный бизнес: 14,000 🪙/ч'},
+}
+
 STARS_COSMETICS = {
     'bp_premium': {'name': '🎃 Премиум Хеллоуинский Pass', 'stars': 4, 'type': 'bp_premium', 'desc': 'Открывает премиум-ветку наград, Тыквокота и Тёмную тему!'},
     'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 4, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
@@ -811,7 +823,13 @@ STARS_COSMETICS = {
     'gif_gulya': {'name': '🌸 GIF профиля: Гуль', 'stars': 4, 'type': 'gif', 'gif_id': 'gulya', 'desc': 'Анимация, прикреплённая к карточке профиля'},
     'gif_sakura': {'name': '🌸 GIF профиля: Сакура', 'stars': 3, 'type': 'gif', 'gif_id': 'sakura_gif', 'desc': 'Анимация, прикреплённая к карточке профиля'},
     'gif_mogger': {'name': '😎 GIF профиля: Могер', 'stars': 5, 'type': 'gif', 'gif_id': 'mogger', 'desc': 'Анимация, прикреплённая к карточке профиля'},
-    'gif_cat': {'name': '🐈 GIF профиля: Кот', 'stars': 2, 'type': 'gif', 'gif_id': 'cat', 'desc': 'Анимация, прикреплённая к карточке профиля'}
+    'gif_cat': {'name': '🐈 GIF профиля: Кот', 'stars': 2, 'type': 'gif', 'gif_id': 'cat', 'desc': 'Анимация, прикреплённая к карточке профиля'},
+    'business_donor_nightclub': {'name': '💎 Донатный бизнес: VIP Ночной клуб', 'stars': 8, 'type': 'donor_business', 'business_id': 'donor_nightclub', 'desc': 'Навсегда: 4,500 🪙/ч'},
+    'business_donor_casino': {'name': '🎰 Донатный бизнес: Императорское казино', 'stars': 12, 'type': 'donor_business', 'business_id': 'donor_casino', 'desc': 'Навсегда: 8,000 🪙/ч'},
+    'business_donor_spacecorp': {'name': '🚀 Донатный бизнес: Космическая корпорация', 'stars': 18, 'type': 'donor_business', 'business_id': 'donor_spacecorp', 'desc': 'Навсегда: 14,000 🪙/ч'},
+    'vehicle_donor_lambo': {'name': '🏎 Донатная машина: Lamborghini VIP', 'stars': 8, 'type': 'donor_vehicle', 'vehicle_id': 'donor_lambo', 'desc': '-34% ко всем таймерам'},
+    'vehicle_donor_batmobile': {'name': '🦇 Донатная машина: Batmobile', 'stars': 12, 'type': 'donor_vehicle', 'vehicle_id': 'donor_batmobile', 'desc': '-42% ко всем таймерам'},
+    'vehicle_donor_ufo': {'name': '🛸 Донатный транспорт: НЛО Императора', 'stars': 18, 'type': 'donor_vehicle', 'vehicle_id': 'donor_ufo', 'desc': '-50% ко всем таймерам'}
 }
 
 
@@ -1958,12 +1976,31 @@ def merge_user_econ_data(dest, src):
     if src.get('vip_forever'):
         dest['vip_forever'] = True
 
-    v_dest = dest.get('vehicle')
-    v_src = src.get('vehicle')
+    # Объединяем полный гараж, а не только одну ранее экипированную машину.
+    dest_vehicles = dest.setdefault('vehicle_inventory', [])
+    src_vehicles = src.get('vehicle_inventory', [])
+    if not isinstance(dest_vehicles, list):
+        dest_vehicles = []
+        dest['vehicle_inventory'] = dest_vehicles
+    for vid in src_vehicles if isinstance(src_vehicles, list) else []:
+        if vid in VEHICLES or vid in DONOR_VEHICLES:
+            if vid not in dest_vehicles:
+                dest_vehicles.append(vid)
+
+    v_dest = dest.get('equipped_vehicle') or dest.get('vehicle')
+    v_src = src.get('equipped_vehicle') or src.get('vehicle')
     tier_dest = VEHICLES[v_dest]['tier'] if v_dest in VEHICLES else -1
     tier_src = VEHICLES[v_src]['tier'] if v_src in VEHICLES else -1
-    if tier_src > tier_dest:
+    if v_dest not in dest_vehicles and v_dest in (VEHICLES.keys() | DONOR_VEHICLES.keys()):
+        dest_vehicles.append(v_dest)
+    if v_src not in dest_vehicles and v_src in (VEHICLES.keys() | DONOR_VEHICLES.keys()):
+        dest_vehicles.append(v_src)
+    if v_src and (not v_dest or tier_src > tier_dest):
+        dest['equipped_vehicle'] = v_src
         dest['vehicle'] = v_src
+    elif v_dest:
+        dest['equipped_vehicle'] = v_dest
+        dest['vehicle'] = v_dest
 
     for eq in ['equipped_rod', 'equipped_bow', 'active_title', 'custom_title', 'badge', 'profile_theme', 'pfp_file_id', 'profile_font', 'premium_emoji_theme', 'premium_emoji_enabled']:
         if not dest.get(eq) and src.get(eq):
@@ -1994,6 +2031,13 @@ def merge_user_econ_data(dest, src):
     cp_dest = dest.setdefault('crypto_portfolio', {})
     for coin_k, cnt in src.get('crypto_portfolio', {}).items():
         cp_dest[coin_k] = cp_dest.get(coin_k, 0.0) + cnt
+
+    donor_biz_dest = dest.setdefault('donor_businesses', {})
+    donor_biz_src = src.get('donor_businesses', {})
+    if isinstance(donor_biz_src, dict):
+        for b_k, b_v in donor_biz_src.items():
+            if b_k in DONOR_BUSINESSES:
+                donor_biz_dest[b_k] = max(int(donor_biz_dest.get(b_k, 1) or 1), int(b_v or 1))
 
     biz_dest = dest.setdefault('businesses', {})
     biz_src = src.get('businesses', {})
@@ -2063,6 +2107,23 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         mark_dirty()
 
     u_data = db['economy'][key]
+    # Миграция гаража: все купленные машины сохраняются, а vehicle/equipped_vehicle
+    # остаётся совместимым алиасом для текущей экипированной машины.
+    vehicle_inventory = u_data.setdefault('vehicle_inventory', [])
+    if not isinstance(vehicle_inventory, list):
+        vehicle_inventory = []
+        u_data['vehicle_inventory'] = vehicle_inventory
+    legacy_vehicle = u_data.get('vehicle')
+    if legacy_vehicle in VEHICLES or legacy_vehicle in DONOR_VEHICLES:
+        if legacy_vehicle not in vehicle_inventory:
+            vehicle_inventory.append(legacy_vehicle)
+    equipped = u_data.get('equipped_vehicle')
+    if equipped not in vehicle_inventory:
+        equipped = legacy_vehicle if legacy_vehicle in vehicle_inventory else (vehicle_inventory[-1] if vehicle_inventory else None)
+        u_data['equipped_vehicle'] = equipped
+    if equipped and u_data.get('vehicle') != equipped:
+        u_data['vehicle'] = equipped
+        mark_dirty()
     # Integrity check: старый бесплатный VIP-грифон без подтверждённой Stars-покупки больше не считается действительным.
     # Если покупка была совершена в старой версии, stars_donated >= 3 позволяет сохранить питомца; новые покупки
     # всегда получают явный paid_stars_items entitlement.
@@ -2092,7 +2153,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('titles', []), ('active_title', None), ('custom_title', None),
         ('has_custom_title_cert', False), ('rings', []), ('active_ring', None),
         ('marriage', None), ('businesses', {}), ('biz_levels', {}),
-        ('last_biz_collect', time.time()), ('vehicle', None),
+        ('last_biz_collect', time.time()), ('vehicle', None), ('vehicle_inventory', []), ('equipped_vehicle', None), ('donor_businesses', {}),
         ('equipped_rod', None), ('equipped_bow', None), ('daily_tasks_date', ''),
         ('daily_progress', {}), ('daily_claimed', []), ('weekly_tasks_yearweek', ''),
         ('weekly_progress', {}), ('weekly_claimed', []), ('fish_inventory', {}),
@@ -5277,28 +5338,49 @@ def cmd_fap(message):
 # ---------------------------------------------------------
 def render_garage_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
-    cur_veh = econ.get('vehicle')
-    cur_name = VEHICLES[cur_veh]['name'] if cur_veh in VEHICLES else "Пешеход 🚶‍♂️"
+    equipped = econ.get('equipped_vehicle') or econ.get('vehicle')
+    if equipped in DONOR_VEHICLES:
+        cur_info = DONOR_VEHICLES[equipped]
+    else:
+        cur_info = VEHICLES.get(equipped)
+    cur_name = cur_info['name'] if cur_info else "Пешеход 🚶‍♂️"
 
+    owned = list(dict.fromkeys(econ.get('vehicle_inventory', [])))
     lines = [
-        f"🏎 <b>ЛИЧНЫЙ АВТОГАРАЖ</b> 😺",
+        "🏎 <b>ЛИЧНЫЙ АВТОГАРАЖ</b> 😺",
         "──────────────────────",
         f"👤 Владелец: {make_link(chat_id, user_name, user_id, ping=False)}",
-        f"🚘 Текущий транспорт: <b>{cur_name}</b>\n",
-        "<i>Транспорт навсегда снижает кулдауны на работу, охоту, рыбалку и замеры!</i>\n",
-        "<b>Каталог транспорта:</b> 😸"
+        f"🚘 Надет сейчас: <b>{cur_name}</b>",
+        "",
+        "<i>Купленные машины сохраняются навсегда. Надеть одновременно можно только одну.</i>",
+        "",
+        "<b>Мои машины:</b>"
     ]
-
     markup = InlineKeyboardMarkup(row_width=2)
-    veh_btns = []
+    owned_btns=[]
+    for vid in owned:
+        info = DONOR_VEHICLES.get(vid) or VEHICLES.get(vid)
+        if not info:
+            continue
+        status = " ✅ НАДЕТА" if vid == equipped else ""
+        lines.append(f"• <b>{info['name']}</b>{status} — {info.get('desc','')}")
+        if vid != equipped:
+            owned_btns.append(InlineKeyboardButton(f"Надеть {info['short']}", callback_data=f"equip_veh_{vid}:{user_id}"))
+    if owned_btns:
+        for i in range(0, len(owned_btns), 2):
+            markup.add(*owned_btns[i:i+2])
+    if not owned:
+        lines.append("• Пока нет купленного транспорта.")
+
+    lines += ["", "<b>Обычный каталог:</b>"]
+    catalog_btns=[]
     for v_id, v_info in VEHICLES.items():
-        is_owned = " (Куплено)" if cur_veh == v_id else ""
-        lines.append(f"• <b>{v_info['name']}</b> — <code>{v_info['price']} 🪙</code> ({v_info['desc']}){is_owned}")
-        veh_btns.append(InlineKeyboardButton(f"{v_info['short']} — {v_info['price']} 🪙", callback_data=f"buy_veh_{v_id}:{user_id}"))
-
-    for i in range(0, len(veh_btns), 2):
-        markup.add(*veh_btns[i:i+2])
-
+        if v_id in owned:
+            continue
+        lines.append(f"• <b>{v_info['name']}</b> — <code>{v_info['price']} 🪙</code> ({v_info['desc']})")
+        catalog_btns.append(InlineKeyboardButton(f"Купить {v_info['short']} — {v_info['price']} 🪙", callback_data=f"buy_veh_{v_id}:{user_id}"))
+    for i in range(0, len(catalog_btns), 2):
+        markup.add(*catalog_btns[i:i+2])
     lines.append("──────────────────────")
     text = "\n".join(lines)
 
@@ -5307,23 +5389,9 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
             return
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
-
-    if cur_veh and cur_veh in VEHICLES and VEHICLES[cur_veh].get('msg_id'):
-        try:
-            bot.copy_message(
-                chat_id=chat_id,
-                from_chat_id=MEDIA_TG_CHAT_ID,
-                message_id=VEHICLES[cur_veh]['msg_id'],
-                caption=text,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
-            return
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
     try:
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception:
-        pass
+    except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
 @bot.message_handler(commands=['garage', 'гараж'])
 @serialize_user_action
@@ -5556,6 +5624,12 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
 
     markup = InlineKeyboardMarkup(row_width=2)
     b_btns = []
+    donor_owned = econ.get('donor_businesses', {})
+    for db_id, db_info in DONOR_BUSINESSES.items():
+        if db_id in donor_owned:
+            lines.append(f"• <b>{db_info['name']}</b> — <b>навсегда</b> ({db_info['desc']}) 💎")
+    if donor_owned:
+        lines.append('\n💎 <b>Донатные бизнесы:</b>')
     for b_id, b_info in BUSINESSES.items():
         if b_id in user_biz:
             lvl = biz_levels.get(b_id, 1)
@@ -6194,11 +6268,13 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     def _send_profile_gif(reply_to=None):
         # GIF отправляется отдельным сообщением, а карточка профиля — отдельно.
         # Поэтому Telegram caption limit для animation больше не влияет на профиль.
+        # Сначала GIF, затем полноценная карточка профиля.
         if message_to_reply is not None:
+            bot.send_animation(chat_id, gif_info['url'], reply_to_message_id=message_to_reply.message_id)
             card_msg = bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
         else:
+            bot.send_animation(chat_id, gif_info['url'])
             card_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        bot.send_animation(chat_id, gif_info['url'], parse_mode='HTML')
         return card_msg
 
     if message_id_to_edit:
@@ -6310,7 +6386,7 @@ def stars_item_is_one_time(item):
     if not item:
         return False
     item_type = item.get('type')
-    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium', 'gif'}
+    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium', 'gif', 'donor_business', 'donor_vehicle'}
 
 def stars_item_owned(econ, kind, item_key):
     if kind == 'vippass':
@@ -6335,6 +6411,12 @@ def stars_item_owned(econ, kind, item_key):
         if t == 'gif':
             gif_id = item.get('gif_id')
             return bool(gif_id) and gif_id in econ.get('profile_gifs', [])
+        if t == 'donor_vehicle':
+            vid = item.get('vehicle_id')
+            return bool(vid) and vid in econ.get('vehicle_inventory', [])
+        if t == 'donor_business':
+            bid = item.get('business_id')
+            return bool(bid) and bid in econ.get('donor_businesses', {})
     return False
 
 def stars_purchase_error(econ, kind, item_key):
@@ -8215,6 +8297,19 @@ def _grant_all_donations(econ):
         elif item_type == 'title_cert':
             if 'custom_title' not in econ['paid_stars_items']:
                 econ['paid_stars_items'].append('custom_title')
+        elif item_type == 'donor_vehicle':
+            vid = item.get('vehicle_id')
+            if vid in DONOR_VEHICLES:
+                inv = econ.setdefault('vehicle_inventory', [])
+                if vid not in inv:
+                    inv.append(vid)
+                if not econ.get('equipped_vehicle'):
+                    econ['equipped_vehicle'] = vid
+                    econ['vehicle'] = vid
+        elif item_type == 'donor_business':
+            bid = item.get('business_id')
+            if bid in DONOR_BUSINESSES:
+                econ.setdefault('donor_businesses', {})[bid] = max(1, int(econ.get('donor_businesses', {}).get(bid, 1)))
     if 'pet_griffin' in STARS_COSMETICS and 'pet_griffin' not in econ['paid_stars_items']:
         econ['paid_stars_items'].append('pet_griffin')
 
@@ -11888,7 +11983,9 @@ def callback_inline(call):
             biz_levels = econ.get('biz_levels', {})
             now = time.time()
             hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
+            donor_biz_owned = econ.get('donor_businesses', {})
             base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
+            base_profit += sum(int(DONOR_BUSINESSES[b]['base_income'] * max(1, int(lvl or 1)) * hours_passed) for b, lvl in donor_biz_owned.items() if b in DONOR_BUSINESSES)
             if base_profit <= 0:
                 bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась! 😿", show_alert=True)
                 return
@@ -11906,29 +12003,41 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit} 🪙! 😻")
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
+        elif action_data.startswith('equip_veh_'):
+            v_id = action_data.replace('equip_veh_', '')
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            owned = econ.setdefault('vehicle_inventory', [])
+            if v_id not in owned or (v_id not in VEHICLES and v_id not in DONOR_VEHICLES):
+                bot.answer_callback_query(call.id, "❌ Эта машина не находится в вашем гараже.", show_alert=True)
+                return
+            econ['equipped_vehicle'] = v_id
+            econ['vehicle'] = v_id
+            mark_dirty()
+            info = DONOR_VEHICLES.get(v_id) or VEHICLES.get(v_id)
+            bot.answer_callback_query(call.id, f"🚘 Надета: {info['name']}")
+            render_garage_view(chat_id, user_id, user_name, call.message.message_id)
+
         elif action_data.startswith('buy_veh_'):
             v_id = action_data.replace('buy_veh_', '')
             if v_id in VEHICLES:
                 v_info = VEHICLES[v_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                cur_veh = econ.get('vehicle')
-                cur_tier = VEHICLES[cur_veh]['tier'] if cur_veh in VEHICLES else -1
-                new_tier = v_info.get('tier', 0)
-
-                if cur_veh == v_id:
-                    bot.answer_callback_query(call.id, "❌ Этот транспорт уже в вашем гараже! 😸", show_alert=True)
-                    return
-                if cur_tier > new_tier:
-                    bot.answer_callback_query(call.id, f"❌ У вас уже есть более мощный транспорт! 😾", show_alert=True)
+                owned = econ.setdefault('vehicle_inventory', [])
+                if v_id in owned:
+                    bot.answer_callback_query(call.id, "❌ Этот транспорт уже куплен. Надеть его можно из гаража! 😸", show_alert=True)
                     return
                 if econ['balance'] < v_info['price']:
                     bot.answer_callback_query(call.id, f"❌ Нужно {v_info['price']} 🪙! 😿", show_alert=True)
                     return
 
                 econ['balance'] -= v_info['price']
-                econ['vehicle'] = v_id
+                owned.append(v_id)
+                # Новая машина автоматически надевается только если ничего не надето.
+                if not econ.get('equipped_vehicle') and not econ.get('vehicle'):
+                    econ['equipped_vehicle'] = v_id
+                    econ['vehicle'] = v_id
                 mark_dirty()
-                bot.answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}! 😻")
+                bot.answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}! Машина сохранена в гараже. 😻")
                 render_garage_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data.startswith('buy_rod_'):
@@ -13074,6 +13183,21 @@ def process_stars_successful_payment(message):
                             target_econ['paid_stars_items'].append(actual_prod)
                         p_info = PETS_DATA[pet_id]
                         target_econ['pet'] = {'id': pet_id, 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+                elif c_type == 'donor_vehicle':
+                    vid = cosm.get('vehicle_id')
+                    if vid in DONOR_VEHICLES:
+                        target_econ.setdefault('vehicle_inventory', [])
+                        if vid not in target_econ['vehicle_inventory']:
+                            target_econ['vehicle_inventory'].append(vid)
+                        if not target_econ.get('equipped_vehicle'):
+                            target_econ['equipped_vehicle'] = vid
+                            target_econ['vehicle'] = vid
+                    prod_name = cosm.get('name', actual_prod)
+                elif c_type == 'donor_business':
+                    bid = cosm.get('business_id')
+                    if bid in DONOR_BUSINESSES:
+                        target_econ.setdefault('donor_businesses', {})[bid] = max(1, int(target_econ.get('donor_businesses', {}).get(bid, 1)))
+                    prod_name = cosm.get('name', actual_prod)
                 elif c_type == 'gif':
                     gif_id = cosm.get('gif_id')
                     if gif_id in PROFILE_GIFS:
@@ -13283,6 +13407,37 @@ def process_stars_successful_payment(message):
                         f"Бонус удачи: <b>+{p_info['luck_bonus']}%</b> ко всем играм, рыбалке и охоте! 😸",
                         parse_mode='HTML'
                     )
+                    mark_stars_charge_processed(charge_id)
+                    return
+                elif c_type == 'donor_vehicle':
+                    vid = cosm.get('vehicle_id')
+                    if vid not in DONOR_VEHICLES:
+                        bot.reply_to(message, '❌ Донатная машина не найдена.', parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id)
+                        return
+                    econ.setdefault('vehicle_inventory', [])
+                    if vid not in econ['vehicle_inventory']:
+                        econ['vehicle_inventory'].append(vid)
+                    if not econ.get('equipped_vehicle'):
+                        econ['equipped_vehicle'] = vid
+                        econ['vehicle'] = vid
+                    mark_dirty()
+                    info = DONOR_VEHICLES[vid]
+                    log_event('STARS DONOR VEHICLE', f'Игрок {user_link} получил {info["name"]} за {stars_amount} ⭐️!')
+                    bot.reply_to(message, f"🏎 <b>ДОНАТНАЯ МАШИНА ПОЛУЧЕНА!</b> 😻\n──────────────────────\n<b>{html.escape(info['name'])}</b> сохранена в гараже. Надеть её можно командой /garage. 😸", parse_mode='HTML')
+                    mark_stars_charge_processed(charge_id)
+                    return
+                elif c_type == 'donor_business':
+                    bid = cosm.get('business_id')
+                    if bid not in DONOR_BUSINESSES:
+                        bot.reply_to(message, '❌ Донатный бизнес не найден.', parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id)
+                        return
+                    econ.setdefault('donor_businesses', {})[bid] = max(1, int(econ.get('donor_businesses', {}).get(bid, 1)))
+                    mark_dirty()
+                    info = DONOR_BUSINESSES[bid]
+                    log_event('STARS DONOR BUSINESS', f'Игрок {user_link} получил {info["name"]} за {stars_amount} ⭐️!')
+                    bot.reply_to(message, f"💎 <b>ДОНАТНЫЙ БИЗНЕС ПОЛУЧЕН!</b> 😻\n──────────────────────\n<b>{html.escape(info['name'])}</b> добавлен навсегда. {html.escape(info['desc'])}. 😸", parse_mode='HTML')
                     mark_stars_charge_processed(charge_id)
                     return
                 elif c_type == 'gif':
