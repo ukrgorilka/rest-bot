@@ -798,9 +798,9 @@ DONOR_VEHICLES = {
 }
 
 DONOR_BUSINESSES = {
-    'donor_nightclub': {'name': '💎 VIP Ночной клуб', 'stars': 8, 'base_income': 4500, 'desc': 'Премиальный бизнес: 4,500 🪙/ч'},
-    'donor_casino': {'name': '🎰 Императорское казино', 'stars': 12, 'base_income': 8000, 'desc': 'Премиальный бизнес: 8,000 🪙/ч'},
-    'donor_spacecorp': {'name': '🚀 Космическая корпорация', 'stars': 18, 'base_income': 14000, 'desc': 'Премиальный бизнес: 14,000 🪙/ч'},
+    'donor_nightclub': {'name': '💎 VIP Ночной клуб', 'stars': 8, 'base_income': 4500, 'upgrade_cost': 3500, 'desc': 'Премиальный бизнес: 4,500 🪙/ч'},
+    'donor_casino': {'name': '🎰 Императорское казино', 'stars': 12, 'base_income': 8000, 'upgrade_cost': 6000, 'desc': 'Премиальный бизнес: 8,000 🪙/ч'},
+    'donor_spacecorp': {'name': '🚀 Космическая корпорация', 'stars': 18, 'base_income': 14000, 'upgrade_cost': 10000, 'desc': 'Премиальный бизнес: 14,000 🪙/ч'},
 }
 
 STARS_COSMETICS = {
@@ -813,12 +813,14 @@ STARS_COSMETICS = {
     'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
     'theme_anime': {'name': '🎀 Тема: Аниме Люкс VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_anime', 'desc': 'Премиальный аниме стиль профиля'},
     'theme_galaxy': {'name': '🌌 Тема: Бездна Сингулярности VIP', 'stars': 4, 'type': 'theme', 'theme_id': 'stars_galaxy', 'desc': 'Космическая стилистика сингулярности'},
+    # Донатные значки. Старые vip_badge_* ID оставлены как алиасы ниже,
+    # чтобы уже купленные предметы не исчезали после обновления бота.
     'badge_crown': {'name': '👑 Значок: Корона VIP', 'stars': 3, 'type': 'badge', 'emoji': '👑', 'desc': 'VIP значок рядом с ником'},
     'badge_star': {'name': '⭐️ Значок: Звезда Покровителя', 'stars': 3, 'type': 'badge', 'emoji': '⭐️', 'desc': 'Значок спонсора бота'},
     'badge_gem': {'name': '💎 Значок: Сияющий Алмаз', 'stars': 3, 'type': 'badge', 'emoji': '💎', 'desc': 'Драгоценный значок'},
     'badge_angel': {'name': '🪽 Значок: Крылья Ангела', 'stars': 4, 'type': 'badge', 'emoji': '🪽', 'desc': 'Ангельские крылья в чате'},
     'badge_galaxy': {'name': '🌌 Значок: Космос', 'stars': 4, 'type': 'badge', 'emoji': '🌌', 'desc': 'Галактический значок'},
-    'badge_dragon': {'name': '🐲 Значок: Дракон Империи', 'stars': 4, 'type': 'badge', 'emoji': '🐲', 'desc': 'Значок дракона'},
+    'badge_dragon': {'name': '🐉 Значок: Дракон Империи', 'stars': 4, 'type': 'badge', 'emoji': '🐉', 'desc': 'Значок дракона'},
     # GIF-профили теперь покупаются только за Telegram Stars. Числа сохранены как цена в ⭐️.
     'gif_gulya': {'name': '🌸 GIF профиля: Гуль', 'stars': 4, 'type': 'gif', 'gif_id': 'gulya', 'desc': 'Анимация, прикреплённая к карточке профиля'},
     'gif_sakura': {'name': '🌸 GIF профиля: Сакура', 'stars': 3, 'type': 'gif', 'gif_id': 'sakura_gif', 'desc': 'Анимация, прикреплённая к карточке профиля'},
@@ -2107,6 +2109,49 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         mark_dirty()
 
     u_data = db['economy'][key]
+
+    # Миграция старых донатных значков: в прошлой версии они имели
+    # ключи vip_badge_*. Не удаляем старые права и не заставляем игрока
+    # покупать их заново — переносим их на текущие canonical ID.
+    _legacy_badges = {
+        'vip_badge_crown': 'badge_crown',
+        'vip_badge_star': 'badge_star',
+        'vip_badge_gem': 'badge_gem',
+        'vip_badge_angel': 'badge_angel',
+        'vip_badge_galaxy': 'badge_galaxy',
+        'vip_badge_dragon': 'badge_dragon',
+    }
+    _paid = u_data.setdefault('paid_stars_items', [])
+    if not isinstance(_paid, list):
+        _paid = []
+        u_data['paid_stars_items'] = _paid
+    _inv = u_data.setdefault('inventory', [])
+    if not isinstance(_inv, list):
+        _inv = []
+        u_data['inventory'] = _inv
+    for _old_badge, _new_badge in _legacy_badges.items():
+        if _old_badge in _paid:
+            if _new_badge not in _paid:
+                _paid.append(_new_badge)
+            _emoji = STARS_COSMETICS[_new_badge]['emoji']
+            if _emoji not in _inv:
+                _inv.append(_emoji)
+            _paid.remove(_old_badge)
+            mark_dirty()
+
+    # Даже если старый entitlement хранился только в inventory, сохраняем
+    # соответствующий Stars-entitlement, чтобы предмет снова отображался
+    # как купленный и не терялся из донатной коллекции.
+    _emoji_to_badge = {
+        '👑': 'badge_crown', '⭐️': 'badge_star', '⭐': 'badge_star',
+        '💎': 'badge_gem', '🪽': 'badge_angel', '🌌': 'badge_galaxy',
+        '🐲': 'badge_dragon', '🐉': 'badge_dragon',
+    }
+    for _emoji, _badge_id in _emoji_to_badge.items():
+        if _emoji in _inv and _badge_id not in _paid:
+            _paid.append(_badge_id)
+            mark_dirty()
+
     # Миграция гаража: все купленные машины сохраняются, а vehicle/equipped_vehicle
     # остаётся совместимым алиасом для текущей экипированной машины.
     vehicle_inventory = u_data.setdefault('vehicle_inventory', [])
@@ -5614,51 +5659,56 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     user_biz = econ.setdefault('businesses', {})
     biz_levels = econ.setdefault('biz_levels', {})
-
+    donor_owned = econ.setdefault('donor_businesses', {})
     lines = [
-        "🏢 <b>КОММЕРЧЕСКАЯ НЕДВИЖИМОСТЬ И БИЗНЕСЫ 2.0</b> 😺",
+        "🏢 <b>МОИ БИЗНЕСЫ</b> 😺",
         "──────────────────────",
-        "Каждое предприятие приносит пассивный доход в час и прокачивается до <b>5 ур.</b>!\n",
-        "<b>Каталог предприятий:</b> 😸"
+        "Все купленные предприятия находятся здесь. Обычные покупаются за 🪙, донатные — только в ⭐️ донатном магазине. И те и другие можно прокачивать за 🪙 до 5 уровня.\n",
+        "<b>Мои предприятия:</b>"
     ]
-
     markup = InlineKeyboardMarkup(row_width=2)
-    b_btns = []
-    donor_owned = econ.get('donor_businesses', {})
-    for db_id, db_info in DONOR_BUSINESSES.items():
-        if db_id in donor_owned:
-            lines.append(f"• <b>{db_info['name']}</b> — <b>навсегда</b> ({db_info['desc']}) 💎")
-    if donor_owned:
-        lines.append('\n💎 <b>Донатные бизнесы:</b>')
+    btns = []
+
+    # Обычные бизнесы: показываем купленные и доступные для покупки.
     for b_id, b_info in BUSINESSES.items():
         if b_id in user_biz:
-            lvl = biz_levels.get(b_id, 1)
-            upg_cost = b_info['upgrade_cost'] * lvl
-            inc = int(b_info['base_income'] * (1 + (lvl-1)*0.45))
-            lines.append(f"• <b>{b_info['name']}</b>: Уровень <b>{lvl}/5</b> (Доход: ~{inc} 🪙/ч)")
+            lvl = max(1, min(5, int(biz_levels.get(b_id, 1))))
+            inc = int(b_info['base_income'] * (1 + (lvl - 1) * 0.45))
+            lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — ~{inc:,} 🪙/ч")
             if lvl < 5:
-                b_btns.append(InlineKeyboardButton(f"⭐ Ап {b_info['short']} (ур. {lvl+1}) — {upg_cost} 🪙", callback_data=f"upg_biz_{b_id}:{user_id}"))
-            else:
-                b_btns.append(InlineKeyboardButton(f"👑 {b_info['short']} (МАКС)", callback_data="noop"))
+                cost = b_info['upgrade_cost'] * lvl
+                btns.append(InlineKeyboardButton(f"⬆️ {b_info['short']} {lvl+1} — {cost:,} 🪙", callback_data=f"upg_biz_{b_id}:{user_id}"))
         else:
-            lines.append(f"• <b>{b_info['name']}</b> — <code>{b_info['price']} 🪙</code> (Базовый: {b_info['base_income']} 🪙/ч)")
-            b_btns.append(InlineKeyboardButton(f"Купить {b_info['short']} — {b_info['price']} 🪙", callback_data=f"buy_biz_{b_id}:{user_id}"))
+            lines.append(f"• {b_info['name']} — <code>{b_info['price']:,} 🪙</code>")
+            btns.append(InlineKeyboardButton(f"Купить {b_info['short']} — {b_info['price']:,} 🪙", callback_data=f"buy_biz_{b_id}:{user_id}"))
 
-    for i in range(0, len(b_btns), 2):
-        markup.add(*b_btns[i:i+2])
+    # Донатные бизнесы: после покупки попадают сюда же, но кнопки покупки за коины нет.
+    if donor_owned:
+        lines.append("\n💎 <b>ДОНАТНЫЕ ПРЕДПРИЯТИЯ</b>")
+    for b_id, b_info in DONOR_BUSINESSES.items():
+        if b_id not in donor_owned:
+            continue
+        lvl = max(1, min(5, int(biz_levels.get(b_id, 1))))
+        inc = int(b_info['base_income'] * (1 + (lvl - 1) * 0.45))
+        lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — ~{inc:,} 🪙/ч 💎")
+        if lvl < 5:
+            cost = int(b_info.get('upgrade_cost', 5000)) * lvl
+            btns.append(InlineKeyboardButton(f"💎⬆️ {b_info['name']} {lvl+1} — {cost:,} 🪙", callback_data=f"upg_donor_biz_{b_id}:{user_id}"))
 
+    for i in range(0, len(btns), 2):
+        markup.add(*btns[i:i+2])
     markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data=f"collect_biz_profit:{user_id}"))
+    markup.add(InlineKeyboardButton("⭐️ Купить донатный бизнес", callback_data=f"stars_cat_businesses:{user_id}"))
     markup.add(InlineKeyboardButton("🏢 Мой публичный бизнес", callback_data=f"pubbiz_view:{user_id}"), InlineKeyboardButton("💼 Вакансии", callback_data=f"pubbiz_jobs:{user_id}"))
-    lines.append("──────────────────────")
-    lines.append("🌴 <i>В ресте действует курортный бонус: +20% к прибыли!</i>")
-
+    lines += ["──────────────────────", "🌴 <i>В ресте действует курортный бонус: +20% к прибыли.</i>"]
     text = "\n".join(lines)
     if message_id:
-        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-        return
-    try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception as e: print(f"[NONFATAL ERROR] {e}")
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
 @serialize_user_action
@@ -5726,9 +5776,10 @@ def cmd_collect(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
     user_biz = econ.get('businesses', {})
+    donor_biz_owned = econ.get('donor_businesses', {})
     biz_levels = econ.get('biz_levels', {})
 
-    if not user_biz:
+    if not user_biz and not donor_biz_owned:
         bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>бизнесы</code> для покупки. 😾", parse_mode='HTML')
         return
 
@@ -5745,6 +5796,11 @@ def cmd_collect(message):
         if b_id in BUSINESSES:
             lvl = biz_levels.get(b_id, 1)
             inc = int(BUSINESSES[b_id]['base_income'] * (1 + (lvl - 1) * 0.45) * hours_passed)
+            base_profit += inc
+    for b_id, stored_lvl in donor_biz_owned.items():
+        if b_id in DONOR_BUSINESSES:
+            lvl = max(1, min(5, int(biz_levels.get(b_id, stored_lvl or 1))))
+            inc = int(DONOR_BUSINESSES[b_id]['base_income'] * (1 + (lvl - 1) * 0.45) * hours_passed)
             base_profit += inc
 
     if base_profit <= 0:
@@ -6430,84 +6486,86 @@ def stars_purchase_error(econ, kind, item_key):
 # ФУНКЦИИ МАГАЗИНА TELEGRAM STARS
 # ---------------------------------------------------------
 def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=None):
+    """Отдельный донатный магазин с категориями. Все товары здесь покупаются только за Telegram Stars."""
     econ = get_user_econ(user_id, user_name)
     now_ts = time.time()
-    
     vip_status = "❌ Не активен"
     if econ.get('vip_forever'):
         vip_status = "👑 Активен НАВСЕГДА"
     elif econ.get('vip_until', 0) > now_ts:
         vip_date = datetime.fromtimestamp(econ['vip_until'], tz=MSK_TZ).strftime('%d.%m.%Y %H:%M')
         vip_status = f"✅ До {vip_date}"
-        
     donated = econ.get('stars_donated', 0)
-
     markup = InlineKeyboardMarkup(row_width=1)
 
     if category == 'main':
         lines = [
-            "⭐️ <b>МАГАЗИН TELEGRAM STARS (ДОНАТ)</b> 😺",
+            "⭐️ <b>ДОНАТНЫЙ МАГАЗИН NYA</b> 😺",
             "──────────────────────",
             f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}",
-            f"⭐️ Ваш статус VIP: <b>{vip_status}</b>",
-            f"🌟 Всего поддержано: <b>{donated} ⭐️</b>\n",
-            "<i>Все товары продаются по низким ценам для поддержки развития бота! Оплата происходит официально внутри Telegram за Звёзды (Telegram Stars).</i> 😻\n",
+            f"⭐️ VIP: <b>{vip_status}</b>",
+            f"🌟 Всего поддержано: <b>{donated} ⭐️</b>",
+            "",
+            "<i>Все товары ниже приобретаются только за Telegram Stars. Донатные предметы не появляются в обычном магазине.</i> 😻",
+            "",
             "<b>Выберите категорию:</b>"
         ]
         markup.add(
-            InlineKeyboardButton("💰 Пакеты Ня-коинов (от 1 ⭐️)", callback_data=f"stars_cat_coins:{user_id}"),
-            InlineKeyboardButton("👑 VIP Nya Pass (Подписка)", callback_data=f"stars_cat_pass:{user_id}"),
-            InlineKeyboardButton("✨ Эксклюзивный визуал и статус", callback_data=f"stars_cat_cosm:{user_id}"),
-            InlineKeyboardButton("🔙 Обычный магазин коинов", callback_data=f"shop_main:{user_id}")
+            InlineKeyboardButton("💰 Коин-паки", callback_data=f"stars_cat_coins:{user_id}"),
+            InlineKeyboardButton("👑 VIP Pass", callback_data=f"stars_cat_pass:{user_id}"),
+            InlineKeyboardButton("🎨 Темы", callback_data=f"stars_cat_themes:{user_id}"),
+            InlineKeyboardButton("👑 Титулы", callback_data=f"stars_cat_titles:{user_id}"),
+            InlineKeyboardButton("✨ Значки", callback_data=f"stars_cat_badges:{user_id}"),
+            InlineKeyboardButton("🎞 GIF профиля", callback_data=f"stars_cat_gifs:{user_id}"),
+            InlineKeyboardButton("🐾 Донатные питомцы", callback_data=f"stars_cat_pets:{user_id}"),
+            InlineKeyboardButton("🏢 Донатные бизнесы", callback_data=f"stars_cat_businesses:{user_id}"),
+            InlineKeyboardButton("🏎 Донатные машины", callback_data=f"stars_cat_vehicles:{user_id}"),
         )
+        markup.add(InlineKeyboardButton("🔙 Обычный магазин", callback_data=f"shop_main:{user_id}"))
+
     elif category == 'coins':
-        lines = [
-            "💰 <b>ПАКЕТЫ НЯ-КОИНОВ ЗА ЗВЁЗДЫ</b> 😺",
-            "──────────────────────",
-            "<i>Мгновенное пополнение игрового баланса по супер-курсу:</i>\n"
-        ]
-        for p_k, p_v in STARS_COIN_PACKS.items():
-            lines.append(f"• <b>{p_v['name']}</b> — <b>{p_v['stars']} ⭐️</b>\n  <i>{p_v['desc']}</i>\n")
-            markup.add(InlineKeyboardButton(f"Купить {p_v['name']} ({p_v['stars']} ⭐️)", callback_data=f"star_buy_coins_{p_k}:{user_id}"))
+        lines = ["💰 <b>КОИНЫ ЗА STARS</b>", "──────────────────────"]
+        for k, v in STARS_COIN_PACKS.items():
+            lines.append(f"• <b>{v['name']}</b> — <b>{v['stars']} ⭐️</b>\n  <i>{v['desc']}</i>")
+            markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['stars']} ⭐️", callback_data=f"star_buy_coins_{k}:{user_id}"))
         lines.append("──────────────────────")
-        markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад", callback_data=f"stars_cat_main:{user_id}"))
 
     elif category == 'pass':
-        lines = [
-            "👑 <b>VIP NYA PASS (ПРИВИЛЕГИИ)</b> 😺",
-            "──────────────────────",
-            "<b>Что даёт VIP Nya Pass:</b>\n"
-            "• ⚡️ <b>-35% ко всем таймерам</b> (работа, рыбалка, охота, замеры)\n"
-            "• 🎁 <b>2.25x часового бонуса /bonus!</b>\n"
-            "• 🛡 <b>100% иммунитет</b> к карманным кражам (вас нельзя ограбить!)\n"
-            "• ⭐️ Эксклюзивная отметка VIP в карточке профиля (/profile)\n"
-            "• 💼 <b>+10% к зарплате и прибыли бизнесов</b>\n"
-            "• ⭐️ <b>+25% к опыту профиля</b>\n"
-            "• 😻 Особое уважение и статус в чате!\n"
-        ]
-        for pass_k, pass_v in STARS_VIP_PASS.items():
-            owned = stars_item_owned(econ, 'vippass', pass_k)
-            status = ' ✅ УЖЕ КУПЛЕН' if owned else ''
-            lines.append(f"• <b>{pass_v['name']}</b> — <b>{pass_v['stars']} ⭐️</b>{status}")
-            if not owned:
-                markup.add(InlineKeyboardButton(f"Купить {pass_v['name']} ({pass_v['stars']} ⭐️)", callback_data=f"star_buy_pass_{pass_k}:{user_id}"))
+        lines = ["👑 <b>VIP NYA PASS</b>", "──────────────────────", "• ⚡️ -35% таймеров\n• 🎁 2.25x /bonus\n• 🛡 защита от ограблений\n• 💼 +10% к работе и бизнесу\n• ⭐️ +25% EXP\n"]
+        for k, v in STARS_VIP_PASS.items():
+            if not stars_item_owned(econ, 'vippass', k):
+                markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['stars']} ⭐️", callback_data=f"star_buy_pass_{k}:{user_id}"))
+            else:
+                lines.append(f"• {v['name']} — уже куплен ✅")
         lines.append("──────────────────────")
-        markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад", callback_data=f"stars_cat_main:{user_id}"))
 
-    elif category == 'cosm':
-        lines = [
-            "✨ <b>ЭКСКЛЮЗИВНЫЙ ВИЗУАЛ И СТАТУС</b> 😺",
-            "──────────────────────",
-            "<i>Уникальная косметика и привилегии, доступные только за Звёзды:</i>\n"
-        ]
-        for c_k, c_v in STARS_COSMETICS.items():
-            owned = stars_item_owned(econ, 'cosm', c_k)
+    else:
+        type_map = {
+            'themes': ('🎨 <b>ДОНАТНЫЕ ТЕМЫ</b>', {'theme'}),
+            'titles': ('👑 <b>ДОНАТНЫЕ ТИТУЛЫ</b>', {'donor_title', 'title_cert'}),
+            'badges': ('✨ <b>ДОНАТНЫЕ ЗНАЧКИ</b>', {'badge'}),
+            'gifs': ('🎞 <b>GIF ДЛЯ ПРОФИЛЯ</b>', {'gif'}),
+            'pets': ('🐾 <b>ДОНАТНЫЕ ПИТОМЦЫ</b>', {'pet'}),
+            'businesses': ('🏢 <b>ДОНАТНЫЕ БИЗНЕСЫ</b>', {'donor_business'}),
+            'vehicles': ('🏎 <b>ДОНАТНЫЕ МАШИНЫ</b>', {'donor_vehicle'}),
+        }
+        if category not in type_map:
+            return render_stars_shop(chat_id, user_id, user_name, 'main', message_id)
+        title, wanted = type_map[category]
+        lines = [title, "──────────────────────"]
+        items = [(k, v) for k, v in STARS_COSMETICS.items() if v.get('type') in wanted]
+        if not items:
+            lines.append("Пока товаров нет.")
+        for k, v in items:
+            owned = stars_item_owned(econ, 'cosm', k)
             status = ' ✅ УЖЕ КУПЛЕНО' if owned else ''
-            lines.append(f"• <b>{c_v['name']}</b> — <b>{c_v['stars']} ⭐️</b>{status}\n  <i>{c_v['desc']}</i>")
+            lines.append(f"• <b>{v['name']}</b> — <b>{v['stars']} ⭐️</b>{status}\n  <i>{v['desc']}</i>")
             if not owned:
-                markup.add(InlineKeyboardButton(f"Купить: {c_v['name']} ({c_v['stars']} ⭐️)", callback_data=f"star_buy_cosm_{c_k}:{user_id}"))
+                markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['stars']} ⭐️", callback_data=f"star_buy_cosm_{k}:{user_id}"))
         lines.append("──────────────────────")
-        markup.add(InlineKeyboardButton("🔙 Назад в меню Stars", callback_data=f"stars_cat_main:{user_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад в донатный магазин", callback_data=f"stars_cat_main:{user_id}"))
 
     text = "\n".join(lines)
     if message_id:
@@ -10813,6 +10871,12 @@ def callback_inline(call):
             bot.answer_callback_query(call.id)
             return
 
+        elif action_data.startswith('stars_cat_'):
+            cat = action_data.replace('stars_cat_', '', 1)
+            render_stars_shop(chat_id, user_id, user_name, category=cat, message_id=call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
+
         # ПЕРЕХОД В РАЗДЕЛ «ГАРАЖ» ИЗ МАГАЗИНА
         elif action_data == 'shop_cat_garage':
             render_garage_view(chat_id, user_id, user_name, message_id=call.message.message_id)
@@ -11936,6 +12000,32 @@ def callback_inline(call):
             process_pet_walk(chat_id, user_id, user_name)
 
         # БИЗНЕС
+        elif action_data.startswith('upg_donor_biz_'):
+            b_id = action_data.replace('upg_donor_biz_', '')
+            if b_id not in DONOR_BUSINESSES:
+                bot.answer_callback_query(call.id, '❌ Донатный бизнес не найден.', show_alert=True)
+                return
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            owned = econ.get('donor_businesses', {})
+            if b_id not in owned:
+                bot.answer_callback_query(call.id, '❌ Сначала приобретите этот бизнес в донатном магазине.', show_alert=True)
+                return
+            biz_levels = econ.setdefault('biz_levels', {})
+            cur_lvl = max(1, int(biz_levels.get(b_id, 1)))
+            if cur_lvl >= 5:
+                bot.answer_callback_query(call.id, '❌ Максимальный 5-й уровень.', show_alert=True)
+                return
+            cost = int(DONOR_BUSINESSES[b_id].get('upgrade_cost', 5000)) * cur_lvl
+            if econ.get('balance', 0) < cost:
+                bot.answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙.', show_alert=True)
+                return
+            econ['balance'] -= cost
+            biz_levels[b_id] = cur_lvl + 1
+            owned[b_id] = cur_lvl + 1
+            mark_dirty()
+            bot.answer_callback_query(call.id, f'🎉 {DONOR_BUSINESSES[b_id]["name"]} улучшен до {cur_lvl+1} уровня!')
+            render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+
         elif action_data.startswith('upg_biz_'):
             b_id = action_data.replace('upg_biz_', '')
             if b_id in BUSINESSES:
