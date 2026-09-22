@@ -18,8 +18,8 @@ import time
 import telebot
 import psycopg2
 from psycopg2.extras import Json
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo
-from flask import Flask, jsonify, request, send_from_directory
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo, MenuButtonWebApp
+from flask import Flask, jsonify, request, send_from_directory, Response
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -45,6 +45,74 @@ MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp'
 MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
 MINES_GAMES = {}
 MINES_GAMES_LOCK = threading.RLock()
+SNAKE_GAMES = {}
+SNAKE_GAMES_LOCK = threading.RLock()
+SNAKE_DIFFICULTIES = {
+    'easy':   {'name': 'Лёгкая',   'width': 10, 'height': 10, 'coin_per_food': 10},
+    'medium': {'name': 'Средняя',  'width': 15, 'height': 15, 'coin_per_food': 25},
+    'hard':   {'name': 'Сложная',  'width': 20, 'height': 16, 'coin_per_food': 50},
+    'insane': {'name': 'Безумная', 'width': 26, 'height': 20, 'coin_per_food': 100},
+}
+SNAKE_MIN_MOVE_INTERVAL = 0.12
+MINIGAME_REWARD_SESSIONS = {}
+MINIGAME_REWARD_LOCK = threading.RLock()
+MINIGAME_REWARD_LIMITS = {
+    '2048': 5000,
+    'reaction': 1000,
+    'target': 1500,
+}
+
+@app.route('/api/minigames/start', methods=['POST'])
+def api_minigames_start():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    data = request.get_json(silent=True) or {}
+    game = str(data.get('game', ''))
+    if game not in MINIGAME_REWARD_LIMITS:
+        return jsonify(ok=False, error='Неизвестная игра'), 400
+    token = secrets.token_urlsafe(24)
+    with MINIGAME_REWARD_LOCK:
+        MINIGAME_REWARD_SESSIONS[token] = {
+            'user_id': int(user['id']), 'game': game, 'used': False, 'created': time.time()
+        }
+    return jsonify(ok=True, token=token, max_reward=MINIGAME_REWARD_LIMITS[game])
+
+@app.route('/api/minigames/reward', methods=['POST'])
+def api_minigames_reward():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    data = request.get_json(silent=True) or {}
+    token = str(data.get('token', ''))
+    game = str(data.get('game', ''))
+    try:
+        reward = max(0, int(data.get('reward', 0)))
+        score = max(0, int(data.get('score', 0)))
+    except Exception:
+        return jsonify(ok=False, error='Некорректный результат'), 400
+    with MINIGAME_REWARD_LOCK:
+        session = MINIGAME_REWARD_SESSIONS.get(token)
+        if not session or session['user_id'] != int(user['id']) or session['game'] != game or session['used']:
+            return jsonify(ok=False, error='Сессия игры недействительна'), 400
+        if time.time() - session['created'] > 3600:
+            session['used'] = True
+            return jsonify(ok=False, error='Сессия игры истекла'), 400
+        reward = min(reward, MINIGAME_REWARD_LIMITS[game])
+        session['used'] = True
+    name = user.get('username') or user.get('first_name') or 'Игрок'
+    econ = get_user_econ(int(user['id']), name, username=user.get('username'))
+    econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+    records = econ.setdefault('mini_game_records', {})
+    rec = records.setdefault(game, {'score': 0, 'reward': 0})
+    if score > int(rec.get('score', 0) or 0):
+        rec['score'] = score
+    rec['reward'] = max(int(rec.get('reward', 0) or 0), reward)
+    mark_dirty()
+    save_data(send_backup=False)
+    return jsonify(ok=True, reward=reward, balance=int(econ.get('balance', 0) or 0), record=rec['score'])
+
+MINI_MUSIC_FILE_ID = 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ'
 MINES_DIFFICULTIES = {
     'easy':   {'name': 'Лёгкая',   'width': 9,  'height': 9,  'mines': 10,  'reward': 250},
     'medium': {'name': 'Средняя',  'width': 16, 'height': 16, 'mines': 40,  'reward': 1000},
@@ -149,6 +217,15 @@ def _mines_finish(user, game):
     mark_dirty()
     save_data(send_backup=False)
 
+@app.route('/api/minigames/records')
+def api_minigames_records():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    econ = get_user_econ(int(user['id']), user.get('username') or user.get('first_name') or 'Игрок', username=user.get('username'))
+    records = econ.get('mini_game_records', {}) if isinstance(econ.get('mini_game_records', {}), dict) else {}
+    return jsonify(ok=True, records=records)
+
 @app.route('/minigames')
 @app.route('/minigames/')
 def mini_games_page():
@@ -161,6 +238,120 @@ def mini_games_static(filename):
     if not os.path.isdir(MINIAPP_DIR):
         return 'Mini App files not found: miniapp/', 404
     return send_from_directory(MINIAPP_DIR, filename)
+
+@app.route('/api/music')
+def api_mini_music():
+    """Отдаёт фоновую музыку из сообщения бота, не раскрывая BOT_TOKEN клиенту."""
+    try:
+        tg_file = bot.get_file(MINI_MUSIC_FILE_ID)
+        data = bot.download_file(tg_file.file_path)
+        return Response(data, mimetype='audio/mpeg', headers={
+            'Cache-Control': 'public, max-age=86400',
+            'Content-Disposition': 'inline; filename="nya-background.mp3"'
+        })
+    except Exception as e:
+        print(f'[MINI MUSIC] Ошибка загрузки: {e}')
+        return jsonify(ok=False, error='Музыка пока недоступна'), 503
+
+
+def _snake_public(game):
+    return {
+        'ok': True, 'game_id': game['game_id'], 'width': game['width'], 'height': game['height'],
+        'snake': list(game['snake']), 'food': game['food'], 'score': game['score'],
+        'reward': game['score'] * game['coin_per_food'], 'finished': game['finished'],
+        'coin_per_food': game['coin_per_food']
+    }
+
+def _snake_spawn_food(game):
+    occupied = set(game['snake'])
+    free = [i for i in range(game['width'] * game['height']) if i not in occupied]
+    return secrets.choice(free) if free else None
+
+def _snake_finish(user, game):
+    if game.get('rewarded'):
+        return
+    game['rewarded'] = True
+    reward = int(game['score']) * int(game['coin_per_food'])
+    if reward <= 0:
+        return
+    name = user.get('username') or user.get('first_name') or 'Игрок'
+    econ = get_user_econ(int(user['id']), name, username=user.get('username'))
+    econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+    mark_dirty()
+    save_data(send_backup=False)
+
+@app.route('/api/snake/start', methods=['POST'])
+def api_snake_start():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    data = request.get_json(silent=True) or {}
+    diff = SNAKE_DIFFICULTIES.get(str(data.get('difficulty', '')))
+    if not diff:
+        return jsonify(ok=False, error='Неизвестная сложность'), 400
+    w, h = diff['width'], diff['height']
+    cx, cy = w // 2, h // 2
+    snake = [cy * w + cx, cy * w + (cx - 1), cy * w + (cx - 2)]
+    game = {
+        'game_id': secrets.token_urlsafe(18), 'user_id': int(user['id']), 'width': w, 'height': h,
+        'snake': snake, 'direction': 'right', 'next_direction': 'right', 'food': None,
+        'score': 0, 'coin_per_food': diff['coin_per_food'], 'finished': False, 'rewarded': False,
+        'last_move': time.time(), 'created': time.time()
+    }
+    game['food'] = _snake_spawn_food(game)
+    with SNAKE_GAMES_LOCK:
+        SNAKE_GAMES[game['game_id']] = game
+    return jsonify(_snake_public(game))
+
+@app.route('/api/snake/move', methods=['POST'])
+def api_snake_move():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    data = request.get_json(silent=True) or {}
+    game_id = str(data.get('game_id', ''))
+    direction = str(data.get('direction', ''))
+    if direction not in {'up', 'down', 'left', 'right'}:
+        return jsonify(ok=False, error='Некорректное направление'), 400
+    opposites = {'up':'down', 'down':'up', 'left':'right', 'right':'left'}
+    with SNAKE_GAMES_LOCK:
+        game = SNAKE_GAMES.get(game_id)
+        if not game or game['user_id'] != int(user['id']):
+            return jsonify(ok=False, error='Игра не найдена'), 404
+        if game['finished']:
+            return jsonify(_snake_public(game))
+        now = time.time()
+        game['next_direction'] = direction
+        if now - game['last_move'] < SNAKE_MIN_MOVE_INTERVAL:
+            return jsonify(_snake_public(game))
+        if direction != opposites.get(game['direction']):
+            game['direction'] = direction
+        dxdy = {'up':(0,-1), 'down':(0,1), 'left':(-1,0), 'right':(1,0)}
+        dx, dy = dxdy[game['direction']]
+        head = game['snake'][0]
+        x, y = head % game['width'], head // game['width']
+        nx, ny = x + dx, y + dy
+        if nx < 0 or nx >= game['width'] or ny < 0 or ny >= game['height']:
+            game['finished'] = True
+        else:
+            new_head = ny * game['width'] + nx
+            growing = new_head == game['food']
+            body_check = game['snake'] if growing else game['snake'][:-1]
+            if new_head in body_check:
+                game['finished'] = True
+            else:
+                game['snake'].insert(0, new_head)
+                if growing:
+                    game['score'] += 1
+                    game['food'] = _snake_spawn_food(game)
+                    if game['food'] is None:
+                        game['finished'] = True
+                else:
+                    game['snake'].pop()
+        game['last_move'] = now
+        if game['finished']:
+            _snake_finish(user, game)
+        return jsonify(_snake_public(game))
 
 @app.route('/api/mines/start', methods=['POST'])
 def api_mines_start():
@@ -1953,6 +2144,14 @@ def setup_bot_commands():
         bot.set_my_commands(commands)
     except Exception as e:
         print(f"Ошибка установки меню команд: {e}")
+    # Кнопка «Открыть приложение» в меню Telegram ведёт прямо в тот же Mini App.
+    if MINIAPP_URL:
+        try:
+            bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+                text='🎮 Игры', url=f'{MINIAPP_URL}/minigames'
+            ))
+        except Exception as e:
+            print(f"Ошибка установки кнопки Mini App: {e}")
 
 def clean_tag(user_str):
     if not user_str:
