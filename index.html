@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>🐉 Dragon</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10131b;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+#wrap{height:100%;display:flex;flex-direction:column}#top{padding:10px 14px;display:flex;justify-content:space-between;font-weight:700;z-index:2}
+#game{flex:1;display:block;width:100%;background:linear-gradient(#5cc8ff,#d8f5ff 70%,#8bd17c 70%,#68b85b)}
+#msg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;background:rgba(0,0,0,.62);padding:22px;border-radius:18px;width:min(78%,320px);z-index:3}
+button{border:0;border-radius:14px;padding:12px 20px;font-size:18px;font-weight:700;background:#fff;color:#111}small{opacity:.8}
+</style></head>
+<body><div id="wrap"><div id="top"><span>🐉 Dragon</span><span id="score">0</span></div><canvas id="game"></canvas><div id="msg"><h2>🐉 Dragon</h2><p>Нажимай, чтобы лететь вверх.<br>Пролети между колоннами и собирай очки!</p><button id="start">Играть</button><p><small>Награда: 1 🪙 за 10 очков</small></p></div></div>
+<script>
+const tg=window.Telegram?.WebApp; if(tg){tg.ready();tg.expand();}
+const initData=tg?.initData||''; const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),msg=document.getElementById('msg'),startBtn=document.getElementById('start');
+let W,H,dpr,dragon,pipes,score,running,last,session;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=canvas.clientHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}addEventListener('resize',resize);resize();
+async function api(path,body){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData},body:JSON.stringify(body||{})});return r.json()}
+async function begin(){const r=await api('/api/dragon/start');if(!r.ok){msg.querySelector('p').innerHTML='Открой игру из Telegram через кнопку бота.';return}session=r.session;score=0;pipes=[];dragon={x:W*.25,y:H*.45,vy:0,r:18};running=true;last=performance.now();msg.style.display='none';scoreEl.textContent='0';requestAnimationFrame(loop)}
+function flap(){if(!running)return;dragon.vy=-430}
+addEventListener('pointerdown',e=>{if(e.target.tagName!=='BUTTON')flap()});addEventListener('keydown',e=>{if(e.code==='Space')flap()});startBtn.onclick=begin;
+function addPipe(){const gap=150;const min=70,max=Math.max(min,H-gap-70);const top=min+Math.random()*(max-min);pipes.push({x:W+40,top,gap,passed:false})}
+function hit(p){return dragon.x+dragon.r>p.x&&dragon.x-dragon.r<p.x+72&&(dragon.y-dragon.r<p.top||dragon.y+dragon.r>p.top+p.gap)}
+async function finish(){running=false;const r=await api('/api/dragon/finish',{session,score});msg.style.display='block';msg.querySelector('h2').textContent=r.ok?'🏁 Игра окончена':'❌ Ошибка';msg.querySelector('p').innerHTML=r.ok?`Очки: <b>${r.score}</b><br>Награда: <b>+${r.reward} 🪙</b><br>Баланс: <b>${r.balance} 🪙</b>`:'Не удалось получить награду.';startBtn.textContent='Играть снова'}
+function loop(t){if(!running)return;const dt=Math.min(.032,(t-last)/1000);last=t;dragon.vy+=1150*dt;dragon.y+=dragon.vy*dt;if(!pipes.length||pipes[pipes.length-1].x<W-230)addPipe();for(const p of pipes){p.x-=220*dt;if(!p.passed&&p.x+72<dragon.x){p.passed=true;score++;scoreEl.textContent=score}}pipes=pipes.filter(p=>p.x>-100);if(dragon.y-dragon.r<0||dragon.y+dragon.r>H||pipes.some(hit)){finish();return}draw();requestAnimationFrame(loop)}
+function draw(){ctx.clearRect(0,0,W,H);for(const p of pipes){ctx.fillStyle='#3e9b45';ctx.fillRect(p.x,0,72,p.top);ctx.fillRect(p.x,p.top+p.gap,72,H-p.top-p.gap);ctx.fillStyle='#2f7e36';ctx.fillRect(p.x-5,p.top-10,82,10);ctx.fillRect(p.x-5,p.top+p.gap,82,10)}ctx.font='34px sans-serif';ctx.fillText('🐉',dragon.x-19,dragon.y+12);}
+</script></body></html>
