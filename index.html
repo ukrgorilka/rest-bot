@@ -73,10 +73,13 @@ function startMusic(){if(!soundOn)return;stopMusic();music=audio[musicSel.value]
 function api(path,body){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData},body:JSON.stringify(body||{})}).then(r=>r.json())}
 async function begin(){
   play('button');
+  // Запускаем музыку непосредственно из обработчика клика.
+  // Если ждать fetch() до music.play(), Telegram/браузер может заблокировать autoplay.
+  if(soundOn) startMusic();
   const r=await api('/api/dragon/start');
   if(!r.ok){info.innerHTML='❌ Открой игру из Telegram через кнопку бота.';return}
   session=r.session;score=0;pipes=[];dragon={x:W*.25,y:H*.45,vy:0,r:18};running=true;startedAt=performance.now();last=startedAt;
-  msg.style.display='none';scoreEl.textContent='0';startMusic();requestAnimationFrame(loop);
+  msg.style.display='none';scoreEl.textContent='0';requestAnimationFrame(loop);
 }
 function flap(){if(!running)return;dragon.vy=-430;play('rubber')}
 addEventListener('pointerdown',e=>{if(e.target.closest('#controls')||e.target.tagName==='BUTTON'||e.target.tagName==='SELECT')return;flap()});
