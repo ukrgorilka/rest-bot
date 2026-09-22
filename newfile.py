@@ -8812,6 +8812,50 @@ def cmd_world_command(message):
 # ---------------------------------------------------------
 # ОБРАБОТКА CALLBACK КНОПОК
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# DRAGON GAME AUDIO: получение file_id для музыки и эффектов
+# Только владелец бота и только в личке.
+# После отправки аудио бот возвращает стабильный Telegram file_id.
+# ---------------------------------------------------------
+@bot.message_handler(content_types=['audio', 'document'])
+@serialize_user_action
+def dragon_audio_file_id(message):
+    try:
+        if not message or not getattr(message, 'from_user', None):
+            return
+        if message.from_user.id != ADMIN_ID:
+            return
+        if getattr(message.chat, 'type', '') != 'private':
+            return
+
+        file_id = None
+        file_name = ''
+        if getattr(message, 'audio', None):
+            file_id = message.audio.file_id
+            file_name = getattr(message.audio, 'file_name', '') or 'audio'
+        elif getattr(message, 'document', None):
+            doc = message.document
+            mime = (getattr(doc, 'mime_type', '') or '').lower()
+            name = getattr(doc, 'file_name', '') or 'document'
+            if not mime.startswith('audio/') and not name.lower().endswith(('.mp3', '.m4a', '.ogg', '.wav', '.aac', '.flac')):
+                return
+            file_id = doc.file_id
+            file_name = name
+
+        if not file_id:
+            return
+
+        bot.reply_to(
+            message,
+            f"🎵 <b>Аудио получено</b>\n"
+            f"📄 {html.escape(str(file_name))}\n"
+            f"🆔 <code>{html.escape(str(file_id))}</code>",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        print(f'[DRAGON AUDIO FILE_ID ERROR] {e}')
+
+
 @bot.message_handler(func=lambda message: True)
 @serialize_user_action
 def handle_messages(message):
