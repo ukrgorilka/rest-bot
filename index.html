@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>🐉 Dragon Game</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10131b;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+#wrap{height:100%;display:flex;flex-direction:column;position:relative}
+#top{padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700;z-index:5;background:rgba(0,0,0,.18)}
+#score{font-size:22px}#controls{display:flex;gap:7px;align-items:center}
+.ctrl{border:0;border-radius:12px;padding:8px 10px;font-size:14px;font-weight:700;background:rgba(255,255,255,.9);color:#111}
+select{max-width:125px;border:0;border-radius:12px;padding:8px;font-weight:700}
+#game{flex:1;display:block;width:100%;background:linear-gradient(#5cc8ff,#d8f5ff 70%,#8bd17c 70%,#68b85b)}
+#msg{position:absolute;left:50%;top:53%;transform:translate(-50%,-50%);text-align:center;background:rgba(0,0,0,.72);padding:20px;border-radius:20px;width:min(78%,330px);z-index:10;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+button.main{border:0;border-radius:14px;padding:12px 22px;font-size:18px;font-weight:700;background:#fff;color:#111}
+small{opacity:.8}.hidden{display:none!important}
+#confetti{position:absolute;inset:0;pointer-events:none;z-index:20}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="top">
+    <span>🐉 Dragon</span>
+    <span id="score">0</span>
+    <div id="controls">
+      <select id="music" aria-label="Музыка">
+        <option value="dreiton">🎵 Dreiton</option>
+        <option value="minecraft">🎵 Minecraft</option>
+        <option value="moog_city_2">🎵 Moog City 2</option>
+      </select>
+      <button class="ctrl" id="sound">🔊</button>
+    </div>
+  </div>
+  <canvas id="game"></canvas>
+  <canvas id="confetti" class="hidden"></canvas>
+  <div id="msg">
+    <h2>🐉 Dragon Game</h2>
+    <p id="info">Нажимай на экран, чтобы лететь вверх.<br>Пролети между колоннами и набирай очки!</p>
+    <button class="main" id="start">Играть</button>
+    <p><small>🪙 Награда: 5 коинов за очко<br>Лимит наград: 2000 🪙 в сутки</small></p>
+  </div>
+</div>
+<script>
+const tg=window.Telegram?.WebApp;
+if(tg){tg.ready();tg.expand();}
+const initData=tg?.initData||'';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const conf=document.getElementById('confetti'),cctx=conf.getContext('2d');
+const scoreEl=document.getElementById('score'),msg=document.getElementById('msg'),info=document.getElementById('info');
+const startBtn=document.getElementById('start'),soundBtn=document.getElementById('sound'),musicSel=document.getElementById('music');
+let W,H,dpr,dragon,pipes,score,running,last,session,startedAt=0,bestLocal=Number(localStorage.getItem('dragon_best')||0);
+let soundOn=localStorage.getItem('dragon_sound')!=='off';
+let music;
+const audio={
+  dreiton:new Audio('/api/dragon/audio/dreiton'),
+  minecraft:new Audio('/api/dragon/audio/minecraft'),
+  moog_city_2:new Audio('/api/dragon/audio/moog_city_2'),
+  rubber:new Audio('/api/dragon/audio/rubber'),
+  dragon:new Audio('/api/dragon/audio/dragon'),
+  univers:new Audio('/api/dragon/audio/univers'),
+  children:new Audio('/api/dragon/audio/children'),
+  button:new Audio('/api/dragon/audio/button')
+};
+Object.values(audio).forEach(a=>{a.preload='auto';a.volume=.55});
+audio.dreiton.loop=audio.minecraft.loop=audio.moog_city_2.loop=true;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=Math.max(200,canvas.clientHeight);canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);conf.width=W*dpr;conf.height=H*dpr;cctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+function play(name){if(!soundOn)return;const a=audio[name];if(!a)return;try{a.currentTime=0;a.play().catch(()=>{});}catch(e){}}
+function stopMusic(){Object.keys(audio).filter(k=>audio[k].loop).forEach(k=>{audio[k].pause();audio[k].currentTime=0})}
+function startMusic(){if(!soundOn)return;stopMusic();music=audio[musicSel.value];music.loop=true;music.volume=.28;music.play().catch(()=>{})}
+function api(path,body){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData},body:JSON.stringify(body||{})}).then(r=>r.json())}
+async function begin(){
+  play('button');
+  const r=await api('/api/dragon/start');
+  if(!r.ok){info.innerHTML='❌ Открой игру из Telegram через кнопку бота.';return}
+  session=r.session;score=0;pipes=[];dragon={x:W*.25,y:H*.45,vy:0,r:18};running=true;startedAt=performance.now();last=startedAt;
+  msg.style.display='none';scoreEl.textContent='0';startMusic();requestAnimationFrame(loop);
+}
+function flap(){if(!running)return;dragon.vy=-430;play('rubber')}
+addEventListener('pointerdown',e=>{if(e.target.closest('#controls')||e.target.tagName==='BUTTON'||e.target.tagName==='SELECT')return;flap()});
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();flap()}});
+startBtn.onclick=begin;
+soundBtn.onclick=()=>{soundOn=!soundOn;localStorage.setItem('dragon_sound',soundOn?'on':'off');soundBtn.textContent=soundOn?'🔊':'🔇';if(soundOn)startMusic();else stopMusic();play('button')};
+soundBtn.textContent=soundOn?'🔊':'🔇';
+musicSel.onchange=()=>{play('button');if(running)startMusic()};
+function addPipe(){
+  const gap=Math.max(145,Math.min(175,H*.27));
+  const min=55,max=Math.max(min,H-gap-55);
+  let top=min+Math.random()*(max-min);
+  if(pipes.length){const prev=pipes[pipes.length-1].top;const maxDelta=Math.max(70,H*.16);top=Math.max(min,Math.min(max,prev+(Math.random()*2-1)*maxDelta));}
+  pipes.push({x:W+40,top,gap,passed:false});
+}
+function hit(p){return dragon.x+dragon.r>p.x&&dragon.x-dragon.r<p.x+72&&(dragon.y-dragon.r<p.top||dragon.y+dragon.r>p.top+p.gap)}
+async function finish(){
+  running=false;stopMusic();play('dragon');
+  const duration=(performance.now()-startedAt)/1000;
+  const r=await api('/api/dragon/finish',{session,score,duration});
+  msg.style.display='block';
+  if(r.ok){
+    const newRecord=score>bestLocal;
+    if(newRecord){bestLocal=score;localStorage.setItem('dragon_best',String(bestLocal));play('children');confetti();}
+    if(r.reward>0)play('univers');
+    msg.querySelector('h2').textContent=newRecord?'🏆 Новый рекорд!':'🏁 Игра окончена';
+    info.innerHTML=`Очки: <b>${r.score}</b><br>Награда: <b>+${r.reward} 🪙</b><br>Лучший результат: <b>${r.best_score}</b><br>Осталось дневной награды: <b>${r.daily_remaining} 🪙</b>`;
+  }else{
+    msg.querySelector('h2').textContent='❌ Ошибка';info.textContent='Не удалось получить результат игры. Попробуй ещё раз.';
+  }
+  startBtn.textContent='Играть снова';
+}
+function loop(t){
+  if(!running)return;
+  const dt=Math.min(.032,(t-last)/1000);last=t;dragon.vy+=1150*dt;dragon.y+=dragon.vy*dt;
+  if(!pipes.length||pipes[pipes.length-1].x<W-230)addPipe();
+  for(const p of pipes){p.x-=220*dt;if(!p.passed&&p.x+72<dragon.x){p.passed=true;score++;scoreEl.textContent=score}}
+  pipes=pipes.filter(p=>p.x>-100);
+  if(dragon.y-dragon.r<0||dragon.y+dragon.r>H||pipes.some(hit)){finish();return}
+  draw();requestAnimationFrame(loop)
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  for(const p of pipes){ctx.fillStyle='#3e9b45';ctx.fillRect(p.x,0,72,p.top);ctx.fillRect(p.x,p.top+p.gap,72,H-p.top-p.gap);ctx.fillStyle='#2f7e36';ctx.fillRect(p.x-5,p.top-10,82,10);ctx.fillRect(p.x-5,p.top+p.gap,82,10)}
+  ctx.font='34px sans-serif';ctx.fillText('🐉',dragon.x-19,dragon.y+12);
+}
+let confettiPieces=[],confettiUntil=0;
+function confetti(){
+  conf.classList.remove('hidden');confettiPieces=Array.from({length:90},()=>({x:W/2,y:H*.35,vx:(Math.random()-.5)*8,vy:-Math.random()*7-3,size:4+Math.random()*6,rot:Math.random()*6}));confettiUntil=performance.now()+2200;requestAnimationFrame(confettiLoop)
+}
+function confettiLoop(t){
+  cctx.clearRect(0,0,W,H);for(const p of confettiPieces){p.x+=p.vx;p.vy+=.18;p.y+=p.vy;p.rot+=.1;cctx.save();cctx.translate(p.x,p.y);cctx.rotate(p.rot);cctx.fillStyle=`hsl(${Math.random()*360},90%,60%)`;cctx.fillRect(-p.size/2,-p.size/2,p.size,p.size);cctx.restore()}
+  if(t<confettiUntil)requestAnimationFrame(confettiLoop);else{cctx.clearRect(0,0,W,H);conf.classList.add('hidden')}
+}
+</script>
+</body>
+</html>
