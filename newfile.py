@@ -2111,6 +2111,7 @@ def setup_bot_commands():
         BotCommand('games', '🎮 Mini Games'),
         BotCommand('profile', '👤 Профиль'),
         BotCommand('stars', '⭐️ Stars магазин'),
+        BotCommand('gift_stars', '🎁 Подарить Stars товар другу'),
         BotCommand('settings', '🌐 Язык / настройки'),
     ]
     try:
@@ -10107,7 +10108,7 @@ def handle_messages(message):
     elif text_lower.startswith(('мем', '/meme')): cmd_meme(message); return
     elif text_lower.startswith(('фанфик', '/story', '/fanfic')): cmd_story(message); return
     elif text_lower in ['аптека', 'больница', '/pharmacy']: cmd_pharmacy(message); return
-    elif text_lower.startswith(('подарить звезды', 'подарок звезды', '/gift_stars')): cmd_gift_stars(message); return
+    elif text_lower.startswith(('подарить звезды', 'подарок звезды', 'подарок за стар', 'подарок за stars', 'подарить stars', '/gift_stars')): cmd_gift_stars(message); return
 
     # ТОПЫ ТЕКСТОМ
     elif text_lower in ['топ', 'топы', 'лидеры', 'топ богачей', 'топ баланс', 'топ денег']: render_top_menu(chat_id, user_id=user_id, category='rich'); return
@@ -11565,6 +11566,14 @@ def callback_inline(call):
             bot.answer_callback_query(call.id)
             return
 
+        elif action_data in ('business_refresh','pet_refresh','lottery_refresh','bp_refresh'):
+            if action_data == 'business_refresh': render_business_view(chat_id, user_id, user_name, call.message.message_id)
+            elif action_data == 'pet_refresh': render_pet_view(chat_id, user_id, user_name, call.message.message_id)
+            elif action_data == 'lottery_refresh': render_lottery_view(chat_id, user_id, user_name, call.message.message_id)
+            else: render_halloween_bp_view(chat_id, user_id, user_name, call.message.message_id)
+            bot.answer_callback_query(call.id, '🔄 Обновлено!')
+            return
+
         elif action_data.startswith('stars_cat_'):
             cat = action_data.replace('stars_cat_', '', 1)
             render_stars_shop(chat_id, user_id, user_name, category=cat, message_id=call.message.message_id)
@@ -12888,16 +12897,17 @@ def callback_inline(call):
         elif action_data == 'bank_refresh':
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-        elif action_data == 'bank_dep_100':
+        elif action_data in ('bank_dep_100','bank_dep_1000'):
+            amount = 1000 if action_data == 'bank_dep_1000' else 100
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if econ['balance'] < 100:
-                bot.answer_callback_query(call.id, "❌ Недостаточно средств на руках! 😿", show_alert=True)
+            if econ['balance'] < amount:
+                bot.answer_callback_query(call.id, f"❌ Недостаточно: нужно {amount:,} 🪙! 😿".replace(',', ' '), show_alert=True)
                 return
-            econ['balance'] -= 100
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + 100
-            check_achievements(user_id, user_name, 'bank_deposit', 100, chat_id, username=user_username)
+            econ['balance'] -= amount
+            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amount
+            check_achievements(user_id, user_name, 'bank_deposit', amount, chat_id, username=user_username)
             mark_dirty()
-            bot.answer_callback_query(call.id, "✅ Внесено 100 🪙 на депозит! 😸")
+            bot.answer_callback_query(call.id, f"✅ Внесено {amount:,} 🪙! 😸".replace(',', ' '))
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_dep_all':
@@ -12913,15 +12923,16 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"✅ Внесено {b} 🪙 на депозит! 😻")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-        elif action_data == 'bank_wd_100':
+        elif action_data in ('bank_wd_100','bank_wd_1000'):
+            amount = 1000 if action_data == 'bank_wd_1000' else 100
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if econ.get('bank_deposit', 0) < 100:
-                bot.answer_callback_query(call.id, "❌ В банке меньше 100 🪙! 😿", show_alert=True)
+            if econ.get('bank_deposit', 0) < amount:
+                bot.answer_callback_query(call.id, f"❌ В банке меньше {amount:,} 🪙! 😿".replace(',', ' '), show_alert=True)
                 return
-            econ['bank_deposit'] -= 100
-            econ['balance'] += 100
+            econ['bank_deposit'] -= amount
+            econ['balance'] += amount
             mark_dirty()
-            bot.answer_callback_query(call.id, "✅ Снято 100 🪙 с депозита! 😸")
+            bot.answer_callback_query(call.id, f"✅ Снято {amount:,} 🪙! 😸".replace(',', ' '))
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_wd_all':
@@ -14307,6 +14318,215 @@ def process_stars_successful_payment(message):
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
+
+# =========================================================
+# NYABOT 3.0 — UX-УЛУЧШЕНИЯ СУЩЕСТВУЮЩИХ ФУНКЦИЙ
+# Не добавляем новые игровые механики: улучшаем отображение,
+# навигацию, расчёты и последствия уже существующих действий.
+# =========================================================
+
+def _n3_num(value):
+    try:
+        return f"{int(value):,}".replace(',', ' ')
+    except Exception:
+        return str(value)
+
+def _n3_bar(cur, total, width=10):
+    try:
+        cur=float(cur); total=max(1,float(total))
+        filled=max(0,min(width,int(cur/total*width)))
+        return '█'*filled+'░'*(width-filled)
+    except Exception:
+        return '░'*width
+
+def _n3_business_snapshot(econ):
+    user_biz=econ.get('businesses',{}) or {}; donor=econ.get('donor_businesses',{}) or {}; levels=econ.get('biz_levels',{}) or {}
+    income=0; count=0
+    for bid in list(user_biz)+list(donor):
+        info=BUSINESSES.get(bid) or DONOR_BUSINESSES.get(bid)
+        if not info: continue
+        lvl=max(1,min(5,int(levels.get(bid, user_biz.get(bid, donor.get(bid,1)) or 1))))
+        income += int(info['base_income']*(1+(lvl-1)*0.45)); count+=1
+    last=econ.get('last_biz_collect',time.time()); elapsed=max(0,time.time()-last)
+    stored=int(income*elapsed/3600) if income else 0
+    return income,count,stored
+
+def _n3_send_or_edit(chat_id,text,markup,message_id=None):
+    if message_id:
+        try:
+            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
+            return
+        except Exception: pass
+    bot.send_message(chat_id,text,reply_markup=markup,parse_mode='HTML')
+
+# ---- Профиль: компактный, но с реальным прогрессом и общей экономикой ----
+def send_user_profile(chat_id,user_tag,user_id,message_to_reply=None,message_id_to_edit=None,username=None):
+    try:
+        econ=get_user_econ(user_id,user_tag,username=username)
+        lvl,exp,next_exp,bar=get_account_level(econ.get('account_exp',0))
+        biz_income,biz_count,_=_n3_business_snapshot(econ)
+        pet=econ.get('pet')
+        pet_text='нет'
+        if pet:
+            pexp=int(pet.get('pet_exp',0)); plvl=1+pexp//100
+            pet_text=f"{pet.get('name','Питомец')} • ур. {plvl} • {pexp%100}/100 EXP"
+        streak=int(econ.get('bonus_streak',0) or 0)
+        ach=len(econ.get('achievements',[]) or [])
+        total=len(ACHIEVEMENTS)
+        text=(f"👤 <b>ПРОФИЛЬ</b> 😺\n──────────────────────\n"
+              f"🐱 Игрок: {make_link(chat_id,user_tag,user_id,ping=False)}\n"
+              f"⭐ Уровень: <b>{lvl}</b> [{bar}]\n"
+              f"📈 EXP: <b>{_n3_num(exp)}/{_n3_num(next_exp)}</b>\n"
+              f"💰 Баланс: <b>{_n3_num(econ.get('balance',0))} 🪙</b> | 🏦 {_n3_num(econ.get('bank_deposit',0))} 🪙\n"
+              f"🏢 Бизнесы: <b>{biz_count}</b> • доход <b>{_n3_num(biz_income)} 🪙/ч</b>\n"
+              f"🐾 Питомец: <b>{html.escape(str(pet_text))}</b>\n"
+              f"🔥 Серия: <b>{streak} дн.</b> • 🏆 Ачивки: <b>{ach}/{total}</b>\n"
+              f"──────────────────────")
+        markup=InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton('⚙️ Настройки профиля',callback_data=f'open_profile_settings:{user_id}'))
+        gif_key=econ.get('profile_gif'); gif=PROFILE_GIFS.get(gif_key) if gif_key else None
+        if gif:
+            cap=re.sub(r'<[^>]+>','',html.unescape(text))[:1000]
+            bot.send_animation(chat_id,gif['url'],caption=cap,reply_markup=markup)
+        elif message_id_to_edit:
+            _n3_send_or_edit(chat_id,text,markup,message_id_to_edit)
+        elif message_to_reply:
+            bot.reply_to(message_to_reply,text,reply_markup=markup,parse_mode='HTML')
+        else: bot.send_message(chat_id,text,reply_markup=markup,parse_mode='HTML')
+    except Exception as e:
+        print(f'[PROFILE 3.0 ERROR] {e}')
+        try: bot.reply_to(message_to_reply,text,parse_mode='HTML') if message_to_reply else bot.send_message(chat_id,text,parse_mode='HTML')
+        except Exception: pass
+
+# ---- Бизнесы: доход, накоплено, окупаемость и быстрый сбор ----
+def render_business_view(chat_id,user_id,user_name,message_id=None):
+    econ=get_user_econ(user_id,user_name); income,count,stored=_n3_business_snapshot(econ)
+    levels=econ.get('biz_levels',{}) or {}; owned=econ.get('businesses',{}) or {}; donor=econ.get('donor_businesses',{}) or {}
+    lines=["🏢 <b>МОИ БИЗНЕСЫ 3.0</b> 😺","──────────────────────",
+           f"📊 Общий доход: <b>{_n3_num(income)} 🪙/ч</b>",f"💰 Накоплено сейчас: <b>{_n3_num(stored)} 🪙</b>",""]
+    btns=[]
+    for bid in list(owned)+list(donor):
+        info=BUSINESSES.get(bid) or DONOR_BUSINESSES.get(bid)
+        if not info: continue
+        lvl=max(1,min(5,int(levels.get(bid,owned.get(bid,donor.get(bid,1)) or 1))))
+        inc=int(info['base_income']*(1+(lvl-1)*0.45)); line=f"• <b>{info['name']}</b> — ур. <b>{lvl}/5</b> • <b>{_n3_num(inc)} 🪙/ч</b>"
+        if lvl<5:
+            cost=int(info['upgrade_cost']*lvl); delta=max(1,int(inc*0.45)); pay=cost/delta if delta else 0
+            line += f"\n  ⬆️ След. уровень: <b>{_n3_num(cost)} 🪙</b> • окупаемость ≈ <b>{pay:.1f} ч</b>"
+            btns.append(InlineKeyboardButton(f"⬆️ {info.get('short',info['name'])} → {lvl+1}",callback_data=f"upg_biz_{bid}:{user_id}"))
+        lines.append(line)
+    if not count: lines.append("😿 Пока нет купленных предприятий.")
+    markup=InlineKeyboardMarkup(row_width=2)
+    for i in range(0,len(btns),2): markup.add(*btns[i:i+2])
+    markup.add(InlineKeyboardButton(f"💰 Собрать всё (+{_n3_num(stored)} 🪙)",callback_data=f"collect_biz_profit:{user_id}"))
+    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'business_refresh:{user_id}'))
+    markup.add(InlineKeyboardButton('⭐️ Донатные бизнесы',callback_data=f'stars_cat_businesses:{user_id}'))
+    lines += ["──────────────────────","💡 После улучшения доход и окупаемость пересчитываются сразу."]
+    _n3_send_or_edit(chat_id,'\n'.join(lines),markup,message_id)
+
+# ---- Банк: сумма, начисленные проценты и время следующего периода ----
+def render_bank_view(chat_id,user_id,user_name,message_id=None):
+    econ=get_user_econ(user_id,user_name); earned=update_bank_interest(econ); mark_dirty()
+    dep=int(econ.get('bank_deposit',0) or 0); pocket=int(econ.get('balance',0) or 0)
+    last=float(econ.get('last_bank_calc',time.time())); left=max(0,6*3600-(time.time()-last)); h=int(left//3600); m=int((left%3600)//60)
+    rate_gain=int(dep*0.0025) if dep else 0
+    markup=InlineKeyboardMarkup(row_width=2)
+    markup.add(InlineKeyboardButton('📥 +1 000',callback_data=f'bank_dep_1000:{user_id}'),InlineKeyboardButton('📥 Внести всё',callback_data=f'bank_dep_all:{user_id}'))
+    markup.add(InlineKeyboardButton('📤 1 000',callback_data=f'bank_wd_1000:{user_id}'),InlineKeyboardButton('📤 Снять всё',callback_data=f'bank_wd_all:{user_id}'))
+    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'bank_refresh:{user_id}'))
+    text=(f"🏦 <b>НЯ-БАНК</b> 😺\n──────────────────────\n"
+          f"💳 На депозите: <b>{_n3_num(dep)} 🪙</b>\n💵 В кармане: <b>{_n3_num(pocket)} 🪙</b>\n"
+          f"📈 Начислено процентов: <b>+{_n3_num(earned)} 🪙</b>\n"
+          f"💎 Следующий период: <b>через {h}ч {m}м</b> • примерно <b>+{_n3_num(rate_gain)} 🪙</b>\n"
+          f"📊 Ставка: <b>+0.25% каждые 6 часов</b>\n──────────────────────\n"
+          f"💡 Используйте кнопки или команды <code>банк положить 500</code> / <code>банк снять 500</code>.")
+    _n3_send_or_edit(chat_id,text,markup,message_id)
+
+# ---- Питомец: уровень, EXP и фактический бонус от состояния ----
+def render_pet_view(chat_id,user_id,user_name,message_id=None):
+    econ=get_user_econ(user_id,user_name); pet=econ.get('pet')
+    if not pet:
+        markup=InlineKeyboardMarkup(); markup.add(InlineKeyboardButton('🐾 Открыть зоомагазин',callback_data=f'shop_cat_pets_0:{user_id}'))
+        _n3_send_or_edit(chat_id,'🐾 <b>У вас пока нет питомца!</b> 😿\n\nКупите друга в зоомагазине.',markup,message_id); return
+    update_pet_stats(pet); mark_dirty()
+    pexp=int(pet.get('pet_exp',0)); plvl=1+pexp//100; cur=pexp%100
+    hunger=int(pet.get('hunger',100)); clean=int(pet.get('cleanliness',100)); state=max(0,min(100,(hunger+clean)//2))
+    base=int(pet.get('luck_bonus',10)); effective=max(0,int(base*state/100))
+    hbar=_n3_bar(hunger,100,10); cbar=_n3_bar(clean,100,10); ebar=_n3_bar(cur,100,10)
+    markup=InlineKeyboardMarkup(row_width=2)
+    markup.add(InlineKeyboardButton('🍖 Покормить 30 🪙',callback_data=f'pet_feed:{user_id}'),InlineKeyboardButton('🧼 Искупать 20 🪙',callback_data=f'pet_wash:{user_id}'))
+    markup.add(InlineKeyboardButton('🦮 Гулять',callback_data=f'pet_walk_btn:{user_id}'),InlineKeyboardButton('👗 Одежда',callback_data=f'pet_clothes:{user_id}'))
+    markup.add(InlineKeyboardButton('🐾 Зоомагазин',callback_data=f'shop_cat_pets_0:{user_id}'),InlineKeyboardButton('🔄 Обновить',callback_data=f'pet_refresh:{user_id}'))
+    text=(f"🐾 <b>ПИТОМЕЦ: {html.escape(str(pet.get('name','Питомец')))}</b> 😺\n──────────────────────\n"
+          f"⭐ Уровень: <b>{plvl}</b> • EXP <b>{cur}/100</b> [{ebar}]\n"
+          f"🍗 Сытость: <b>{hunger}%</b> [{hbar}]\n🧼 Чистота: <b>{clean}%</b> [{cbar}]\n"
+          f"✨ Базовый бонус: <b>+{base}%</b> • сейчас: <b>+{effective}%</b>\n"
+          f"💡 Состояние питомца: <b>{state}%</b> — чем лучше уход, тем выше действующий бонус.\n──────────────────────")
+    _n3_send_or_edit(chat_id,text,markup,message_id)
+
+# ---- Задания: визуальный прогресс и награда в одной строке ----
+def format_daily_tasks(user_id,user_tag):
+    tasks,econ=get_daily_tasks(user_id,user_tag); w_tasks,_=get_weekly_tasks(user_id,user_tag)
+    day=['Понедельник','Вторник','Среда','Четверг','Пятница','Суббота','Воскресенье'][now_msk().weekday()]
+    lines=[f"📋 <b>ЗАДАНИЯ — {day.upper()}</b>","──────────────────────","☀️ <b>Ежедневные</b>"]
+    done_count=0
+    for key,desc,target,reward in tasks:
+        cur=min(int(econ.get('daily_progress',{}).get(key,0)),target); done=key in econ.get('daily_claimed',[])
+        if done: done_count+=1
+        lines.append(f"{'✅' if done else '🔄'} {desc}\n   [{_n3_bar(cur,target,8)}] <b>{cur}/{target}</b> • 🎁 +{_n3_num(reward)} 🪙")
+    lines.append(f"\n📅 <b>Еженедельные</b>")
+    for key,desc,target,reward in w_tasks:
+        cur=min(int(econ.get('weekly_progress',{}).get(key,0)),target); done=key in econ.get('weekly_claimed',[])
+        lines.append(f"{'✅' if done else '🔄'} {desc}\n   [{_n3_bar(cur,target,8)}] <b>{cur}/{target}</b> • 🎁 +{_n3_num(reward)} 🪙")
+    lines += ["──────────────────────",f"📊 Сегодня выполнено: <b>{done_count}/{len(tasks)}</b>"]
+    if tasks and done_count==len(tasks): lines.append("🎉 <b>Все ежедневные задания выполнены!</b> 😻")
+    return '\n'.join(lines)
+
+# ---- Лотерея: участники, свои билеты и время/состояние розыгрыша ----
+def render_lottery_view(chat_id,user_id,user_name,message_id=None):
+    lottery=db.setdefault('lottery',{'tickets':{},'pot':0,'last_draw':0}); tickets=lottery.get('tickets',{}) or {}; total=sum(tickets.values()); mine=tickets.get(str(user_id),0); pot=int(lottery.get('pot',0) or 0)
+    participants=sum(1 for v in tickets.values() if v>0)
+    markup=InlineKeyboardMarkup(row_width=2); markup.add(InlineKeyboardButton('🎟 1 билет • 100 🪙',callback_data=f'buy_ticket_1:{user_id}'),InlineKeyboardButton('🎟 5 билетов • 500 🪙',callback_data=f'buy_ticket_5:{user_id}'))
+    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'lottery_refresh:{user_id}'))
+    text=(f"🎟 <b>ДЖЕКПОТ-ЛОТЕРЕЯ</b> 😺\n──────────────────────\n💰 Джекпот: <b>{_n3_num(pot)} 🪙</b>\n"
+          f"🎫 Билетов: <b>{total}/10</b> • 👥 Участников: <b>{participants}</b>\n🎟 Ваших билетов: <b>{mine}</b>\n"
+          f"🎯 Шанс зависит от количества ваших билетов.\n──────────────────────\n💡 При достижении 10 билетов розыгрыш запускается автоматически.")
+    _n3_send_or_edit(chat_id,text,markup,message_id)
+
+# ---- Battle Pass: понятный прогресс и статус каждой ключевой награды ----
+def render_halloween_bp_view(chat_id,user_id,user_name,message_id=None):
+    econ=get_user_econ(user_id,user_name); bp_exp=int(econ.get('bp_exp',0) or 0); prem=bool(econ.get('bp_premium')); lvl,in_exp,req,bar=get_user_bp_level(bp_exp)
+    pct=int(in_exp/max(1,req)*100)
+    status='👑 Премиум активен' if prem else '🔒 Бесплатная ветка'
+    rewards=[(15,'🎃 Значок Тыквы',False),(20,'🐱 Тыквоголовый Кот',True),(30,'👑 Титул «🎃 Повелитель Тыкв»',False),(30,'🎨 Тёмная тема Хэллоуина',True)]
+    lines=["🎃 <b>ХЕЛЛОУИНСКИЙ BATTLE PASS</b> 🦇","──────────────────────",f"🏆 Уровень: <b>{lvl}/30</b> [{bar}] <b>{pct}%</b>",f"📈 До следующего уровня: <b>{max(0,req-in_exp)} EXP</b>",f"⭐ Статус: <b>{status}</b>","","<b>Ключевые награды:</b>"]
+    for rl,name,pr in rewards:
+        got=lvl>=rl; locked=(not got) or (pr and not prem)
+        icon='🔒' if locked else '🎁' if not got else '✅'
+        need='' if got and not(pr and not prem) else f' • нужно LVL {rl}' + (' + Premium' if pr else '')
+        lines.append(f"{icon} {name}{need}")
+    markup=InlineKeyboardMarkup(); markup.add(InlineKeyboardButton('🎁 Забрать доступные награды',callback_data=f'claim_bp_rewards:{user_id}'))
+    if not prem: markup.add(InlineKeyboardButton('⭐️ Премиум за 4 Stars',callback_data=f'buy_bp_prem_stars:{user_id}'))
+    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'bp_refresh:{user_id}'))
+    _n3_send_or_edit(chat_id,'\n'.join(lines),markup,message_id)
+
+# ---- Обычный магазин: статусы и быстрый вход в Stars-магазин ----
+def send_shop_menu(chat_id,user_id,user_tag,message_id=None):
+    econ=get_user_econ(user_id,user_tag); owned=sum(1 for k in ['badge','custom_title','equipped_vehicle','pet'] if econ.get(k));
+    markup=InlineKeyboardMarkup(row_width=2)
+    markup.add(InlineKeyboardButton('⭐️ Stars-магазин',callback_data=f'shop_cat_stars_main:{user_id}'))
+    markup.add(InlineKeyboardButton('✨ Значки',callback_data=f'shop_cat_badges_0:{user_id}'),InlineKeyboardButton('👑 Титулы',callback_data=f'shop_cat_titles_0:{user_id}'))
+    markup.add(InlineKeyboardButton('🎨 Темы',callback_data=f'shop_cat_themes:{user_id}'),InlineKeyboardButton('🧰 Расходники',callback_data=f'shop_cat_buffs:{user_id}'))
+    markup.add(InlineKeyboardButton('💍 Кольца',callback_data=f'shop_cat_rings:{user_id}'),InlineKeyboardButton('🐾 Питомцы',callback_data=f'shop_cat_pets_0:{user_id}'))
+    markup.add(InlineKeyboardButton('🏎 Гараж',callback_data=f'shop_cat_garage:{user_id}'),InlineKeyboardButton('🪴 Семена',callback_data=f'shop_cat_garden:{user_id}'))
+    markup.add(InlineKeyboardButton('🎙 Стример',callback_data=f'shop_cat_stream:{user_id}'),InlineKeyboardButton('🎞 GIF профиля',callback_data=f'shop_cat_gifs:{user_id}'))
+    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'shop_main:{user_id}'))
+    text=(f"🏪 <b>МАГАЗИН NYA</b> 😺\n──────────────────────\n"
+          f"💰 Баланс: <b>{_n3_num(econ.get('balance',0))} 🪙</b>\n"
+          f"📦 Уже экипировано/есть: <b>{owned}</b>\n\n"
+          f"💡 Внутри категории после покупки предмет можно использовать/экипировать, а донатные товары вынесены в ⭐ Stars-магазин.")
+    _n3_send_or_edit(chat_id,text,markup,message_id)
+
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ---------------------------------------------------------
