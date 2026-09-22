@@ -1783,6 +1783,7 @@ def get_chat_settings(chat_id):
             'flood_protection': False,
             'flood_admins': False,
             'auto_reactions': True,
+            'bot_paused': False,
             'welcome_enabled': True,
             'timezone_offset': 3,
             'remind_minutes': 60
@@ -1794,6 +1795,7 @@ def get_chat_settings(chat_id):
         sett.setdefault('flood_protection', False)
         sett.setdefault('flood_admins', False)
         sett.setdefault('auto_reactions', True)
+        sett.setdefault('bot_paused', False)
         sett.setdefault('welcome_enabled', True)
         # Раньше стоял жёсткий лимит 30/60 дней — теперь ограничения нет.
         # Не вызываем mark_dirty() при обычном чтении настроек.
@@ -2013,9 +2015,14 @@ def merge_user_econ_data(dest, src):
     if src.get('has_custom_title_cert'):
         dest['has_custom_title_cert'] = True
 
-    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts', 'achievements', 'paid_stars_items']:
+    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts', 'achievements', 'paid_stars_items', 'profile_gifs']:
         combined = list(dict.fromkeys(dest.get(list_field, []) + src.get(list_field, [])))
         dest[list_field] = combined
+
+    # Старый активный GIF также переносим при объединении tag_аккаунта
+    # с аккаунтом по Telegram ID.
+    if not dest.get('profile_gif') and src.get('profile_gif'):
+        dest['profile_gif'] = src['profile_gif']
 
     # Одноразовые Stars-энтитлменты тоже обязаны переживать объединение
     # старого tag_аккаунта с новым id_аккаунтом.
@@ -2153,6 +2160,33 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         if _emoji in _inv and _badge_id not in _paid:
             _paid.append(_badge_id)
             mark_dirty()
+
+    # МИГРАЦИЯ GIF: раньше право на купленный GIF могло оставаться только
+    # в paid_stars_items. После миграции/объединения это приводило к пустому
+    # profile_gifs и GIF исчезал из магазина/профиля. Восстанавливаем только
+    # реально подтверждённые покупки.
+    _profile_gifs = u_data.setdefault('profile_gifs', [])
+    if not isinstance(_profile_gifs, list):
+        _profile_gifs = []
+        u_data['profile_gifs'] = _profile_gifs
+    _paid_stars = u_data.setdefault('paid_stars_items', [])
+    if not isinstance(_paid_stars, list):
+        _paid_stars = []
+        u_data['paid_stars_items'] = _paid_stars
+    for _cosm_key, _cosm in STARS_COSMETICS.items():
+        if _cosm.get('type') != 'gif':
+            continue
+        _gif_id = _cosm.get('gif_id')
+        if _cosm_key in _paid_stars and _gif_id in PROFILE_GIFS and _gif_id not in _profile_gifs:
+            _profile_gifs.append(_gif_id)
+            mark_dirty()
+    _active_gif = u_data.get('profile_gif')
+    if _active_gif in PROFILE_GIFS and _active_gif not in _profile_gifs:
+        _profile_gifs.append(_active_gif)
+        mark_dirty()
+    if _active_gif not in PROFILE_GIFS and _profile_gifs:
+        u_data['profile_gif'] = _profile_gifs[-1]
+        mark_dirty()
 
     # Миграция гаража: все купленные машины сохраняются, а vehicle/equipped_vehicle
     # остаётся совместимым алиасом для текущей экипированной машины.
@@ -2497,6 +2531,16 @@ def can_process_user_message(message):
     user_username = (message.from_user.username or '').lower()
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
     is_super_admin = (user_id == ADMIN_ID)
+
+    # Пауза привязана только к текущему чату. Глобальный bot_active больше
+    # не используется как выключатель, поэтому один остановленный чат не
+    # может сломать работу бота для всех остальных пользователей.
+    if not is_super_admin and getattr(message.chat, 'type', '') in ('group', 'supergroup'):
+        try:
+            if get_chat_settings(message.chat.id).get('bot_paused', False):
+                return False
+        except Exception as e:
+            print(f'[CHAT PAUSE ERROR] {e}')
 
     # Запоминаем чаты, где пользователь реально встречался. Это позволяет
     # строить чатовые топы без смешивания участников разных чатов.
@@ -7474,6 +7518,17 @@ def render_activity_leaderboard(chat_id, period='day'):
     key='day_count' if period=='day' else 'week_count'; label='СЕГОДНЯ' if period=='day' else 'ЭТУ НЕДЕЛЮ'
     items=[]
     for info in db.get('economy',{}).values():
+        if not isinstance(info, dict):
+            continue
+        chat_ids = info.get('chat_ids', [])
+        if not isinstance(chat_ids, list):
+            continue
+        try:
+            in_chat = int(chat_id) in {int(x) for x in chat_ids}
+        except (TypeError, ValueError):
+            in_chat = False
+        if not in_chat:
+            continue
         count=info.get('msg_stats',{}).get(key,0)
         if count>0: items.append((count,info))
     items.sort(key=lambda x:x[0],reverse=True)
@@ -8604,8 +8659,9 @@ def cmd_game_stats(message):
 @serialize_user_action
 def cmd_bot_status(message):
     if not _owner_only(message): return
-    bot_state='🟢 работает' if db.get('bot_active',True) else '🔴 спящий режим'; neon='🟢 подключена' if DATABASE_URL else '🟡 локальный fallback'
-    bot.reply_to(message,f"🟢 <b>СТАТУС БОТА</b>\n──────────────────────\n🤖 Состояние: <b>{bot_state}</b>\n📡 Активных групп: <b>{len(_bot_chat_items(True))}</b>\n💾 Neon: <b>{neon}</b>\n💾 Несохранённых изменений: <b>{'да' if db_dirty else 'нет'}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
+    chat_paused = bool(get_chat_settings(message.chat.id).get('bot_paused', False)) if getattr(message.chat, 'type', '') in ('group', 'supergroup') else False
+    bot_state='🔴 пауза в этом чате' if chat_paused else '🟢 работает'; neon='🟢 подключена' if DATABASE_URL else '🟡 локальный fallback'
+    bot.reply_to(message,f"🟢 <b>СТАТУС БОТА</b>\n──────────────────────\n🤖 Состояние этого чата: <b>{bot_state}</b>\n📡 Активных групп: <b>{len(_bot_chat_items(True))}</b>\n💾 Neon: <b>{neon}</b>\n💾 Несохранённых изменений: <b>{'да' if db_dirty else 'нет'}</b>\n⏱ Аптайм: <b>{_fmt_duration(time.time()-BOT_STARTED_AT)}</b>",parse_mode='HTML')
 
 @bot.message_handler(commands=['dashboard', 'панель'])
 @serialize_user_action
@@ -8777,7 +8833,8 @@ def handle_messages(message):
     # Если Telegram прислал неизвестную slash-команду, не запускаем её как обычный текст.
     if text.startswith('/'):
         command_token = text.split()[0].split('@')[0].lower()
-        if command_token not in {'/calc'}:
+        allowed_general_commands = {'/calc', '/dice', '/slots', '/fish', '/hunt'}
+        if command_token not in allowed_general_commands:
             return
     user_id = message.from_user.id
     user_username = (message.from_user.username or '').lower()
@@ -8789,13 +8846,15 @@ def handle_messages(message):
 
     is_super_admin = (user_id == ADMIN_ID)
 
-    # bot_active больше не блокирует обычных пользователей.
-    # Старое значение False в Neon не должно переводить бота в режим "только владелец".
-    if not db.get('bot_active', True) and is_super_admin and text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
-        db['bot_active'] = True
+    # /start_bot снимает паузу только в текущем чате. Старое глобальное
+    # поле bot_active оставлено в базе только ради совместимости.
+    if is_super_admin and text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
+        chat_settings = get_chat_settings(chat_id)
+        chat_settings['bot_paused'] = False
+        mark_dirty()
         save_data()
-        log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде ID:{user_id}')
-        bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b> 😻", parse_mode='HTML')
+        log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу в чате {chat_id} по команде ID:{user_id}')
+        bot.reply_to(message, "🟢 <b>Бот снова работает в этом чате!</b> 😻", parse_mode='HTML')
         return
 
     last_chat_activity[chat_id] = now_ts
@@ -8972,10 +9031,12 @@ def handle_messages(message):
                 return
 
         if text_lower in ['/stop_bot', '/shutdown', 'выключить бота', 'остановить бота']:
-            db['bot_active'] = False
+            chat_settings = get_chat_settings(chat_id)
+            chat_settings['bot_paused'] = True
+            mark_dirty()
             save_data(send_backup=True)
-            log_event('ОСТАНОВКА', f'Бот переведён в спящий режим администратором ID:{user_id}')
-            bot.reply_to(message, "🛑 <b>Бот переведён в спящий режим.</b>", parse_mode='HTML')
+            log_event('ОСТАНОВКА', f'Бот поставлен на паузу в чате {chat_id} администратором ID:{user_id}')
+            bot.reply_to(message, "🛑 <b>Бот поставлен на паузу в этом чате.</b>\n\nДля возврата: <code>/start_bot</code> 😺", parse_mode='HTML')
             return
 
         if text_lower.startswith('/inspect'):
@@ -13342,6 +13403,10 @@ def process_stars_successful_payment(message):
                         target_econ.setdefault('profile_gifs', [])
                         if gif_id not in target_econ['profile_gifs']:
                             target_econ['profile_gifs'].append(gif_id)
+                        target_econ.setdefault('paid_stars_items', [])
+                        _gif_cosm_key = next((k for k, v in STARS_COSMETICS.items() if v.get('type') == 'gif' and v.get('gif_id') == gif_id), None)
+                        if _gif_cosm_key and _gif_cosm_key not in target_econ['paid_stars_items']:
+                            target_econ['paid_stars_items'].append(_gif_cosm_key)
                         target_econ['profile_gif'] = gif_id
                 prod_name = cosm.get('name', actual_prod)
             else:
@@ -13587,6 +13652,11 @@ def process_stars_successful_payment(message):
                     econ.setdefault('profile_gifs', [])
                     if gif_id not in econ['profile_gifs']:
                         econ['profile_gifs'].append(gif_id)
+                    # Каноническое право покупки сохраняем отдельно от активного GIF.
+                    econ.setdefault('paid_stars_items', [])
+                    _gif_cosm_key = next((k for k, v in STARS_COSMETICS.items() if v.get('type') == 'gif' and v.get('gif_id') == gif_id), None)
+                    if _gif_cosm_key and _gif_cosm_key not in econ['paid_stars_items']:
+                        econ['paid_stars_items'].append(_gif_cosm_key)
                     econ['profile_gif'] = gif_id
                     mark_dirty()
                     log_event('STARS GIF', f'Игрок {user_link} купил GIF профиля {PROFILE_GIFS[gif_id]["name"]} за {stars_amount} ⭐️!')
