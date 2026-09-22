@@ -2,10 +2,6 @@ import ast
 import csv
 import copy
 import functools
-import hashlib
-import hmac
-import secrets
-from urllib.parse import parse_qsl
 from datetime import datetime, timedelta, timezone
 import html
 import json
@@ -18,8 +14,12 @@ import time
 import telebot
 import psycopg2
 from psycopg2.extras import Json
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo, MenuButtonWebApp
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo
 from flask import Flask, jsonify, request, send_from_directory, Response
+import hashlib
+import hmac
+import secrets
+from urllib.parse import parse_qsl
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -34,456 +34,148 @@ def now_msk():
 # ---------------------------------------------------------
 app = Flask('')
 
+# ---------------------------------------------------------
+# MINI APP 2.0
+# ---------------------------------------------------------
+MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp')
+MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
+MINIAPP_GAMES = {}
+MINIAPP_LOCK = threading.RLock()
+
+def _miniapp_user(init_data):
+    if not init_data or not TOKEN:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop('hash', None)
+        if not received_hash:
+            return None
+        check = '\n'.join(f'{k}={pairs[k]}' for k in sorted(pairs))
+        secret_key = hmac.new(b'WebAppData', TOKEN.encode(), hashlib.sha256).digest()
+        calc = hmac.new(secret_key, check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calc, received_hash):
+            return None
+        user = json.loads(pairs.get('user', '{}'))
+        return user if user.get('id') else None
+    except Exception:
+        return None
+
+def _miniapp_auth(payload):
+    return _miniapp_user(str((payload or {}).get('initData', '')))
+
+@app.route('/minigames')
+def miniapp_index():
+    if not os.path.exists(os.path.join(MINIAPP_DIR, 'index.html')):
+        return 'Mini App is not installed', 404
+    return send_from_directory(MINIAPP_DIR, 'index.html')
+
+@app.route('/minigames/<path:filename>')
+def miniapp_static(filename):
+    return send_from_directory(MINIAPP_DIR, filename)
+
+@app.route('/api/mini/profile', methods=['POST'])
+def mini_profile_api():
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id'])
+    name = (user.get('first_name') or user.get('username') or 'Игрок')
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    lvl, exp, nxt, bar = get_account_level(econ.get('account_exp', 0))
+    st = econ.get('msg_stats', {}) or {}
+    return jsonify({'ok': True, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}})
+
+@app.route('/api/mini/bonus', methods=['POST'])
+def mini_bonus_api():
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id']); name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    now = now_msk().date().isoformat()
+    if econ.get('mini_daily_claimed') == now:
+        return jsonify({'ok': False, 'error': 'already_claimed'})
+    last = econ.get('mini_daily_date')
+    streak = int(econ.get('mini_daily_streak',0) or 0)
+    yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
+    streak = streak + 1 if last == yesterday else 1
+    reward = min(5000, 500 + streak * 100)
+    econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
+    econ['balance'] = int(econ.get('balance',0) or 0) + reward
+    add_account_exp(uid, name, 25, user.get('username'))
+    mark_dirty(); save_data(send_backup=False)
+    return jsonify({'ok': True, 'reward': reward, 'streak': streak})
+
+@app.route('/api/mini/leaderboard', methods=['POST'])
+def mini_leaderboard_api():
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    rows=[]
+    for uid, econ in db.get('economy', {}).items():
+        if not isinstance(econ, dict): continue
+        try: score=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
+        except: continue
+        rows.append({'name': clean_tag(econ.get('name') or econ.get('tag') or str(uid)), 'level': get_account_level(score)[0], 'exp': score, 'balance': balance})
+    rows.sort(key=lambda x: (x['exp'], x['balance']), reverse=True)
+    return jsonify({'ok': True, 'rows': rows[:20]})
+
+@app.route('/api/mini/game/start', methods=['POST'])
+def mini_game_start_api():
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    game = str((request.get_json(silent=True) or {}).get('game','')).lower()
+    if game not in {'mines','snake','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
+    gid=secrets.token_urlsafe(12)
+    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'started':time.time()}
+    return jsonify({'ok':True,'game_id':gid})
+
+@app.route('/api/mini/game/finish', methods=['POST'])
+def mini_game_finish_api():
+    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    gid=str(payload.get('game_id','')); score=max(0,min(int(payload.get('score',0) or 0),100000))
+    with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
+    if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
+    elapsed=time.time()-game['started']
+    if elapsed < 0.5: return jsonify({'ok':False,'error':'too_fast'}),400
+    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
+    econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
+    records=econ.setdefault('mini_records',{}); old=int(records.get(game['game'],0) or 0)
+    if score>old: records[game['game']]=score
+    reward=0
+    # Only modest server-side rewards; client cannot choose the reward.
+    caps={'mines':2500,'snake':2000,'2048':2500,'reaction':1500,'shooter':2500}
+    reward=min(caps[game['game']], max(0, score//10))
+    if reward:
+        econ['balance']=int(econ.get('balance',0) or 0)+reward
+    mark_dirty(); save_data(send_backup=False)
+    return jsonify({'ok':True,'reward':reward,'record':records.get(game['game'],score)})
+
+MINIAPP_MUSIC = {
+    'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
+    'moog': 'CQACAgIAAxkBAAI7c2qxoKtO0jM_j2VfHWHg3qzIkYhuAAK0mAACt-8pS74P-OfxOrdgPQQ',
+    'doki': 'CQACAgIAAxkBAAI8OGqye6dxzMArn5Z8_oN-Zfxpwad_AAKjlQACzEIhSbF9j2pSNFhAPQQ',
+    'plenka': 'CQACAgIAAxkBAAI8O2qye8_F-Q_cGII2umP6qPi8-zcoAAJWgQACw5kBSoZ0PAKSKD5uPQQ',
+}
+
+@app.route('/api/mini/music/<track>')
+def mini_music(track):
+    file_id=MINIAPP_MUSIC.get(track)
+    if not file_id: return 'Not found',404
+    try:
+        f=bot.get_file(file_id)
+        data=bot.download_file(f.file_path)
+        mime='audio/mp4' if f.file_path.lower().endswith(('.m4a','.mp4')) else 'audio/mpeg'
+        return Response(data,mimetype=mime,headers={'Cache-Control':'public,max-age=86400'})
+    except Exception as e:
+        print(f'[MINI MUSIC ERROR] {e}')
+        return 'Music unavailable',502
+
 @app.route('/health')
 def health():
     return "Nya Bot is alive and running! 😺"
 
-# ---------------------------------------------------------
-# TELEGRAM MINI APP — МЕНЮ И САПЁР
-# ---------------------------------------------------------
-MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp')
-MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
-MINES_GAMES = {}
-MINES_GAMES_LOCK = threading.RLock()
-SNAKE_GAMES = {}
-SNAKE_GAMES_LOCK = threading.RLock()
-SNAKE_DIFFICULTIES = {
-    'easy':   {'name': 'Лёгкая',   'width': 10, 'height': 10, 'coin_per_food': 10},
-    'medium': {'name': 'Средняя',  'width': 15, 'height': 15, 'coin_per_food': 25},
-    'hard':   {'name': 'Сложная',  'width': 20, 'height': 16, 'coin_per_food': 50},
-    'insane': {'name': 'Безумная', 'width': 26, 'height': 20, 'coin_per_food': 100},
-}
-SNAKE_MIN_MOVE_INTERVAL = 0.28
-MINIGAME_REWARD_SESSIONS = {}
-MINIGAME_REWARD_LOCK = threading.RLock()
-MINIGAME_REWARD_LIMITS = {
-    '2048': 5000,
-    'reaction': 100,
-    'target': 1500,
-}
-
-@app.route('/api/minigames/start', methods=['POST'])
-def api_minigames_start():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    data = request.get_json(silent=True) or {}
-    game = str(data.get('game', ''))
-    if game not in MINIGAME_REWARD_LIMITS:
-        return jsonify(ok=False, error='Неизвестная игра'), 400
-    token = secrets.token_urlsafe(24)
-    with MINIGAME_REWARD_LOCK:
-        session = {
-            'user_id': int(user['id']), 'game': game, 'used': False, 'created': time.time()
-        }
-        if game == 'reaction':
-            delay = random.uniform(1.2, 3.2)
-            session['ready_at'] = time.time() + delay
-        MINIGAME_REWARD_SESSIONS[token] = session
-    result = {'ok': True, 'token': token, 'max_reward': MINIGAME_REWARD_LIMITS[game]}
-    if game == 'reaction':
-        result['delay_ms'] = int(delay * 1000)
-    return jsonify(**result)
-
-@app.route('/api/minigames/reward', methods=['POST'])
-def api_minigames_reward():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    data = request.get_json(silent=True) or {}
-    token = str(data.get('token', ''))
-    game = str(data.get('game', ''))
-    try:
-        reward = max(0, int(data.get('reward', 0)))
-        score = max(0, int(data.get('score', 0)))
-    except Exception:
-        return jsonify(ok=False, error='Некорректный результат'), 400
-    with MINIGAME_REWARD_LOCK:
-        session = MINIGAME_REWARD_SESSIONS.get(token)
-        if not session or session['user_id'] != int(user['id']) or session['game'] != game or session['used']:
-            return jsonify(ok=False, error='Сессия игры недействительна'), 400
-        if time.time() - session['created'] > 3600:
-            session['used'] = True
-            return jsonify(ok=False, error='Сессия игры истекла'), 400
-        if game == 'reaction':
-            ready_at = float(session.get('ready_at', 0) or 0)
-            now = time.time()
-            if now < ready_at:
-                return jsonify(ok=False, error='Слишком рано! Дождись сигнала.'), 400
-            elapsed_ms = max(1, int((now - ready_at) * 1000))
-            score = elapsed_ms
-            reward = max(0, min(100, int((1000 - elapsed_ms) / 10)))
-        else:
-            reward = min(reward, MINIGAME_REWARD_LIMITS[game])
-        session['used'] = True
-    name = user.get('username') or user.get('first_name') or 'Игрок'
-    econ = get_user_econ(int(user['id']), name, username=user.get('username'))
-    econ['balance'] = int(econ.get('balance', 0) or 0) + reward
-    records = econ.setdefault('mini_game_records', {})
-    rec = records.setdefault(game, {'score': 0, 'reward': 0})
-    if score > int(rec.get('score', 0) or 0):
-        rec['score'] = score
-    rec['reward'] = max(int(rec.get('reward', 0) or 0), reward)
-    mark_dirty()
-    save_data(send_backup=False)
-    return jsonify(ok=True, reward=reward, balance=int(econ.get('balance', 0) or 0), record=rec['score'])
-
-MINI_MUSIC_TRACKS = [
-    {'id': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ', 'name': '🌃 Розмова з містом — Nikow'},
-    {'id': 'CQACAgIAAxkBAAI7c2qxoKtO0jM_j2VfHWHg3qzIkYhuAAK0mAACt-8pS74P-OfxOrdgPQQ', 'name': '🌆 Moog City 2'},
-    {'id': 'CQACAgIAAxkBAAI8OGqye6dxzMArn5Z8_oN-Zfxpwad_AAKjlQACzEIhSbF9j2pSNFhAPQQ', 'name': '💗 DokiDoki — YOU DAYEON'},
-    {'id': 'CQACAgIAAxkBAAI8O2qye8_F-Q_cGII2umP6qPi8-zcoAAJWgQACw5kBSoZ0PAKSKD5uPQQ', 'name': '🌙 When You Find Me — plenka'},
-]
-MINES_DIFFICULTIES = {
-    'easy':   {'name': 'Лёгкая',   'width': 9,  'height': 9,  'mines': 10,  'reward': 250},
-    'medium': {'name': 'Средняя',  'width': 16, 'height': 16, 'mines': 40,  'reward': 1000},
-    'hard':   {'name': 'Сложная',  'width': 24, 'height': 16, 'mines': 80,  'reward': 2500},
-    'insane': {'name': 'Безумная', 'width': 30, 'height': 20, 'mines': 150, 'reward': 6000},
-}
-
-def _miniapp_auth():
-    """Проверяет Telegram WebApp initData и возвращает пользователя."""
-    raw = request.headers.get('X-Telegram-Init-Data', '')
-    if not raw or not TOKEN:
-        return None, 'Нет данных Telegram Web App'
-    try:
-        pairs = dict(parse_qsl(raw, keep_blank_values=True))
-        received = pairs.pop('hash', '')
-        if not received:
-            return None, 'Некорректные initData'
-        data_check = '\n'.join(f'{k}={pairs[k]}' for k in sorted(pairs))
-        secret = hmac.new(b'WebAppData', TOKEN.encode(), hashlib.sha256).digest()
-        calc = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(calc, received):
-            return None, 'Неверная подпись Telegram'
-        user = json.loads(pairs.get('user', '{}'))
-        if not user.get('id'):
-            return None, 'Пользователь Telegram не найден'
-        return user, None
-    except Exception as e:
-        return None, f'Ошибка авторизации: {e}'
-
-def _mines_public(game, reveal=False):
-    cells = []
-    for i, v in enumerate(game['cells']):
-        if i in game['flags']:
-            cells.append('flag')
-        elif reveal and i in game['mines_set']:
-            cells.append('mine')
-        elif i in game['opened']:
-            cells.append(game['numbers'][i])
-        else:
-            cells.append(None)
-    return {
-        'ok': True, 'game_id': game['game_id'], 'width': game['width'], 'height': game['height'],
-        'mines': game['mines'], 'flags': len(game['flags']), 'reward': game['reward'],
-        'cells': cells, 'finished': game['finished'], 'won': game.get('won', False),
-    }
-
-def _mines_build(game, first_cell):
-    total = game['width'] * game['height']
-    safe = {first_cell}
-    x, y = first_cell % game['width'], first_cell // game['width']
-    for dy in (-1, 0, 1):
-        for dx in (-1, 0, 1):
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < game['width'] and 0 <= ny < game['height']:
-                safe.add(ny * game['width'] + nx)
-    candidates = [i for i in range(total) if i not in safe]
-    game['mines_set'] = set(secrets.SystemRandom().sample(candidates, game['mines']))
-    numbers = [0] * total
-    for m in game['mines_set']:
-        mx, my = m % game['width'], m // game['width']
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                nx, ny = mx + dx, my + dy
-                if 0 <= nx < game['width'] and 0 <= ny < game['height']:
-                    n = ny * game['width'] + nx
-                    if n not in game['mines_set']:
-                        numbers[n] += 1
-    game['numbers'] = numbers
-    game['built'] = True
-
-def _mines_open(game, cell):
-    if cell in game['opened'] or cell in game['flags']:
-        return
-    if cell in game['mines_set']:
-        game['finished'] = True
-        game['won'] = False
-        return
-    stack = [cell]
-    while stack:
-        cur = stack.pop()
-        if cur in game['opened'] or cur in game['flags'] or cur in game['mines_set']:
-            continue
-        game['opened'].add(cur)
-        if game['numbers'][cur] == 0:
-            cx, cy = cur % game['width'], cur // game['width']
-            for dy in (-1, 0, 1):
-                for dx in (-1, 0, 1):
-                    nx, ny = cx + dx, cy + dy
-                    if 0 <= nx < game['width'] and 0 <= ny < game['height']:
-                        stack.append(ny * game['width'] + nx)
-    if len(game['opened']) >= game['width'] * game['height'] - game['mines']:
-        game['finished'] = True
-        game['won'] = True
-
-def _mines_finish(user, game):
-    if not game.get('won') or game.get('rewarded'):
-        return
-    game['rewarded'] = True
-    name = user.get('username') or user.get('first_name') or 'Игрок'
-    econ = get_user_econ(int(user['id']), name, username=user.get('username'))
-    econ['balance'] = int(econ.get('balance', 0) or 0) + int(game['reward'])
-    mark_dirty()
-    save_data(send_backup=False)
-
-@app.route('/api/minigames/records')
-def api_minigames_records():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    econ = get_user_econ(int(user['id']), user.get('username') or user.get('first_name') or 'Игрок', username=user.get('username'))
-    records = econ.get('mini_game_records', {}) if isinstance(econ.get('mini_game_records', {}), dict) else {}
-    return jsonify(ok=True, records=records)
-
-@app.route('/minigames')
-@app.route('/minigames/')
-def mini_games_page():
-    if not os.path.isdir(MINIAPP_DIR):
-        return 'Mini App files not found: miniapp/', 404
-    return send_from_directory(MINIAPP_DIR, 'index.html')
-
-@app.route('/minigames/<path:filename>')
-def mini_games_static(filename):
-    if not os.path.isdir(MINIAPP_DIR):
-        return 'Mini App files not found: miniapp/', 404
-    return send_from_directory(MINIAPP_DIR, filename)
-
-@app.route('/api/minigames/profile')
-def api_minigames_profile():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    uid = int(user['id']); name = user.get('username') or user.get('first_name') or 'Игрок'
-    econ = get_user_econ(uid, name, username=user.get('username'))
-    lvl, cur, nxt, bar = get_account_level(int(econ.get('account_exp', 0) or 0))
-    records = econ.get('mini_game_records', {}) if isinstance(econ.get('mini_game_records', {}), dict) else {}
-    return jsonify(ok=True, profile={'name': name, 'balance': int(econ.get('balance',0) or 0), 'level': lvl, 'exp': cur, 'next_exp': nxt, 'bar': bar, 'games': sum(1 for _ in records), 'streak': int(econ.get('bonus_streak',0) or 0)})
-
-@app.route('/api/minigames/leaderboard')
-def api_minigames_leaderboard():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    rows=[]
-    for key,e in (db.get('economy',{}) or {}).items():
-        if not isinstance(e,dict): continue
-        rows.append({'name': e.get('username') or e.get('user_tag') or str(key), 'balance': int(e.get('balance',0) or 0), 'exp': int(e.get('account_exp',0) or 0)})
-    rows.sort(key=lambda x:(x['balance'],x['exp']), reverse=True)
-    return jsonify(ok=True, rows=rows[:10])
-
-@app.route('/api/minigames/daily', methods=['POST'])
-def api_minigames_daily():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    uid=int(user['id']); name=user.get('username') or user.get('first_name') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
-    now=time.time(); last=float(econ.get('mini_daily_claim',0) or 0)
-    if now-last < 86400:
-        return jsonify(ok=False,error='Ежедневный бонус уже получен',next_in=int(86400-(now-last))), 400
-    streak=int(econ.get('mini_daily_streak',0) or 0)+1
-    reward=min(500,100+streak*25)
-    econ['mini_daily_claim']=now; econ['mini_daily_streak']=streak
-    econ['balance']=int(econ.get('balance',0) or 0)+reward
-    add_account_exp(uid,name,25,username=user.get('username')); mark_dirty(); save_data(send_backup=False)
-    return jsonify(ok=True,reward=reward,streak=streak,balance=int(econ['balance']))
-
-@app.route('/api/minigames/quests')
-def api_minigames_quests():
-    user, err = _miniapp_auth()
-    if err: return jsonify(ok=False,error=err),401
-    uid=int(user['id']); name=user.get('username') or user.get('first_name') or 'Игрок'; tasks,econ=get_daily_tasks(uid,name,user.get('username'))
-    result=[]
-    for key,desc,target,reward in tasks:
-        result.append({'key':key,'description':desc,'target':target,'progress':min(target,int(econ.get('daily_progress',{}).get(key,0) or 0)),'reward':reward,'claimed':key in econ.get('daily_claimed',[])})
-    return jsonify(ok=True,tasks=result)
-
-@app.route('/api/music')
-def api_mini_music():
-    """Отдаёт выбранный трек из Telegram-файла."""
-    try:
-        try:
-            idx = int(request.args.get('track', '0'))
-        except Exception:
-            idx = 0
-        idx = max(0, min(idx, len(MINI_MUSIC_TRACKS) - 1))
-        tg_file = bot.get_file(MINI_MUSIC_TRACKS[idx]['id'])
-        data = bot.download_file(tg_file.file_path)
-        return Response(data, mimetype=('audio/mp4' if tg_file.file_path.lower().endswith(('.m4a','.mp4')) else 'audio/mpeg'), headers={
-            'Cache-Control': 'public, max-age=86400',
-            'Content-Disposition': f'inline; filename="nya-background-{idx}.audio"'
-        })
-    except Exception as e:
-        print(f'[MINI MUSIC] Ошибка загрузки: {e}')
-        return jsonify(ok=False, error='Музыка пока недоступна'), 503
-
-
-def _snake_public(game):
-    return {
-        'ok': True, 'game_id': game['game_id'], 'width': game['width'], 'height': game['height'],
-        'snake': list(game['snake']), 'food': game['food'], 'score': game['score'],
-        'reward': game['score'] * game['coin_per_food'], 'finished': game['finished'],
-        'coin_per_food': game['coin_per_food']
-    }
-
-def _snake_spawn_food(game):
-    occupied = set(game['snake'])
-    free = [i for i in range(game['width'] * game['height']) if i not in occupied]
-    return secrets.choice(free) if free else None
-
-def _snake_finish(user, game):
-    if game.get('rewarded'):
-        return
-    game['rewarded'] = True
-    reward = int(game['score']) * int(game['coin_per_food'])
-    if reward <= 0:
-        return
-    name = user.get('username') or user.get('first_name') or 'Игрок'
-    econ = get_user_econ(int(user['id']), name, username=user.get('username'))
-    econ['balance'] = int(econ.get('balance', 0) or 0) + reward
-    mark_dirty()
-    save_data(send_backup=False)
-
-@app.route('/api/snake/start', methods=['POST'])
-def api_snake_start():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    data = request.get_json(silent=True) or {}
-    diff = SNAKE_DIFFICULTIES.get(str(data.get('difficulty', '')))
-    if not diff:
-        return jsonify(ok=False, error='Неизвестная сложность'), 400
-    w, h = diff['width'], diff['height']
-    cx, cy = w // 2, h // 2
-    snake = [cy * w + cx, cy * w + (cx - 1), cy * w + (cx - 2)]
-    game = {
-        'game_id': secrets.token_urlsafe(18), 'user_id': int(user['id']), 'width': w, 'height': h,
-        'snake': snake, 'direction': 'right', 'next_direction': 'right', 'food': None,
-        'score': 0, 'coin_per_food': diff['coin_per_food'], 'finished': False, 'rewarded': False,
-        'last_move': time.time(), 'created': time.time()
-    }
-    game['food'] = _snake_spawn_food(game)
-    with SNAKE_GAMES_LOCK:
-        SNAKE_GAMES[game['game_id']] = game
-    return jsonify(_snake_public(game))
-
-@app.route('/api/snake/move', methods=['POST'])
-def api_snake_move():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    data = request.get_json(silent=True) or {}
-    game_id = str(data.get('game_id', ''))
-    direction = str(data.get('direction', ''))
-    if direction not in {'up', 'down', 'left', 'right'}:
-        return jsonify(ok=False, error='Некорректное направление'), 400
-    opposites = {'up':'down', 'down':'up', 'left':'right', 'right':'left'}
-    with SNAKE_GAMES_LOCK:
-        game = SNAKE_GAMES.get(game_id)
-        if not game or game['user_id'] != int(user['id']):
-            return jsonify(ok=False, error='Игра не найдена'), 404
-        if game['finished']:
-            return jsonify(_snake_public(game))
-        now = time.time()
-        game['next_direction'] = direction
-        if now - game['last_move'] < SNAKE_MIN_MOVE_INTERVAL:
-            return jsonify(_snake_public(game))
-        if direction != opposites.get(game['direction']):
-            game['direction'] = direction
-        dxdy = {'up':(0,-1), 'down':(0,1), 'left':(-1,0), 'right':(1,0)}
-        dx, dy = dxdy[game['direction']]
-        head = game['snake'][0]
-        x, y = head % game['width'], head // game['width']
-        nx, ny = x + dx, y + dy
-        if nx < 0 or nx >= game['width'] or ny < 0 or ny >= game['height']:
-            game['finished'] = True
-        else:
-            new_head = ny * game['width'] + nx
-            growing = new_head == game['food']
-            body_check = game['snake'] if growing else game['snake'][:-1]
-            if new_head in body_check:
-                game['finished'] = True
-            else:
-                game['snake'].insert(0, new_head)
-                if growing:
-                    game['score'] += 1
-                    game['food'] = _snake_spawn_food(game)
-                    if game['food'] is None:
-                        game['finished'] = True
-                else:
-                    game['snake'].pop()
-        game['last_move'] = now
-        if game['finished']:
-            _snake_finish(user, game)
-        return jsonify(_snake_public(game))
-
-@app.route('/api/mines/start', methods=['POST'])
-def api_mines_start():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    data = request.get_json(silent=True) or {}
-    diff = MINES_DIFFICULTIES.get(str(data.get('difficulty', '')))
-    if not diff:
-        return jsonify(ok=False, error='Неизвестная сложность'), 400
-    with MINES_GAMES_LOCK:
-        game_id = secrets.token_urlsafe(18)
-        game = {
-            'game_id': game_id, 'user_id': int(user['id']), 'width': diff['width'], 'height': diff['height'],
-            'mines': diff['mines'], 'reward': diff['reward'], 'cells': [None] * (diff['width'] * diff['height']),
-            'mines_set': set(), 'numbers': [0] * (diff['width'] * diff['height']), 'opened': set(), 'flags': set(),
-            'built': False, 'finished': False, 'won': False, 'rewarded': False, 'created': time.time(),
-        }
-        MINES_GAMES[game_id] = game
-    return jsonify(_mines_public(game))
-
-@app.route('/api/mines/move', methods=['POST'])
-def api_mines_move():
-    user, err = _miniapp_auth()
-    if err:
-        return jsonify(ok=False, error=err), 401
-    data = request.get_json(silent=True) or {}
-    game_id = str(data.get('game_id', ''))
-    action = str(data.get('action', ''))
-    try:
-        cell = int(data.get('cell'))
-    except Exception:
-        return jsonify(ok=False, error='Некорректная клетка'), 400
-    with MINES_GAMES_LOCK:
-        game = MINES_GAMES.get(game_id)
-        if not game or game['user_id'] != int(user['id']):
-            return jsonify(ok=False, error='Игра не найдена'), 404
-        if game['finished']:
-            return jsonify(_mines_public(game, reveal=True))
-        if not 0 <= cell < game['width'] * game['height']:
-            return jsonify(ok=False, error='Некорректная клетка'), 400
-        if not game['built']:
-            _mines_build(game, cell)
-        if action == 'flag':
-            if cell not in game['opened']:
-                if cell in game['flags']:
-                    game['flags'].remove(cell)
-                elif len(game['flags']) < game['mines']:
-                    game['flags'].add(cell)
-        elif action == 'open':
-            _mines_open(game, cell)
-        else:
-            return jsonify(ok=False, error='Неизвестное действие'), 400
-        if game['finished'] and game['won']:
-            _mines_finish(user, game)
-        result = _mines_public(game, reveal=game['finished'])
-    return jsonify(result)
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -2141,92 +1833,18 @@ def _global_message_stats():
     return total, users
 
 def setup_bot_commands():
+    # Короткое меню Telegram. Остальные команды остаются рабочими при ручном вводе.
     commands = [
-        BotCommand('menu', '📱 Главное интерактивное меню'),
-        BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
-        BotCommand('stars', '⭐️ Звёздный магазин и VIP Pass (Telegram Stars)'),
-        BotCommand('profile_settings', '⚙️ Настройки тем, шрифтов и визуала профиля'),
-        BotCommand('custom_title', '🌟 Установить личный кастомный титул'),
-        BotCommand('shop', '🏪 Магазин значков, тем, титулов и расходников'),
-        BotCommand('trash', '🗑 Порыться в мусорке в поисках лута'),
-        BotCommand('durak', '🃏 Карточная игра Дурак (36 карт)'),
-        BotCommand('promo', '🎁 Активировать промокод на коины'),
-        BotCommand('stream', '🎥 Запустить трансляцию стримера'),
-        BotCommand('garden', '🪴 Ваша личная оранжерея Бонсай'),
-        BotCommand('backpack', '🎒 Рюкзак баффов и расходников'),
-        BotCommand('crash', '🚀 Игра Краш (Взлетающая ракета)'),
-        BotCommand('brick', '🧱 Игра Кирпич (Стройка)'),
-        BotCommand('wheel', '🎡 Бесплатное Колесо Фортуны'),
-        BotCommand('mines', '💣 Игра Сапёр (Мины)'),
-        BotCommand('games', '🎮 Открыть Mini App с мини-играми'),
-        BotCommand('football', '⚽️ Футбол пенальти'),
-        BotCommand('daily_heroes', '🏆 Герои и ударники дня'),
-        BotCommand('ball', '🔮 Магический шар предсказаний'),
-        BotCommand('chance', '📊 Измеритель шанса и вероятности'),
-        BotCommand('detector', '🕵️‍♂️ Детектор правды и лжи'),
-        BotCommand('dick', '🍆 Измерить размер писюна'),
-        BotCommand('fap', '💦 Сделать ежедневный фап'),
-        BotCommand('garage', '🏎 Гараж и личный транспорт'),
-        BotCommand('cook', '🍳 Приготовить пойманную еду'),
-        BotCommand('walk', '🦮 Отправить питомца на прогулку'),
-        BotCommand('bank', '🏦 Ня-Банк и депозиты (+1% / 6ч)'),
-        BotCommand('loan', '💳 Взять кредит в банке'),
-        BotCommand('case', '📦 Ежедневный бесплатный кейс'),
-        BotCommand('chest', '🎁 Ежедневный сундук и серия наград'),
-        BotCommand('inventory', '🎒 Коллекция питомцев и косметики'),
-        BotCommand('memes', '📸 Мемы дня и рейтинг'),
-        BotCommand('top_daily', '🏆 Топ активности за сегодня'),
-        BotCommand('top_weekly', '🏆 Топ активности за неделю'),
-        BotCommand('lottery', '🎟 Лотерея джекпота'),
-        BotCommand('business', '🏢 Бизнесы 2.0 и прокачка'),
-        BotCommand('miner', '💻 Криптоферма и майнинг NYA'),
-        BotCommand('collect', '💰 Собрать прибыль предприятий'),
-        BotCommand('family', '💍 Информация о браке и семье'),
-        BotCommand('market', '📈 Крипто-биржа и котировки'),
-        BotCommand('work', '💼 Биржа труда и вакансии'),
-        BotCommand('pet', '🐾 Ваш питомец и уход'),
-        BotCommand('fish', '🎣 Отправиться на рыбалку'),
-        BotCommand('hunt', '🏹 Отправиться на охоту'),
-        BotCommand('bj', '🃏 Сыграть в Блэкджек (21)'),
-        BotCommand('dice', '🎲 Кости'),
-        BotCommand('slots', '🎰 Слоты'),
-        BotCommand('tasks', '📋 Задания и квесты'),
-        BotCommand('top', '🏆 Таблицы лидеров чата'),
-        BotCommand('safe', '🔒 Взлом 4-значного сейфа чата'),
-        BotCommand('house', '🏡 Семейный дом и обустройство'),
-        BotCommand('sheriff', '👮‍♂️ Полиция чата и служба шерифа'),
-        BotCommand('jail', '🔒 КПЗ и статус тюрьмы'),
-        BotCommand('escape', '🏃‍♂️ Попытка побега из тюрьмы'),
-        BotCommand('pet_fight', '⚔️ Подпольные бои питомцев'),
-        BotCommand('meme', '📸 Опубликовать мем дня'),
-        BotCommand('story', '📜 Смешная история / фанфик про участников'),
-        BotCommand('pass', '🎃 Хеллоуинский Боевой Пропуск'),
-        BotCommand('pharmacy', '💊 Аптека и лечение мемных болезней'),
-        BotCommand('resources', '📦 Рыба, дичь и материалы для крафта'),
-        BotCommand('guild', '🏰 Гильдии и общая казна'),
-        BotCommand('pmarket', '🛒 Рынок между игроками'),
-        BotCommand('raid', '🐉 Мировой рейд на босса'),
-        BotCommand('season', '🏆 Сезонный рейтинг и награды'),
-        BotCommand('collection', '📚 Коллекция ресурсов и косметики'),
-        BotCommand('world', '🗺 Мир Nya и игровые локации'),
-        BotCommand('gift_stars', '🎁 Подарить Stars товар другу'),
-        BotCommand('settings', '⚙️ Настройки бота в чате'),
-        BotCommand('groups', '📋 Группы, где находится бот'),
-        BotCommand('dashboard', '📊 Панель мониторинга владельца'),
-        BotCommand('groupinfo', '🔎 Информация о текущей группе')
+        BotCommand('menu', '📱 Меню'),
+        BotCommand('profile', '👤 Профиль'),
+        BotCommand('stars', '⭐️ Stars магазин'),
+        BotCommand('settings', '⚙️ Настройки чата'),
     ]
     try:
         bot.set_my_commands(commands)
     except Exception as e:
         print(f"Ошибка установки меню команд: {e}")
-    # Кнопка «Открыть приложение» в меню Telegram ведёт прямо в тот же Mini App.
-    if MINIAPP_URL:
-        try:
-            bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
-                text='🎮 Игры', url=f'{MINIAPP_URL}/minigames'
-            ))
-        except Exception as e:
-            print(f"Ошибка установки кнопки Mini App: {e}")
+
 
 def clean_tag(user_str):
     if not user_str:
@@ -4021,34 +3639,24 @@ def welcome_new_members(message):
             pass
 
 # ---------------------------------------------------------
-# MINI APP — ОТКРЫТИЕ МЕНЮ ИГР
-# ---------------------------------------------------------
-@bot.message_handler(commands=['games', 'minigames', 'миниигры'])
-@serialize_user_action
-def cmd_mini_games(message):
-    if not can_process_user_message(message):
-        return
-    if not MINIAPP_URL:
-        bot.reply_to(message, "❌ MINIAPP_URL не настроен в Render. Добавьте переменную MINIAPP_URL со ссылкой на сервис Render.")
-        return
-    markup = InlineKeyboardMarkup()
-    mini_url = f"{MINIAPP_URL}/minigames"
-    markup.add(InlineKeyboardButton("🎮 Открыть мини-игры", web_app=WebAppInfo(url=mini_url)))
-    bot.reply_to(message, "🎮 <b>МИНИ-ИГРЫ НЯ</b>\n\n💣 Сапёр уже доступен! Выберите сложность прямо в приложении.", reply_markup=markup, parse_mode='HTML')
-
-# ---------------------------------------------------------
 # ГЛАВНОЕ МЕНЮ И СПРАВОЧНИК
 # ---------------------------------------------------------
+@bot.message_handler(commands=['games', 'игры', 'миниигры'])
+@serialize_user_action
+def cmd_mini_games(message):
+    if not can_process_user_message(message): return
+    if not MINIAPP_URL:
+        bot.reply_to(message, '❌ MINIAPP_URL не настроен в Render. Укажи URL Mini App в переменной окружения.')
+        return
+    kb=InlineKeyboardMarkup(); kb.add(InlineKeyboardButton('🎮 Открыть Nya Mini Games', web_app=WebAppInfo(url=MINIAPP_URL + '/minigames')))
+    bot.reply_to(message, '🎮 <b>Nya Mini Games 2.0</b>\nСапёр • Змейка • 2048 • Реакция • Тир\n\n👤 Профиль, 🏆 рейтинг, 🎁 бонусы и ⚙️ настройки внутри Mini App.', reply_markup=kb, parse_mode='HTML')
+
 @bot.message_handler(commands=['start', 'help', 'menu', 'info'])
 @serialize_user_action
 def send_welcome(message):
     if not can_process_user_message(message):
         return
     markup = InlineKeyboardMarkup()
-    if MINIAPP_URL:
-        markup.add(
-            InlineKeyboardButton("🎮 МИНИ-ИГРЫ", web_app=WebAppInfo(url=f"{MINIAPP_URL}/minigames"))
-        )
     markup.add(
         InlineKeyboardButton("📚 ЧИТАТЬ ПОЛНЫЙ ГАЙД В TELETYPE 🌐", url="https://teletype.in/@ukrgorilka/Nya")
     )
@@ -6581,14 +6189,11 @@ def cmd_settings(message):
 def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     cur_theme = econ.get('profile_theme', 'default')
-    cur_font = econ.get('profile_font', 'default')
     theme_name = THEMES.get(cur_theme, {}).get('name', 'Классическая')
-    font_name = FONTS.get(cur_font, {}).get('name', 'Обычный')
 
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🎨 Сменить Тему", callback_data=f"ps_themes:{user_id}"),
-        InlineKeyboardButton("🔤 Сменить Шрифт", callback_data=f"ps_fonts:{user_id}")
+        InlineKeyboardButton("🎨 Сменить Тему", callback_data=f"ps_themes:{user_id}")
     )
     markup.add(
         InlineKeyboardButton("🏷 Значки", callback_data=f"ps_badges:{user_id}"),
@@ -6606,7 +6211,6 @@ def render_profile_settings_view(chat_id, user_id, user_name, message_id=None):
         f"──────────────────────\n"
         f"👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}\n"
         f"🎨 Активная тема: <b>{theme_name}</b>\n"
-        f"🔤 Активный шрифт: <b>{font_name}</b>\n"
         f"──────────────────────\n"
         f"<i>Используйте кнопки ниже для индивидуальной кастомизации вашей карточки игрока!</i> 😻"
     )
@@ -6676,15 +6280,22 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     econ = get_user_econ(user_id, user_tag, username=username)
     theme_key = econ.get('profile_theme', 'default')
     theme_info = THEMES.get(theme_key, THEMES['default'])
-    font_key = econ.get('profile_font', 'default')
 
     border = theme_info['border']
     header = theme_info['header']
     t_icon = theme_info['icon']
 
-    markup = None
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton('📊 Статистика', callback_data=f'profile_stats:{user_id}'),
+        InlineKeyboardButton('🏆 Рейтинг', callback_data=f'profile_rating:{user_id}'),
+        InlineKeyboardButton('🎁 Бонусы', callback_data=f'profile_bonus:{user_id}'),
+        InlineKeyboardButton('🔔 Уведомления', callback_data=f'profile_notifications:{user_id}'),
+        InlineKeyboardButton('👤 Аккаунт', callback_data=f'profile_account:{user_id}'),
+        InlineKeyboardButton('🎨 Оформление', callback_data=f'open_profile_settings:{user_id}')
+    )
 
-    # Профиль теперь отображается без кнопок. Все действия вынесены в /profile_settings.
+    # Профиль намеренно компактный: подробные разделы открываются кнопками.
     purchased_titles = econ.get('titles', [])
     active_title = econ.get('active_title')
     custom_title = econ.get('custom_title')
@@ -6769,36 +6380,22 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
         f"{header}\n"
         f"{border}\n"
         f"{premium_emoji('profile', '🐱')} {t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
-        f"{premium_emoji('star', '⭐')} {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}] (<b>{cur_exp}/{next_exp} EXP</b>)\n"
-        f"{t_icon} 🪖 Погон Дурака: <b>{durak_rank}</b> | Побед: <b>{durak_wins}</b> | Поражений: <b>{durak_losses}</b>\n"
-        f"{t_icon} ⚖️ Карма: <b>{karma}</b> ({karma_title})\n"
+        f"{premium_emoji('star', '⭐')} {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}]\n"
+        f"{premium_emoji('money', '💰')} {t_icon} Баланс: <b>{econ['balance']} 🪙</b>\n"
+        f"{t_icon} 🏦 Банк: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
         f"{vip_line}"
         f"{stars_line}"
-        f"{t_icon} {streak_str}"
-        f"{premium_emoji('money', '💰')} {t_icon} В кармане: <b>{econ['balance']} Ня-коинов 💸</b>\n"
-        f"{t_icon} 🏦 На депозите: <b>{econ.get('bank_deposit', 0)} 🪙</b>{loan_str}\n"
-        f"{t_icon} 🚘 Гараж: <b>{veh_str}</b>\n"
-        f"{t_icon} 💼 Опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n"
+        f"{t_icon} 🔥 Бонусная серия: <b>{streak_days} дн.</b>\n"
         f"{t_icon} 💍 Семья: <b>{marriage_info}</b>\n"
-        f"{t_icon} 🏢 Бизнесы: <b>{biz_str}</b>\n"
-        f"{t_icon} 🐾 Питомец: <b>{pet_info}</b>\n"
-        f"{t_icon} 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b> (/achievements)\n"
+        f"{t_icon} 🏢 Бизнесы: <b>{biz_str}</b> | 🐾 Питомец: <b>{pet_info}</b>\n"
+        f"{t_icon} 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b>\n"
         f"{border}\n"
-        f"📊 <b>Биометрия и замеры:</b>\n"
-        f"• 🍆 Писюн: <b>{econ.get('dick_size', 15)} см</b> | 💦 Фап: <b>{econ.get('fap_count', 0)} раз(а)</b>\n"
-        f"• 🧬 Хромосомы: <b>{econ.get('chromosomes', 46)}</b> | 🧠 IQ: <b>{econ.get('iq', 100)}</b>\n"
-        f"• 🥩 Жир: <b>{econ.get('fat', 20)}%</b> | 🦶 Размер пятки: <b>{econ.get('foot_size', 25)} см</b>\n"
-        f"{border}\n"
-        f"📊 <b>Активность сообщений:</b>\n{msg_stats_str}\n"
-        f"😎 <b>Могнул:</b> {econ.get('mog_count', 0)} раз(а)\n"
-        f"📈 <b>Крипто-портфель:</b> {portfolio_str}\n"
-        f"🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n"
-        f"🎒 Значки: {inv_str}\n"
-        f"🐟 Рыба: {fish_inv} | 🏹 Дичь: {hunt_inv}\n"
+        f"📊 <b>Активность:</b> день <b>{m_st.get('day_count', 0)}</b> | неделя <b>{m_st.get('week_count', 0)}</b> | месяц <b>{m_st.get('month_count', 0)}</b> | всё время <b>{m_st.get('total_count', 0)}</b>\n"
+        f"{t_icon} 🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n"
         f"{border}"
     )
 
-    text = apply_font(raw_text, font_key)
+    text = raw_text
 
     # GIF отправляется отдельным сообщением, поэтому полный профиль всегда
     # отправляется обычным текстом без обрезания и без caption-лимита.
@@ -6873,6 +6470,23 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     else:
         try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
+
+
+@bot.message_handler(commands=['biometry', 'биометрия', 'замеры'])
+@serialize_user_action
+def cmd_biometry(message):
+    if not can_process_user_message(message): return
+    econ=get_user_econ(message.from_user.id, clean_tag(message.from_user.first_name or message.from_user.username), username=message.from_user.username)
+    text=(
+        "📊 <b>БИОМЕТРИЯ И ЗАМЕРЫ</b>\n──────────────────────\n"
+        f"🍆 Писюн: <b>{econ.get('dick_size',15)} см</b> | 💦 Фап: <b>{econ.get('fap_count',0)}</b>\n"
+        f"🧬 Хромосомы: <b>{econ.get('chromosomes',46)}</b> | 🧠 IQ: <b>{econ.get('iq',100)}</b>\n"
+        f"🥩 Жир: <b>{econ.get('fat',20)}%</b> | 🦶 Пятка: <b>{econ.get('foot_size',25)} см</b>\n"
+        f"😎 Могнул: <b>{econ.get('mog_count',0)}</b> раз(а)\n"
+        "──────────────────────\n"
+        "Здесь собраны биометрия и симулятор Могера. Основной профиль теперь компактный."
+    )
+    bot.reply_to(message,text,parse_mode='HTML')
 
 
 def get_durak_rank(wins):
@@ -11079,6 +10693,38 @@ def callback_inline(call):
                 return
 
 
+        if action_data == 'profile_stats':
+            econ=get_user_econ(user_id,user_name,username=user_username); st=econ.get('msg_stats',{}) or {}
+            text=(f"📊 <b>СТАТИСТИКА</b>\n──────────────────────\n"
+                  f"🗓 День: <b>{st.get('day_count',0)}</b>\n📅 Неделя: <b>{st.get('week_count',0)}</b>\n🗓 Месяц: <b>{st.get('month_count',0)}</b>\n♾ Всё время: <b>{st.get('total_count',0)}</b>\n\n"
+                  f"🎮 Игр Mini App: <b>{econ.get('mini_games_played',0)}</b>\n🏆 Побед Mini App: <b>{econ.get('mini_games_wins',0)}</b>")
+            bot.edit_message_text(text,chat_id=chat_id,message_id=call.message.message_id,parse_mode='HTML',reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Профиль',callback_data=f'ps_back_profile:{user_id}')))
+            bot.answer_callback_query(call.id); return
+
+        if action_data == 'profile_rating':
+            rows=[]
+            for uid,e in db.get('economy',{}).items():
+                if isinstance(e,dict): rows.append((int(e.get('account_exp',0) or 0),clean_tag(e.get('name') or e.get('tag') or uid)))
+            rows.sort(reverse=True); lines=['🏆 <b>РЕЙТИНГ ПО XP</b>','──────────────────────']
+            for i,(xp,nm) in enumerate(rows[:10],1): lines.append(f'<b>{i}.</b> {html.escape(nm)} — {xp:,} XP')
+            bot.edit_message_text('\n'.join(lines),chat_id=chat_id,message_id=call.message.message_id,parse_mode='HTML',reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Профиль',callback_data=f'ps_back_profile:{user_id}')))
+            bot.answer_callback_query(call.id); return
+
+        if action_data == 'profile_bonus':
+            econ=get_user_econ(user_id,user_name,username=user_username)
+            bot.edit_message_text(f"🎁 <b>БОНУСЫ</b>\n──────────────────────\n🔥 Серия: <b>{econ.get('bonus_streak',0)} дн.</b>\n🎁 Ежедневный бонус: команда <code>/chest</code>\n📋 Задания: <code>/tasks</code>",chat_id=chat_id,message_id=call.message.message_id,parse_mode='HTML',reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Профиль',callback_data=f'ps_back_profile:{user_id}')))
+            bot.answer_callback_query(call.id); return
+
+        if action_data == 'profile_notifications':
+            bot.edit_message_text("🔔 <b>УВЕДОМЛЕНИЯ</b>\n──────────────────────\nНастройки уведомлений чата находятся в <code>/settings</code>.\nЗдесь профиль не перегружается лишними переключателями.",chat_id=chat_id,message_id=call.message.message_id,parse_mode='HTML',reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Профиль',callback_data=f'ps_back_profile:{user_id}')))
+            bot.answer_callback_query(call.id); return
+
+        if action_data == 'profile_account':
+            econ=get_user_econ(user_id,user_name,username=user_username); lvl,exp,nxt,bar=get_account_level(econ.get('account_exp',0))
+            bot.edit_message_text(f"👤 <b>ЦЕНТР АККАУНТА</b>\n──────────────────────\n🆔 ID: <code>{user_id}</code>\n⭐ Уровень: <b>{lvl}</b>\n📈 XP: <b>{exp}/{nxt}</b>\n{bar}\n🪙 Баланс: <b>{econ.get('balance',0):,}</b>\n⭐ Stars поддержки: <b>{econ.get('stars_donated',0)}</b>",chat_id=chat_id,message_id=call.message.message_id,parse_mode='HTML',reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Профиль',callback_data=f'ps_back_profile:{user_id}')))
+            bot.answer_callback_query(call.id); return
+
+
         # МЕМЫ: ГОЛОСОВАНИЕ
         if action_data.startswith('meme_l_') or action_data.startswith('meme_d_'):
             meme_id = action_data[7:]
@@ -11405,30 +11051,7 @@ def callback_inline(call):
             return
 
         elif action_data == 'ps_fonts':
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            cur_f = econ.get('profile_font', 'default')
-            markup = InlineKeyboardMarkup(row_width=1)
-            for f_k, f_v in FONTS.items():
-                active_mark = " (Выбран)" if f_k == cur_f else ""
-                markup.add(InlineKeyboardButton(f"{f_v['name']}{active_mark}", callback_data=f"set_font_{f_k}:{user_id}"))
-            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
-            try:
-                bot.edit_message_text(
-                    "🔤 <b>ВЫБОР ШРИФТА ДЛЯ ПРОФИЛЯ</b> 😺\n──────────────────────\nВыберите желаемый стиль текста для вашей карточки игрока: 😻",
-                    chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML'
-                )
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
-            bot.answer_callback_query(call.id)
-            return
-
-        elif action_data.startswith('set_font_'):
-            f_k = action_data.replace('set_font_', '')
-            if f_k in FONTS:
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                econ['profile_font'] = f_k
-                mark_dirty()
-                bot.answer_callback_query(call.id, f"✅ Установлен шрифт: {FONTS[f_k]['name']}! 😻", show_alert=True)
-                render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
+            bot.answer_callback_query(call.id, 'Шрифты профиля отключены.', show_alert=True)
             return
 
         elif action_data == 'ps_themes':
