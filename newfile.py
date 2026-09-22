@@ -19,7 +19,7 @@ import telebot
 import psycopg2
 from psycopg2.extras import Json
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -71,22 +71,85 @@ def _telegram_webapp_user(init_data):
         return None
 
 
-@app.route('/api/dragon/finish', methods=['POST'])
-def dragon_finish():
-    """Validate a Dragon Game result and award coins to the existing bot balance."""
+# Telegram file_ids for Dragon Game audio.
+DRAGON_AUDIO = {
+    'dreiton': 'CQACAgIAAxkBAAI7d2qyBncc2_7etKbWtCq1vxiwwM_4AAIsqwACmICRSUrGlbyI5c9APQQ',
+    'minecraft': 'CQACAgIAAyEFAAMBAAH79iIAAgMEarIGqn4nK5VjkeVinvrc9ne1mHcAAvenAAKYjJBJQlUGasGqMOc9BA',
+    'moog_city_2': 'CQACAgIAAyEFAAMBAAH79iIAAgMFarIGwRfF3G_Yzy3iv_7qPoxoepgAAvinAAKYjJBJR7PMjLke-eQ9BA',
+    'rubber': 'CQACAgIAAyEFAAMBAAH79iIAAgMGarIHDuQJX8tkvjt6bpPjjwPqOH8AAv2nAAKYjJBJpvkJegj4fog9BA',
+    'dragon': 'CQACAgIAAyEFAAMBAAH79iIAAgMIarIHMYUMTq8SteIzHwbYVcK0JqUAAgGoAAKYjJBJaRGSa8Bpb1E9BA',
+    'univers': 'CQACAgIAAyEFAAMBAAH79iIAAgMKarIHfaEeb4IY5mNnAskS5t6jmnQAAgeoAAKYjJBJ2_qxCE8Jvdw9BA',
+    'children': 'CQACAgIAAyEFAAMBAAH79iIAAgMJarIHZCVLkPNfF64lWJOZvA8dS6UAAgWoAAKYjJBJjvLVVXIAAb9oPQQ',
+    'button': 'CQACAgIAAyEFAAMBAAH79iIAAgMHarIHMQxuCO3MGv5T20hxNshstAMAA6gAApiMkEktISr_Ban2Kz0E',
+}
+DRAGON_AUDIO_MIME = {
+    'dreiton': 'audio/mp4', 'minecraft': 'audio/mp4', 'moog_city_2': 'audio/mp4',
+    'rubber': 'audio/mpeg', 'dragon': 'audio/mpeg', 'univers': 'audio/mpeg',
+    'children': 'audio/mpeg', 'button': 'audio/mpeg',
+}
+
+@app.route('/api/dragon/audio/<key>')
+def dragon_audio(key):
+    file_id = DRAGON_AUDIO.get(key)
+    if not file_id:
+        return jsonify({'ok': False, 'error': 'unknown_audio'}), 404
     try:
-        payload = request.get_json(silent=True) or {}
-        tg_user = _telegram_webapp_user(str(payload.get('initData', '')))
+        tg_file = bot.get_file(file_id)
+        data = bot.download_file(tg_file.file_path)
+        return Response(data, mimetype=DRAGON_AUDIO_MIME.get(key, 'application/octet-stream'),
+                        headers={'Cache-Control': 'public, max-age=86400'})
+    except Exception as exc:
+        print(f'[DRAGON AUDIO API] {key}: {exc}')
+        return jsonify({'ok': False, 'error': 'audio_unavailable'}), 502
+
+# Short-lived sessions stop a client from submitting arbitrary results without starting a game.
+DRAGON_SESSIONS = {}
+DRAGON_SESSION_LOCK = threading.Lock()
+
+def _cleanup_dragon_sessions():
+    now = time.time()
+    with DRAGON_SESSION_LOCK:
+        for sid, info in list(DRAGON_SESSIONS.items()):
+            if now - info.get('created', now) > 900 or info.get('used'):
+                DRAGON_SESSIONS.pop(sid, None)
+
+@app.route('/api/dragon/start', methods=['POST'])
+def dragon_start():
+    try:
+        init_data = request.headers.get('X-Telegram-Init-Data', '') or str((request.get_json(silent=True) or {}).get('initData', ''))
+        tg_user = _telegram_webapp_user(init_data)
         if not tg_user:
             return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+        _cleanup_dragon_sessions()
+        sid = secrets.token_urlsafe(24)
+        with DRAGON_SESSION_LOCK:
+            DRAGON_SESSIONS[sid] = {'user_id': int(tg_user['id']), 'created': time.time(), 'used': False}
+        return jsonify({'ok': True, 'session': sid})
+    except Exception as exc:
+        print(f'[DRAGON START API] {exc}')
+        return jsonify({'ok': False, 'error': 'server_error'}), 500
+
+@app.route('/api/dragon/finish', methods=['POST'])
+def dragon_finish():
+    try:
+        payload = request.get_json(silent=True) or {}
+        init_data = request.headers.get('X-Telegram-Init-Data', '') or str(payload.get('initData', ''))
+        tg_user = _telegram_webapp_user(init_data)
+        if not tg_user:
+            return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+        sid = str(payload.get('session', ''))
+        with DRAGON_SESSION_LOCK:
+            session = DRAGON_SESSIONS.get(sid)
+            if not session or session.get('used') or session.get('user_id') != int(tg_user['id']):
+                return jsonify({'ok': False, 'error': 'invalid_session'}), 400
+            session['used'] = True
 
         score = int(payload.get('score', 0))
         duration = float(payload.get('duration', 0))
         score = max(0, min(score, 2000))
         if duration < 2 or duration > 600:
             return jsonify({'ok': False, 'error': 'invalid_duration'}), 400
-
-        # A normal game can pass only a limited number of pipes per second.
         max_plausible_score = int(duration * 4.5) + 3
         if score > max_plausible_score:
             return jsonify({'ok': False, 'error': 'invalid_score'}), 400
@@ -95,32 +158,24 @@ def dragon_finish():
         username = tg_user.get('username') or ''
         display_name = (f"{tg_user.get('first_name', '')} {tg_user.get('last_name', '')}").strip() or username or f'ID:{uid}'
         econ = get_user_econ(user_id=uid, user_tag=display_name, username=username)
-
         today = now_msk().strftime('%Y-%m-%d')
         if econ.get('dragon_reward_date') != today:
             econ['dragon_reward_date'] = today
             econ['dragon_reward_today'] = 0
-
         current_daily = int(econ.get('dragon_reward_today', 0) or 0)
         daily_cap = 2000
-        reward = min(score * 5, daily_cap - current_daily)
-        reward = max(0, reward)
-
+        reward = max(0, min(score * 5, daily_cap - current_daily))
         best_score = int(econ.get('dragon_best_score', 0) or 0)
         if score > best_score:
             econ['dragon_best_score'] = score
-
         if reward:
             add_coins(user_id=uid, user_tag=display_name, amount=reward, username=username)
             econ['dragon_reward_today'] = current_daily + reward
         mark_dirty()
-        return jsonify({
-            'ok': True,
-            'score': score,
-            'reward': reward,
-            'best_score': int(econ.get('dragon_best_score', score)),
-            'daily_remaining': max(0, daily_cap - int(econ.get('dragon_reward_today', 0) or 0)),
-        })
+        balance = int(econ.get('balance', econ.get('coins', 0)) or 0)
+        return jsonify({'ok': True, 'score': score, 'reward': reward, 'balance': balance,
+                        'best_score': int(econ.get('dragon_best_score', score)),
+                        'daily_remaining': max(0, daily_cap - int(econ.get('dragon_reward_today', 0) or 0))})
     except Exception as exc:
         print(f'[DRAGON API] {exc}')
         return jsonify({'ok': False, 'error': 'server_error'}), 500
