@@ -53,12 +53,12 @@ SNAKE_DIFFICULTIES = {
     'hard':   {'name': 'Сложная',  'width': 20, 'height': 16, 'coin_per_food': 50},
     'insane': {'name': 'Безумная', 'width': 26, 'height': 20, 'coin_per_food': 100},
 }
-SNAKE_MIN_MOVE_INTERVAL = 0.12
+SNAKE_MIN_MOVE_INTERVAL = 0.28
 MINIGAME_REWARD_SESSIONS = {}
 MINIGAME_REWARD_LOCK = threading.RLock()
 MINIGAME_REWARD_LIMITS = {
     '2048': 5000,
-    'reaction': 1000,
+    'reaction': 100,
     'target': 1500,
 }
 
@@ -73,10 +73,17 @@ def api_minigames_start():
         return jsonify(ok=False, error='Неизвестная игра'), 400
     token = secrets.token_urlsafe(24)
     with MINIGAME_REWARD_LOCK:
-        MINIGAME_REWARD_SESSIONS[token] = {
+        session = {
             'user_id': int(user['id']), 'game': game, 'used': False, 'created': time.time()
         }
-    return jsonify(ok=True, token=token, max_reward=MINIGAME_REWARD_LIMITS[game])
+        if game == 'reaction':
+            delay = random.uniform(1.2, 3.2)
+            session['ready_at'] = time.time() + delay
+        MINIGAME_REWARD_SESSIONS[token] = session
+    result = {'ok': True, 'token': token, 'max_reward': MINIGAME_REWARD_LIMITS[game]}
+    if game == 'reaction':
+        result['delay_ms'] = int(delay * 1000)
+    return jsonify(**result)
 
 @app.route('/api/minigames/reward', methods=['POST'])
 def api_minigames_reward():
@@ -98,7 +105,16 @@ def api_minigames_reward():
         if time.time() - session['created'] > 3600:
             session['used'] = True
             return jsonify(ok=False, error='Сессия игры истекла'), 400
-        reward = min(reward, MINIGAME_REWARD_LIMITS[game])
+        if game == 'reaction':
+            ready_at = float(session.get('ready_at', 0) or 0)
+            now = time.time()
+            if now < ready_at:
+                return jsonify(ok=False, error='Слишком рано! Дождись сигнала.'), 400
+            elapsed_ms = max(1, int((now - ready_at) * 1000))
+            score = elapsed_ms
+            reward = max(0, min(100, int((1000 - elapsed_ms) / 10)))
+        else:
+            reward = min(reward, MINIGAME_REWARD_LIMITS[game])
         session['used'] = True
     name = user.get('username') or user.get('first_name') or 'Игрок'
     econ = get_user_econ(int(user['id']), name, username=user.get('username'))
@@ -112,7 +128,12 @@ def api_minigames_reward():
     save_data(send_backup=False)
     return jsonify(ok=True, reward=reward, balance=int(econ.get('balance', 0) or 0), record=rec['score'])
 
-MINI_MUSIC_FILE_ID = 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ'
+MINI_MUSIC_TRACKS = [
+    {'id': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ', 'name': '🌃 Розмова з містом — Nikow'},
+    {'id': 'CQACAgIAAxkBAAI7c2qxoKtO0jM_j2VfHWHg3qzIkYhuAAK0mAACt-8pS74P-OfxOrdgPQQ', 'name': '🌆 Moog City 2'},
+    {'id': 'CQACAgIAAxkBAAI8OGqye6dxzMArn5Z8_oN-Zfxpwad_AAKjlQACzEIhSbF9j2pSNFhAPQQ', 'name': '💗 DokiDoki — YOU DAYEON'},
+    {'id': 'CQACAgIAAxkBAAI8O2qye8_F-Q_cGII2umP6qPi8-zcoAAJWgQACw5kBSoZ0PAKSKD5uPQQ', 'name': '🌙 When You Find Me — plenka'},
+]
 MINES_DIFFICULTIES = {
     'easy':   {'name': 'Лёгкая',   'width': 9,  'height': 9,  'mines': 10,  'reward': 250},
     'medium': {'name': 'Средняя',  'width': 16, 'height': 16, 'mines': 40,  'reward': 1000},
@@ -239,15 +260,69 @@ def mini_games_static(filename):
         return 'Mini App files not found: miniapp/', 404
     return send_from_directory(MINIAPP_DIR, filename)
 
+@app.route('/api/minigames/profile')
+def api_minigames_profile():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    uid = int(user['id']); name = user.get('username') or user.get('first_name') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    lvl, cur, nxt, bar = get_account_level(int(econ.get('account_exp', 0) or 0))
+    records = econ.get('mini_game_records', {}) if isinstance(econ.get('mini_game_records', {}), dict) else {}
+    return jsonify(ok=True, profile={'name': name, 'balance': int(econ.get('balance',0) or 0), 'level': lvl, 'exp': cur, 'next_exp': nxt, 'bar': bar, 'games': sum(1 for _ in records), 'streak': int(econ.get('bonus_streak',0) or 0)})
+
+@app.route('/api/minigames/leaderboard')
+def api_minigames_leaderboard():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    rows=[]
+    for key,e in (db.get('economy',{}) or {}).items():
+        if not isinstance(e,dict): continue
+        rows.append({'name': e.get('username') or e.get('user_tag') or str(key), 'balance': int(e.get('balance',0) or 0), 'exp': int(e.get('account_exp',0) or 0)})
+    rows.sort(key=lambda x:(x['balance'],x['exp']), reverse=True)
+    return jsonify(ok=True, rows=rows[:10])
+
+@app.route('/api/minigames/daily', methods=['POST'])
+def api_minigames_daily():
+    user, err = _miniapp_auth()
+    if err:
+        return jsonify(ok=False, error=err), 401
+    uid=int(user['id']); name=user.get('username') or user.get('first_name') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
+    now=time.time(); last=float(econ.get('mini_daily_claim',0) or 0)
+    if now-last < 86400:
+        return jsonify(ok=False,error='Ежедневный бонус уже получен',next_in=int(86400-(now-last))), 400
+    streak=int(econ.get('mini_daily_streak',0) or 0)+1
+    reward=min(500,100+streak*25)
+    econ['mini_daily_claim']=now; econ['mini_daily_streak']=streak
+    econ['balance']=int(econ.get('balance',0) or 0)+reward
+    add_account_exp(uid,name,25,username=user.get('username')); mark_dirty(); save_data(send_backup=False)
+    return jsonify(ok=True,reward=reward,streak=streak,balance=int(econ['balance']))
+
+@app.route('/api/minigames/quests')
+def api_minigames_quests():
+    user, err = _miniapp_auth()
+    if err: return jsonify(ok=False,error=err),401
+    uid=int(user['id']); name=user.get('username') or user.get('first_name') or 'Игрок'; tasks,econ=get_daily_tasks(uid,name,user.get('username'))
+    result=[]
+    for key,desc,target,reward in tasks:
+        result.append({'key':key,'description':desc,'target':target,'progress':min(target,int(econ.get('daily_progress',{}).get(key,0) or 0)),'reward':reward,'claimed':key in econ.get('daily_claimed',[])})
+    return jsonify(ok=True,tasks=result)
+
 @app.route('/api/music')
 def api_mini_music():
-    """Отдаёт фоновую музыку из сообщения бота, не раскрывая BOT_TOKEN клиенту."""
+    """Отдаёт выбранный трек из Telegram-файла."""
     try:
-        tg_file = bot.get_file(MINI_MUSIC_FILE_ID)
+        try:
+            idx = int(request.args.get('track', '0'))
+        except Exception:
+            idx = 0
+        idx = max(0, min(idx, len(MINI_MUSIC_TRACKS) - 1))
+        tg_file = bot.get_file(MINI_MUSIC_TRACKS[idx]['id'])
         data = bot.download_file(tg_file.file_path)
-        return Response(data, mimetype='audio/mpeg', headers={
+        return Response(data, mimetype=('audio/mp4' if tg_file.file_path.lower().endswith(('.m4a','.mp4')) else 'audio/mpeg'), headers={
             'Cache-Control': 'public, max-age=86400',
-            'Content-Disposition': 'inline; filename="nya-background.mp3"'
+            'Content-Disposition': f'inline; filename="nya-background-{idx}.audio"'
         })
     except Exception as e:
         print(f'[MINI MUSIC] Ошибка загрузки: {e}')
