@@ -5,6 +5,10 @@ import functools
 from datetime import datetime, timedelta, timezone
 import html
 import json
+import hashlib
+import hmac
+import secrets
+from urllib.parse import parse_qsl
 
 import os
 import random
@@ -14,8 +18,8 @@ import time
 import telebot
 import psycopg2
 from psycopg2.extras import Json
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation
-from flask import Flask
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReactionTypeEmoji, LabeledPrice, InputMediaAnimation, WebAppInfo
+from flask import Flask, jsonify, request, send_from_directory
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -30,10 +34,123 @@ def now_msk():
 # ---------------------------------------------------------
 app = Flask('')
 
+# ---------------------------------------------------------
+# TELEGRAM MINI APP — МИНИ-ИГРЫ
+# ---------------------------------------------------------
+MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp')
+MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
+MINES_GAMES = {}
+MINES_GAMES_LOCK = threading.RLock()
+MINES_DIFFICULTIES = {
+    'easy': {'name':'Лёгкая','w':9,'h':9,'mines':10,'reward':250},
+    'medium': {'name':'Средняя','w':16,'h':16,'mines':40,'reward':1000},
+    'hard': {'name':'Сложная','w':24,'h':16,'mines':80,'reward':2500},
+    'insane': {'name':'Безумная','w':30,'h':20,'mines':150,'reward':6000},
+}
+
+def _miniapp_validate_init_data(init_data):
+    if not init_data or not TOKEN:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop('hash', None)
+        if not received_hash: return None
+        check = '\n'.join(f'{k}={pairs[k]}' for k in sorted(pairs))
+        secret_key = hmac.new(b'WebAppData', TOKEN.encode('utf-8'), hashlib.sha256).digest()
+        calculated = hmac.new(secret_key, check.encode('utf-8'), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calculated, received_hash): return None
+        user_raw = pairs.get('user')
+        if not user_raw: return None
+        user = json.loads(user_raw)
+        return user if user.get('id') else None
+    except Exception:
+        return None
+
+def _miniapp_user():
+    return _miniapp_validate_init_data(request.headers.get('X-Telegram-Init-Data', ''))
+
+def _mines_neighbors(idx, w, h):
+    x,y=idx%w,idx//w; out=[]
+    for dy in (-1,0,1):
+        for dx in (-1,0,1):
+            if not dx and not dy: continue
+            nx,ny=x+dx,y+dy
+            if 0<=nx<w and 0<=ny<h: out.append(ny*w+nx)
+    return out
+
+def _mines_public(game, reveal_mines=False):
+    cells=[]
+    for i in range(game['w']*game['h']):
+        if i in game['flags']: v='flag'
+        elif i in game['revealed']: v='mine' if i in game['mines'] else game['numbers'][i]
+        elif reveal_mines and i in game['mines']: v='mine'
+        else: v=None
+        cells.append(v)
+    return cells
+
+def _mines_finish(game,user,won):
+    game['finished']=True; game['won']=bool(won)
+    if won and not game.get('rewarded'):
+        name=((user.get('first_name') or '')+' '+(user.get('last_name') or '')).strip() or user.get('username') or 'Пользователь'
+        econ=get_user_econ(user_id=int(user['id']),user_tag=name,username=user.get('username'))
+        econ['balance']=int(econ.get('balance',0) or 0)+int(game['reward'])
+        game['rewarded']=True; mark_dirty(); save_data(send_backup=False)
+
+@app.route('/minigames')
+def miniapp_home():
+    return send_from_directory(MINIAPP_DIR,'index.html')
+
+@app.route('/minigames/<path:filename>')
+def miniapp_static(filename):
+    return send_from_directory(MINIAPP_DIR,filename)
+
+@app.route('/api/mines/start',methods=['POST'])
+def mines_start_api():
+    user=_miniapp_user()
+    if not user: return jsonify({'ok':False,'error':'Telegram authentication required'}),401
+    data=request.get_json(silent=True) or {}; difficulty=str(data.get('difficulty','easy')); cfg=MINES_DIFFICULTIES.get(difficulty)
+    if not cfg: return jsonify({'ok':False,'error':'Unknown difficulty'}),400
+    total=cfg['w']*cfg['h']; mines=set(random.sample(range(1,total),cfg['mines']))
+    numbers=[0]*total
+    for i in range(total):
+        if i not in mines: numbers[i]=sum(1 for n in _mines_neighbors(i,cfg['w'],cfg['h']) if n in mines)
+    gid=secrets.token_urlsafe(16)
+    game={'id':gid,'user_id':int(user['id']),'difficulty':difficulty,'w':cfg['w'],'h':cfg['h'],'mines':mines,'numbers':numbers,'revealed':set(),'flags':set(),'reward':cfg['reward'],'finished':False,'won':False,'rewarded':False,'started_at':time.time()}
+    with MINES_GAMES_LOCK: MINES_GAMES[gid]=game
+    return jsonify({'ok':True,'game_id':gid,'width':cfg['w'],'height':cfg['h'],'mines':cfg['mines'],'reward':cfg['reward'],'cells':_mines_public(game)})
+
+@app.route('/api/mines/move',methods=['POST'])
+def mines_move_api():
+    user=_miniapp_user()
+    if not user: return jsonify({'ok':False,'error':'Telegram authentication required'}),401
+    data=request.get_json(silent=True) or {}; gid=str(data.get('game_id','')); action=str(data.get('action','open'))
+    try: idx=int(data.get('cell'))
+    except (TypeError,ValueError): return jsonify({'ok':False,'error':'Bad cell'}),400
+    with MINES_GAMES_LOCK:
+        game=MINES_GAMES.get(gid)
+        if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'Game not found'}),404
+        if game['finished'] or idx<0 or idx>=game['w']*game['h']: return jsonify({'ok':False,'error':'Game is finished or cell is invalid'}),400
+        if action=='flag':
+            if idx not in game['revealed']:
+                if idx in game['flags']: game['flags'].remove(idx)
+                elif len(game['flags'])<len(game['mines']): game['flags'].add(idx)
+        elif action=='open':
+            if idx not in game['flags']:
+                if idx in game['mines']: _mines_finish(game,user,False)
+                else:
+                    stack=[idx]
+                    while stack:
+                        cur=stack.pop()
+                        if cur in game['revealed'] or cur in game['flags'] or cur in game['mines']: continue
+                        game['revealed'].add(cur)
+                        if game['numbers'][cur]==0: stack.extend(_mines_neighbors(cur,game['w'],game['h']))
+                    if len(game['revealed'])>=game['w']*game['h']-len(game['mines']): _mines_finish(game,user,True)
+        else: return jsonify({'ok':False,'error':'Unknown action'}),400
+        return jsonify({'ok':True,'finished':game['finished'],'won':game['won'],'reward':game['reward'] if game['won'] else 0,'cells':_mines_public(game,game['finished']),'flags':len(game['flags']),'mines':len(game['mines']),'seconds':int(time.time()-game['started_at'])})
+
 @app.route('/health')
 def health():
     return "Nya Bot is alive and running! 😺"
-
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -1693,6 +1810,7 @@ def _global_message_stats():
 def setup_bot_commands():
     commands = [
         BotCommand('menu', '📱 Главное интерактивное меню'),
+        BotCommand('games', '🎮 Открыть Mini App с мини-играми'),
         BotCommand('profile', '👤 Профиль, баланс и карточка игрока'),
         BotCommand('stars', '⭐️ Звёздный магазин и VIP Pass (Telegram Stars)'),
         BotCommand('profile_settings', '⚙️ Настройки тем, шрифтов и визуала профиля'),
@@ -13863,6 +13981,21 @@ def process_stars_successful_payment(message):
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
+# ---------------------------------------------------------
+# TELEGRAM MINI APP: МИНИ-ИГРЫ
+# ---------------------------------------------------------
+@bot.message_handler(commands=['games','игры','миниигры'])
+def cmd_mini_games(message):
+    if not can_process_user_message(message): return
+    url=MINIAPP_URL
+    if not url:
+        bot.reply_to(message,'❌ MINIAPP_URL не настроен в Render ENV. Укажи URL своего Render-сервиса.')
+        return
+    if not url.endswith('/minigames'): url += '/minigames'
+    markup=InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton('🎮 Открыть мини-игры',web_app=WebAppInfo(url=url)))
+    bot.reply_to(message,'🎮 <b>МИНИ-ИГРЫ</b>\n\n💣 Сапёр уже доступен.\n🧩 Новые игры добавим сюда позже.',reply_markup=markup,parse_mode='HTML')
+
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ---------------------------------------------------------
