@@ -41,6 +41,7 @@ MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp'
 MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
 MINIAPP_GAMES = {}
 MINIAPP_LOCK = threading.RLock()
+MINIAPP_BONUS_LOCK = threading.Lock()
 
 def _miniapp_user(init_data):
     if not init_data or not TOKEN:
@@ -54,6 +55,12 @@ def _miniapp_user(init_data):
         secret_key = hmac.new(b'WebAppData', TOKEN.encode(), hashlib.sha256).digest()
         calc = hmac.new(secret_key, check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calc, received_hash):
+            return None
+        try:
+            auth_date = int(pairs.get('auth_date', '0') or 0)
+        except Exception:
+            return None
+        if not auth_date or abs(time.time() - auth_date) > 24 * 3600:
             return None
         user = json.loads(pairs.get('user', '{}'))
         return user if user.get('id') else None
@@ -93,14 +100,16 @@ def mini_bonus_api():
     uid = int(user['id']); name = user.get('first_name') or user.get('username') or 'Игрок'
     econ = get_user_econ(uid, name, username=user.get('username'))
     now = now_msk().date().isoformat()
-    if econ.get('mini_daily_claimed') == now:
-        return jsonify({'ok': False, 'error': 'already_claimed'})
-    last = econ.get('mini_daily_date')
-    streak = int(econ.get('mini_daily_streak',0) or 0)
-    yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
-    streak = streak + 1 if last == yesterday else 1
-    reward = min(5000, 500 + streak * 100)
-    econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
+    with MINIAPP_BONUS_LOCK:
+        econ = get_user_econ(uid, name, username=user.get('username'))
+        if econ.get('mini_daily_claimed') == now:
+            return jsonify({'ok': False, 'error': 'already_claimed'})
+        last = econ.get('mini_daily_date')
+        streak = int(econ.get('mini_daily_streak',0) or 0)
+        yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
+        streak = streak + 1 if last == yesterday else 1
+        reward = min(5000, 500 + streak * 100)
+        econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
     econ['balance'] = int(econ.get('balance',0) or 0) + reward
     add_account_exp(uid, name, 25, user.get('username'))
     mark_dirty(); save_data(send_backup=False)
@@ -122,35 +131,53 @@ def mini_leaderboard_api():
 
 @app.route('/api/mini/game/start', methods=['POST'])
 def mini_game_start_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
+    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    game = str((request.get_json(silent=True) or {}).get('game','')).lower()
+    game=str(payload.get('game','')).lower()
     if game not in {'mines','snake','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
-    gid=secrets.token_urlsafe(12)
-    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'started':time.time()}
-    return jsonify({'ok':True,'game_id':gid})
+    difficulty=str(payload.get('difficulty','easy')).lower()
+    mines_cfg={'easy':{'rows':9,'cols':9,'mines':10,'reward':250},'medium':{'rows':16,'cols':16,'mines':40,'reward':1000},'hard':{'rows':16,'cols':24,'mines':80,'reward':2500},'insane':{'rows':20,'cols':30,'mines':150,'reward':6000}}
+    if game=='mines' and difficulty not in mines_cfg: return jsonify({'ok':False,'error':'unknown_difficulty'}),400
+    uid=int(user['id']); now=time.time()
+    with MINIAPP_LOCK:
+        for old_id,old in list(MINIAPP_GAMES.items()):
+            if now-float(old.get('started',now))>45*60: MINIAPP_GAMES.pop(old_id,None)
+            elif old.get('user_id')==uid: MINIAPP_GAMES.pop(old_id,None)
+        gid=secrets.token_urlsafe(16)
+        MINIAPP_GAMES[gid]={'user_id':uid,'game':game,'difficulty':difficulty,'started':now,'last_activity':now}
+    out={'ok':True,'game_id':gid}
+    if game=='mines': out['difficulty']=mines_cfg[difficulty]
+    return jsonify(out)
 
 @app.route('/api/mini/game/finish', methods=['POST'])
 def mini_game_finish_api():
     payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    gid=str(payload.get('game_id','')); score=max(0,min(int(payload.get('score',0) or 0),100000))
+    gid=str(payload.get('game_id',''))
+    try:
+        score=max(0,min(int(payload.get('score',0) or 0),100000))
+        won=bool(payload.get('won',False))
+    except Exception:
+        score=0
+        won=False
     with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
     if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
-    elapsed=time.time()-game['started']
-    if elapsed < 0.5: return jsonify({'ok':False,'error':'too_fast'}),400
+    elapsed=time.time()-float(game['started'])
+    if elapsed<0.8: return jsonify({'ok':False,'error':'too_fast'}),400
     uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
+    game_name=game['game']; caps={'mines':6000,'snake':2000,'2048':2500,'reaction':500,'shooter':2500}
+    max_score={'snake':max(0,int(elapsed/0.12*2)),'reaction':5000,'shooter':max(50,int(elapsed*8)),'2048':max(100,int(elapsed*120)),'mines':100000}
+    score=min(score,max_score.get(game_name,100000))
+    if game_name=='mines': reward_caps={'easy':250,'medium':1000,'hard':2500,'insane':6000}; reward=reward_caps.get(game.get('difficulty','easy'),250) if (won and score>0) else 0
+    elif game_name=='reaction': reward=max(0,min(500,500-max(0,score-250))) if 0<score<=1000 else 0
+    else: reward=min(caps[game_name],max(0,score//10))
     econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
-    records=econ.setdefault('mini_records',{}); old=int(records.get(game['game'],0) or 0)
-    if score>old: records[game['game']]=score
-    reward=0
-    # Only modest server-side rewards; client cannot choose the reward.
-    caps={'mines':2500,'snake':2000,'2048':2500,'reaction':1500,'shooter':2500}
-    reward=min(caps[game['game']], max(0, score//10))
-    if reward:
-        econ['balance']=int(econ.get('balance',0) or 0)+reward
+    records=econ.setdefault('mini_records',{}); old=int(records.get(game_name,0) or 0)
+    if score>old: records[game_name]=score
+    if won and score>0: econ['mini_games_wins']=int(econ.get('mini_games_wins',0) or 0)+1
+    if reward: econ['balance']=int(econ.get('balance',0) or 0)+reward
     mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok':True,'reward':reward,'record':records.get(game['game'],score)})
+    return jsonify({'ok':True,'reward':reward,'record':records.get(game_name,score)})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
@@ -185,6 +212,16 @@ def keep_alive():
     t = threading.Thread(target=run_web)
     t.daemon = True
     t.start()
+
+def cleanup_mini_games_loop():
+    while True:
+        try:
+            cutoff=time.time()-45*60
+            with MINIAPP_LOCK:
+                for gid,g in list(MINIAPP_GAMES.items()):
+                    if float(g.get('started',0))<cutoff: MINIAPP_GAMES.pop(gid,None)
+        except Exception as e: print(f'[MINI GAME CLEANUP] {e}')
+        time.sleep(300)
 
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
@@ -6285,15 +6322,8 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     header = theme_info['header']
     t_icon = theme_info['icon']
 
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton('📊 Статистика', callback_data=f'profile_stats:{user_id}'),
-        InlineKeyboardButton('🏆 Рейтинг', callback_data=f'profile_rating:{user_id}'),
-        InlineKeyboardButton('🎁 Бонусы', callback_data=f'profile_bonus:{user_id}'),
-        InlineKeyboardButton('🔔 Уведомления', callback_data=f'profile_notifications:{user_id}'),
-        InlineKeyboardButton('👤 Аккаунт', callback_data=f'profile_account:{user_id}'),
-        InlineKeyboardButton('🎨 Оформление', callback_data=f'open_profile_settings:{user_id}')
-    )
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton('⚙️ Настройки профиля', callback_data=f'open_profile_settings:{user_id}'))
 
     # Профиль намеренно компактный: подробные разделы открываются кнопками.
     purchased_titles = econ.get('titles', [])
@@ -6376,94 +6406,43 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     streak_days = econ.get('bonus_streak', 0)
     streak_str = f"🔥 Стрик бонусов: <b>{streak_days} дн.</b> (Множитель: x{min(2.0, 1.0 + (streak_days * 0.15)):.1f})\n"
 
-    raw_text = (
-        f"{header}\n"
-        f"{border}\n"
-        f"{premium_emoji('profile', '🐱')} {t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
-        f"{premium_emoji('star', '⭐')} {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}]\n"
-        f"{premium_emoji('money', '💰')} {t_icon} Баланс: <b>{econ['balance']} 🪙</b>\n"
-        f"{t_icon} 🏦 Банк: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
-        f"{vip_line}"
-        f"{stars_line}"
-        f"{t_icon} 🔥 Бонусная серия: <b>{streak_days} дн.</b>\n"
+    raw_text=(
+        f"{header}\n{border}\n"
+        f"🐱 {t_icon} 👤 Игрок: {make_link(chat_id,user_tag,user_id,ping=False)}\n"
+        f"⭐ {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}]\n"
+        f"💰 {t_icon} Баланс: <b>{econ['balance']} 🪙</b> | 🏦 <b>{econ.get('bank_deposit',0)} 🪙</b>\n"
+        f"{vip_line}{stars_line}"
+        f"{t_icon} 🔥 Бонусная серия: <b>{streak_days} дн.</b> | 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b>\n"
         f"{t_icon} 💍 Семья: <b>{marriage_info}</b>\n"
         f"{t_icon} 🏢 Бизнесы: <b>{biz_str}</b> | 🐾 Питомец: <b>{pet_info}</b>\n"
-        f"{t_icon} 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b>\n"
-        f"{border}\n"
-        f"📊 <b>Активность:</b> день <b>{m_st.get('day_count', 0)}</b> | неделя <b>{m_st.get('week_count', 0)}</b> | месяц <b>{m_st.get('month_count', 0)}</b> | всё время <b>{m_st.get('total_count', 0)}</b>\n"
-        f"{t_icon} 🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n"
-        f"{border}"
+        f"📊 <b>Активность:</b> день <b>{m_st.get('day_count',0)}</b> | неделя <b>{m_st.get('week_count',0)}</b> | месяц <b>{m_st.get('month_count',0)}</b> | всё время <b>{m_st.get('total_count',0)}</b>\n"
+        f"{t_icon} 🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n{border}"
     )
-
-    text = raw_text
-
-    # GIF отправляется отдельным сообщением, поэтому полный профиль всегда
-    # отправляется обычным текстом без обрезания и без caption-лимита.
-    # ВАЖНО: Telegram ограничивает caption animation 1024 символами. Поэтому
-    # мы НЕ обрезаем готовый профиль. Для GIF строится компактная версия,
-    # в которой сохраняются все поля профиля, но убираются повторяющиеся
-    # декоративные разделители и лишние подписи.
-    gif_key = econ.get('profile_gif')
-    gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
-    gif_text = text
-
+    text=raw_text
+    gif_key=econ.get('profile_gif'); gif_info=PROFILE_GIFS.get(gif_key) if gif_key else None
+    if len(text)>1000: text=text[:995]+'…'
+    gif_caption = html.unescape(re.sub(r'<[^>]+>', '', text))
+    if len(gif_caption)>1000: gif_caption=gif_caption[:997]+'…'
     def _send_profile_gif(reply_to=None):
-        # GIF отправляется отдельным сообщением, а карточка профиля — отдельно.
-        # Поэтому Telegram caption limit для animation больше не влияет на профиль.
-        # Сначала GIF, затем полноценная карточка профиля.
-        if message_to_reply is not None:
-            bot.send_animation(chat_id, gif_info['url'], reply_to_message_id=message_to_reply.message_id)
-            card_msg = bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.send_animation(chat_id, gif_info['url'])
-            card_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        return card_msg
-
+        kwargs={'reply_markup':markup,'caption':gif_caption}
+        if reply_to is not None: return bot.send_animation(chat_id,gif_info['url'],reply_to_message_id=reply_to.message_id,**kwargs)
+        return bot.send_animation(chat_id,gif_info['url'],**kwargs)
     if message_id_to_edit:
-        # Если GIF активен, сама карточка должна быть animation-сообщением.
-        # Сначала пытаемся изменить media (если старое сообщение уже GIF),
-        # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
         if gif_info:
-            # Раньше GIF пытался стать самой карточкой через caption. Теперь
-            # карточка и GIF — два отдельных сообщения, поэтому при обновлении
-            # просто заменяем старую карточку новой и отправляем GIF отдельно.
-            try:
-                bot.delete_message(chat_id, message_id_to_edit)
-            except Exception as delete_error:
-                print(f"[PROFILE GIF CARD DELETE] {delete_error}")
-            try:
-                _send_profile_gif()
-                return
-            except Exception as gif_error:
-                print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
-
-        # GIF выключен: обычная текстовая карточка. Если старое сообщение было
-        # animation, edit_message_text не сработает — тогда заменяем его текстом.
+            try: bot.delete_message(chat_id,message_id_to_edit)
+            except Exception: pass
+            try: _send_profile_gif(); return
+            except Exception as e: print(f"[PROFILE GIF EDIT ERROR] {e}")
         try:
-            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
-            return
-        except Exception as profile_edit_error:
-            print(f"[PROFILE EDIT ERROR] {profile_edit_error}")
-            try:
-                bot.delete_message(chat_id, message_id_to_edit)
-            except Exception:
-                pass
-            try:
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                return
-            except Exception as text_error:
-                print(f"[PROFILE TEXT REPLACE ERROR] {text_error}")
-
+            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id_to_edit,reply_markup=markup,parse_mode='HTML'); return
+        except Exception:
+            try: bot.delete_message(chat_id,message_id_to_edit)
+            except Exception: pass
     if gif_info:
         try:
-            if message_to_reply:
-                _send_profile_gif(message_to_reply)
-            else:
-                _send_profile_gif()
+            _send_profile_gif(message_to_reply) if message_to_reply else _send_profile_gif()
             return
-        except Exception as gif_error:
-            print(f"[PROFILE GIF ERROR] {gif_error}")
-
+        except Exception as e: print(f"[PROFILE GIF ERROR] {e}")
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
@@ -13971,6 +13950,7 @@ def process_stars_successful_payment(message):
 setup_bot_commands()
 start_background_threads()
 keep_alive()
+threading.Thread(target=cleanup_mini_games_loop,daemon=True).start()
 
 print('Бот успешно запущен со всеми обновлениями и исправлениями! 😸')
 bot.infinity_polling()
