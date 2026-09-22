@@ -1855,6 +1855,18 @@ def get_account_level(exp):
     bar = "█" * filled + "░" * (8 - filled)
     return lvl, exp, next_tier_exp, bar
 
+
+def account_exp_for_level(level):
+    """Минимальный account_exp, необходимый для указанного уровня."""
+    try:
+        level = max(1, int(level))
+    except (TypeError, ValueError):
+        return 0
+    if level <= 1:
+        return 0
+    # get_account_level() использует порог следующего уровня: 100 * level^1.5.
+    return int(100 * ((level - 1) ** 1.5))
+
 def is_vip_active(econ):
     return bool(econ and (econ.get('vip_forever') or econ.get('vip_until', 0) > time.time()))
 
@@ -8400,12 +8412,20 @@ def _admin_grant(message):
     raw = (message.text or '').strip()
     parts = raw.split()
     if len(parts) < 3:
-        bot.reply_to(message, "❌ Формат: <code>/give @user coins 100000</code> или <code>/give @user all</code>.", parse_mode='HTML')
+        bot.reply_to(message, (
+            "❌ Формат: <code>/give @user coins 100000</code>\n"
+            "<code>/give @user level 50</code>\n"
+            "<code>/give @user exp 5000</code>\n"
+            "<code>/give @user work_exp 5000</code>\n"
+            "<code>/give @user bank 100000</code>\n"
+            "<code>/give @user all</code>"
+        ), parse_mode='HTML')
         return True
+
     target_raw = parts[1]
     target_id = None
     target_name = None
-    if message.reply_to_message and (target_raw in ('reply', '.', '-', '@reply') or target_raw.lower() == 'this'):
+    if message.reply_to_message and (target_raw.lower() in ('reply', '.', '-', '@reply', 'this')):
         target = message.reply_to_message.from_user
         target_id = target.id
         target_name = target.username or target.first_name or f'ID:{target_id}'
@@ -8420,40 +8440,175 @@ def _admin_grant(message):
     amount = parts[3] if len(parts) > 3 else None
     changed = []
 
-    if item in ('coins', 'coin', 'коины', 'коины'):
-        try: value = int(amount or '0')
-        except ValueError: value = 0
-        if value <= 0:
-            bot.reply_to(message, "❌ Укажи положительное количество коинов.")
-            return True
-        econ['balance'] += value; changed.append(f'+{value:,} 🪙')
+    def positive_int(value, label):
+        try:
+            n = int(value or '0')
+        except (TypeError, ValueError):
+            n = 0
+        if n <= 0:
+            bot.reply_to(message, f"❌ {label} должно быть положительным числом.")
+            return None
+        return n
+
+    if item in ('coins', 'coin', 'коины', 'монеты'):
+        value = positive_int(amount, 'Количество коинов')
+        if value is None: return True
+        econ['balance'] = int(econ.get('balance', 0) or 0) + value
+        changed.append(f'+{value:,} 🪙')
+
+    elif item in ('bank', 'банк', 'cash', 'касса'):
+        value = positive_int(amount, 'Сумма')
+        if value is None: return True
+        econ['bank_deposit'] = int(econ.get('bank_deposit', 0) or 0) + value
+        changed.append(f'+{value:,} 🏦 в банк/кассу')
+
+    elif item in ('level', 'lvl', 'уровень'):
+        value = positive_int(amount, 'Уровень')
+        if value is None: return True
+        econ['account_exp'] = account_exp_for_level(value)
+        actual_level, _, _, _ = get_account_level(econ['account_exp'])
+        changed.append(f'уровень профиля: {actual_level} LVL')
+
+    elif item in ('exp', 'xp', 'account_exp', 'опыт'):
+        value = positive_int(amount, 'Количество EXP')
+        if value is None: return True
+        econ['account_exp'] = int(econ.get('account_exp', 0) or 0) + value
+        lvl, _, _, _ = get_account_level(econ['account_exp'])
+        changed.append(f'+{value:,} EXP профиля → {lvl} LVL')
+
+    elif item in ('set_exp', 'setexp'):
+        value = positive_int(amount, 'EXP')
+        if value is None: return True
+        econ['account_exp'] = value
+        lvl, _, _, _ = get_account_level(value)
+        changed.append(f'установлен EXP: {value:,} → {lvl} LVL')
+
+    elif item in ('work_exp', 'workexp', 'работа_exp', 'опыт_работы'):
+        value = positive_int(amount, 'Опыт работы')
+        if value is None: return True
+        econ['work_exp'] = int(econ.get('work_exp', 0) or 0) + value
+        changed.append(f'+{value:,} EXP работы')
+
+    elif item in ('set_work_exp', 'set_workexp'):
+        value = positive_int(amount, 'Опыт работы')
+        if value is None: return True
+        econ['work_exp'] = value
+        changed.append(f'установлен EXP работы: {value:,}')
+
     elif item in ('vip', 'vip_days'):
         try: days = int(amount or '30')
-        except ValueError: days = 0
+        except (TypeError, ValueError): days = 0
         if days <= 0:
             bot.reply_to(message, "❌ Количество дней должно быть больше 0.")
             return True
         econ['vip_until'] = max(time.time(), econ.get('vip_until', 0)) + days * 86400
         changed.append(f'VIP +{days} дн.')
+
     elif item in ('vip_forever', 'vip_forever_25', 'вечный_vip'):
-        econ['vip_forever'] = True; changed.append('VIP навсегда')
+        econ['vip_forever'] = True
+        changed.append('VIP навсегда')
+
     elif item in ('gif', 'profile_gif', 'гив'):
         gif_id = (amount or '').lower()
         if gif_id not in PROFILE_GIFS:
             bot.reply_to(message, "❌ GIF не найден. Доступны: <code>gulya</code>, <code>sakura_gif</code>, <code>mogger</code>, <code>cat</code>.", parse_mode='HTML')
             return True
         owned = econ.setdefault('profile_gifs', [])
-        if gif_id not in owned:
-            owned.append(gif_id)
+        if gif_id not in owned: owned.append(gif_id)
         econ['profile_gif'] = gif_id
         changed.append(f"GIF: {PROFILE_GIFS[gif_id]['name']}")
-    elif item in ('all', 'everything', 'донаты', 'donates'):
-        _grant_all_donations(econ); changed.append('все Stars-донаты')
+
+    elif item in ('all', 'everything', 'донаты', 'donates', 'all_stars', 'stars_all'):
+        _grant_all_donations(econ)
+        changed.append('все Stars-донаты: VIP, питомцы, GIF, темы, титулы, значки, машины, бизнесы')
+
+    elif item in ('vehicle', 'машина', 'транспорт'):
+        vehicle_id = (amount or '').lower()
+        if vehicle_id in VEHICLES:
+            inv = econ.setdefault('vehicle_inventory', [])
+            if vehicle_id not in inv:
+                inv.append(vehicle_id)
+            econ['equipped_vehicle'] = vehicle_id
+            econ['vehicle'] = vehicle_id
+            changed.append(f'машина {VEHICLES[vehicle_id]["name"]}')
+        elif vehicle_id in DONOR_VEHICLES:
+            inv = econ.setdefault('vehicle_inventory', [])
+            if vehicle_id not in inv:
+                inv.append(vehicle_id)
+            econ['equipped_vehicle'] = vehicle_id
+            econ['vehicle'] = vehicle_id
+            paid = econ.setdefault('paid_stars_items', [])
+            paid_id = next((k for k,v in STARS_COSMETICS.items() if v.get('type') == 'donor_vehicle' and v.get('vehicle_id') == vehicle_id), None)
+            if paid_id and paid_id not in paid: paid.append(paid_id)
+            changed.append(f'донатный транспорт {DONOR_VEHICLES[vehicle_id]["name"]}')
+        else:
+            bot.reply_to(message, "❌ Машина не найдена. Пример: <code>/give @user vehicle donor_lambo</code>.", parse_mode='HTML')
+            return True
+
+    elif item in ('rod', 'удочка'):
+        rod_id = (amount or '').lower()
+        if rod_id not in RODS:
+            bot.reply_to(message, "❌ Удочка не найдена. Укажи ID из каталога RODS.")
+            return True
+        econ['equipped_rod'] = rod_id
+        changed.append(f'удочка {RODS[rod_id]["name"]}')
+
+    elif item in ('bow', 'лук'):
+        bow_id = (amount or '').lower()
+        if bow_id not in BOWS:
+            bot.reply_to(message, "❌ Лук не найден. Укажи ID из каталога BOWS.")
+            return True
+        econ['equipped_bow'] = bow_id
+        changed.append(f'лук {BOWS[bow_id]["name"]}')
+
+    elif item in ('pet', 'питомец'):
+        pet_id = (amount or '').lower()
+        if pet_id not in PETS_DATA:
+            bot.reply_to(message, "❌ Питомец не найден. Укажи его ID из PETS_DATA.")
+            return True
+        pi = PETS_DATA[pet_id]
+        econ['pet'] = {'id': pet_id, 'name': pi['name'], 'luck_bonus': pi['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+        changed.append(f'питомец {pi["name"]}')
+
+    elif item in ('item', 'предмет'):
+        item_id = amount or ''
+        if not item_id:
+            bot.reply_to(message, "❌ Укажи ID предмета: <code>/give @user item ITEM_ID</code>.", parse_mode='HTML')
+            return True
+        econ.setdefault('inventory', [])
+        if item_id not in econ['inventory']:
+            econ['inventory'].append(item_id)
+        changed.append(f'предмет {item_id}')
+
+    elif item in ('business', 'biz', 'бизнес'):
+        biz_id = (amount or '').lower()
+        level_arg = parts[4] if len(parts) > 4 else '1'
+        if biz_id in BUSINESSES:
+            try: level = max(1, min(5, int(level_arg)))
+            except (TypeError, ValueError): level = 1
+            econ.setdefault('businesses', {})[biz_id] = True
+            econ.setdefault('biz_levels', {})[biz_id] = level
+            changed.append(f'бизнес {BUSINESSES[biz_id]["short"]} → уровень {level}')
+        elif biz_id in DONOR_BUSINESSES:
+            try: level = max(1, min(5, int(level_arg)))
+            except (TypeError, ValueError): level = 1
+            econ.setdefault('donor_businesses', {})[biz_id] = level
+            econ.setdefault('biz_levels', {})[biz_id] = level
+            paid = econ.setdefault('paid_stars_items', [])
+            paid_id = next((k for k,v in STARS_COSMETICS.items() if v.get('type') == 'donor_business' and v.get('business_id') == biz_id), None)
+            if paid_id and paid_id not in paid: paid.append(paid_id)
+            changed.append(f'донатный бизнес {DONOR_BUSINESSES[biz_id]["name"]} → уровень {level}')
+        else:
+            bot.reply_to(message, "❌ Бизнес не найден. Укажи ID, например <code>club</code> или <code>donor_nightclub</code>.", parse_mode='HTML')
+            return True
+
     elif item in STARS_COSMETICS:
         c = STARS_COSMETICS[item]
         t = c.get('type')
-        if t == 'bp_premium': econ['bp_premium'] = True
-        elif t == 'title_cert': econ['has_custom_title_cert'] = True
+        if t == 'bp_premium':
+            econ['bp_premium'] = True
+        elif t == 'title_cert':
+            econ['has_custom_title_cert'] = True
         elif t == 'theme':
             th = c.get('theme_id'); purchased = econ.setdefault('purchased_themes', ['default'])
             if th and th not in purchased: purchased.append(th)
@@ -8462,51 +8617,80 @@ def _admin_grant(message):
             em = c.get('emoji'); inv = econ.setdefault('inventory', [])
             if em and em not in inv: inv.append(em)
             econ['badge'] = em
+        elif t == 'donor_title':
+            tid = c.get('title_id')
+            if tid and tid not in econ.setdefault('titles', []): econ['titles'].append(tid)
+            if tid: econ['active_title'] = tid
+        elif t == 'gif':
+            gid = c.get('gif_id')
+            if gid and gid not in econ.setdefault('profile_gifs', []): econ['profile_gifs'].append(gid)
+            if gid: econ['profile_gif'] = gid
         elif t == 'pet':
             pid = c.get('pet_id'); econ.setdefault('paid_stars_items', [])
             if item not in econ['paid_stars_items']: econ['paid_stars_items'].append(item)
             if pid in PETS_DATA:
-                pi=PETS_DATA[pid]; econ['pet']={'id':pid,'name':pi['name'],'luck_bonus':pi['luck_bonus'],'hunger':100,'cleanliness':100,'pet_exp':0,'last_update':time.time()}
+                pi = PETS_DATA[pid]
+                econ['pet'] = {'id': pid, 'name': pi['name'], 'luck_bonus': pi['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+        elif t == 'donor_vehicle':
+            vid = c.get('vehicle_id')
+            if vid in DONOR_VEHICLES:
+                inv = econ.setdefault('vehicle_inventory', [])
+                if vid not in inv: inv.append(vid)
+                econ['equipped_vehicle'] = vid; econ['vehicle'] = vid
+        elif t == 'donor_business':
+            bid = c.get('business_id')
+            if bid in DONOR_BUSINESSES:
+                econ.setdefault('donor_businesses', {})[bid] = max(1, int(econ.get('donor_businesses', {}).get(bid, 1)))
+        paid = econ.setdefault('paid_stars_items', [])
+        if item not in paid: paid.append(item)
         changed.append(c.get('name', item))
+
     elif item in ('pass_forever', 'vip_pass_forever'):
-        econ['vip_forever'] = True; changed.append('VIP навсегда')
+        econ['vip_forever'] = True
+        changed.append('VIP навсегда')
+
     elif item in ('bp_premium', 'premium_pass'):
         econ['bp_premium'] = True; econ.setdefault('paid_stars_items', [])
         if 'bp_premium' not in econ['paid_stars_items']: econ['paid_stars_items'].append('bp_premium')
         changed.append('Премиум Pass')
+
     elif item.startswith('theme_'):
-        key=item.replace('theme_','',1)
+        key = item.replace('theme_', '', 1)
         if key in THEMES:
-            purchased=econ.setdefault('purchased_themes',['default'])
+            purchased = econ.setdefault('purchased_themes', ['default'])
             if key not in purchased: purchased.append(key)
-            econ['profile_theme']=key; changed.append(THEMES[key]['name'])
+            econ['profile_theme'] = key; changed.append(THEMES[key]['name'])
         else:
             bot.reply_to(message, "❌ Такой темы нет."); return True
+
     elif item.startswith('badge_'):
-        key=item
-        if key in STARS_COSMETICS and STARS_COSMETICS[key].get('type')=='badge':
-            em=STARS_COSMETICS[key]['emoji']; inv=econ.setdefault('inventory',[])
-            if em not in inv: inv.append(em)
-            econ['badge']=em; changed.append(em)
+        key = item
+        if key in STARS_COSMETICS and STARS_COSMETICS[key].get('type') == 'badge':
+            em = STARS_COSMETICS[key]['emoji']; inv = econ.setdefault('inventory', [])
+            if em and em not in inv: inv.append(em)
+            econ['badge'] = em; changed.append(em)
         elif key in VIP_BADGES:
-            em=VIP_BADGES[key]['emoji']; inv=econ.setdefault('inventory',[])
+            em = VIP_BADGES[key]['emoji']; inv = econ.setdefault('inventory', [])
             if em not in inv: inv.append(em)
-            econ['badge']=em; changed.append(em)
+            econ['badge'] = em; changed.append(em)
         else:
             bot.reply_to(message, "❌ Такой VIP-значок не найден."); return True
+
     elif item in ('pet_griffin', 'vip_griffin'):
         econ.setdefault('paid_stars_items', [])
         if 'pet_griffin' not in econ['paid_stars_items']: econ['paid_stars_items'].append('pet_griffin')
         if 'vip_griffin' in PETS_DATA:
-            pi=PETS_DATA['vip_griffin']; econ['pet']={'id':'vip_griffin','name':pi['name'],'luck_bonus':pi['luck_bonus'],'hunger':100,'cleanliness':100,'pet_exp':0,'last_update':time.time()}
+            pi = PETS_DATA['vip_griffin']; econ['pet'] = {'id': 'vip_griffin', 'name': pi['name'], 'luck_bonus': pi['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
         changed.append('👑 Королевский Грифон')
+
     elif item == 'stars':
-        try: value=int(amount or '0')
-        except ValueError: value=0
-        if value <= 0: bot.reply_to(message,"❌ Укажи положительное число Stars."); return True
-        econ['stars_donated']=econ.get('stars_donated',0)+value; changed.append(f'+{value} ⭐️ в статистику донатов')
+        value = positive_int(amount, 'Количество Stars')
+        if value is None: return True
+        econ['stars_donated'] = int(econ.get('stars_donated', 0) or 0) + value
+        changed.append(f'+{value} ⭐️ в статистику донатов')
+
     else:
-        bot.reply_to(message, "❌ Неизвестный предмет. Используй <code>all</code>, <code>coins</code>, <code>vip</code>, <code>vip_forever</code>, <code>pet_griffin</code> или ID товара из Stars-магазина.", parse_mode='HTML')
+        bot.reply_to(message, "❌ Неизвестный предмет. Используй <code>all</code>, <code>coins</code>, <code>level</code>, <code>exp</code>, <code>work_exp</code>, <code>bank</code>, <code>business</code> или ID товара из Stars-магазина.", parse_mode='HTML')
         return True
 
     mark_dirty()
@@ -8659,6 +8843,25 @@ def cmd_group_info(message):
     flood='🟢 включён' if settings.get('flood_protection',False) else '🔴 выключен'
     welcome='🟢 включены' if settings.get('welcome_enabled',True) else '🔴 выключены'
     bot.reply_to(message,f"🔎 <b>ИНФОРМАЦИЯ О ГРУППЕ</b>\n──────────────────────\n📌 <b>{title}</b>\n🆔 <code>{chat.id}</code>\n{uname}\n{mem}\n📡 Тип: <b>{_chat_type_label(getattr(chat,'type','group'))}</b>\n🟢 Бот: <b>активен</b>\n🛡 Антифлуд: <b>{flood}</b>\n👋 Приветствия: <b>{welcome}</b>\n🕐 Последняя активность: <b>{_fmt_seen(item.get('last_activity'))}</b>",parse_mode='HTML')
+
+@bot.message_handler(commands=['save_json', 'force_save', 'сохранить', 'сохранить_json'])
+@serialize_user_action
+def admin_force_save_command(message):
+    """Owner-only: немедленно сохраняет актуальную базу в JSON + Neon и отправляет JSON-бэкап в DB_CHANNEL_ID."""
+    if not _is_owner_admin(message):
+        return
+    try:
+        save_data(send_backup=True)
+        bot.reply_to(
+            message,
+            f"💾 <b>ПРИНУДИТЕЛЬНОЕ СОХРАНЕНИЕ ВЫПОЛНЕНО</b>\n"
+            f"📄 <code>{html.escape(DATA_FILE)}</code>\n"
+            f"☁️ Neon: {'сохранён' if DATABASE_URL else 'не настроен'}\n"
+            f"📦 Telegram-бэкап: {'отправлен в DB_CHANNEL_ID' if DB_CHANNEL_ID else 'DB_CHANNEL_ID не задан'}",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        bot.reply_to(message, f"❌ <b>Ошибка принудительного сохранения:</b> <code>{html.escape(str(e))}</code>", parse_mode='HTML')
 
 @bot.message_handler(commands=['give_gif', 'выдать_gif'])
 @serialize_user_action
