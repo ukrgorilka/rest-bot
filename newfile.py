@@ -20,7 +20,6 @@ import hashlib
 import hmac
 import secrets
 from urllib.parse import parse_qsl
-from urllib.request import Request as UrlRequest, urlopen
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -42,7 +41,6 @@ MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp'
 MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
 MINIAPP_GAMES = {}
 MINIAPP_LOCK = threading.RLock()
-MINIAPP_BONUS_LOCK = threading.Lock()
 
 def _miniapp_user(init_data):
     if not init_data or not TOKEN:
@@ -57,120 +55,23 @@ def _miniapp_user(init_data):
         calc = hmac.new(secret_key, check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calc, received_hash):
             return None
-        try:
-            auth_date = int(pairs.get('auth_date', '0') or 0)
-        except Exception:
-            return None
-        if not auth_date or abs(time.time() - auth_date) > 24 * 3600:
-            return None
         user = json.loads(pairs.get('user', '{}'))
         return user if user.get('id') else None
     except Exception:
         return None
 
-def _miniapp_auth(payload=None):
-    payload = payload or {}
-    init_data = str(payload.get('initData', '') or request.headers.get('X-Telegram-Init-Data', ''))
-    return _miniapp_user(init_data)
+def _miniapp_auth(payload):
+    return _miniapp_user(str((payload or {}).get('initData', '')))
 
 @app.route('/minigames')
 def miniapp_index():
     if not os.path.exists(os.path.join(MINIAPP_DIR, 'index.html')):
         return 'Mini App is not installed', 404
-    response = send_from_directory(MINIAPP_DIR, 'index.html')
-    response.headers['Cache-Control'] = 'no-store, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    return response
+    return send_from_directory(MINIAPP_DIR, 'index.html')
 
 @app.route('/minigames/<path:filename>')
 def miniapp_static(filename):
-    response = send_from_directory(MINIAPP_DIR, filename)
-    # Telegram WebView can keep old JS/CSS longer than a normal browser.
-    # Never cache our own Mini App assets so a deploy immediately picks up fixes.
-    response.headers['Cache-Control'] = 'no-store, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    return response
-
-def _mini_log(econ, kind, amount=0, text=''):
-    now = now_msk().strftime('%Y-%m-%d %H:%M:%S')
-    tx = econ.setdefault('mini_transactions', [])
-    tx.append({'time': now, 'kind': str(kind), 'amount': int(amount or 0), 'text': str(text)[:160]})
-    del tx[:-50]
-    notes = econ.setdefault('mini_notifications', [])
-    notes.append({'time': now, 'kind': str(kind), 'text': str(text)[:220], 'read': False})
-    del notes[:-50]
-
-def _mini_task_payload(uid, name, username=None):
-    tasks, econ = get_daily_tasks(uid, name, username)
-    wtasks, _ = get_weekly_tasks(uid, name, username)
-    dp = econ.get('daily_progress', {}) or {}; dc = set(econ.get('daily_claimed', []) or [])
-    wp = econ.get('weekly_progress', {}) or {}; wc = set(econ.get('weekly_claimed', []) or [])
-    return {
-        'daily': [{'key':k,'description':d,'target':t,'reward':r,'progress':min(int(dp.get(k,0) or 0),t),'claimed':k in dc} for k,d,t,r in tasks],
-        'weekly': [{'key':k,'description':d,'target':t,'reward':r,'progress':min(int(wp.get(k,0) or 0),t),'claimed':k in wc} for k,d,t,r in wtasks],
-        'streak': int(econ.get('mini_daily_streak',0) or 0),
-    }
-
-@app.route('/api/mini/tasks', methods=['POST'])
-def mini_tasks_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    return jsonify({'ok':True, **_mini_task_payload(uid,name,user.get('username'))})
-
-@app.route('/api/mini/achievements', methods=['POST'])
-def mini_achievements_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    econ=get_user_econ(uid,name,username=user.get('username')); stats=econ.get('stats',{}) or {}; unlocked=set(econ.get('achievements',[]) or [])
-    rows=[]
-    for aid,info in ACHIEVEMENTS.items():
-        cur=int(stats.get(info['stat'],0) or 0); target=int(info['target'])
-        rows.append({'id':aid,'title':info['title'],'desc':info['desc'],'progress':min(cur,target),'target':target,'reward':info['reward'],'unlocked':aid in unlocked})
-    return jsonify({'ok':True,'rows':rows,'unlocked':len(unlocked)})
-
-@app.route('/api/mini/transactions', methods=['POST'])
-def mini_transactions_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    econ=get_user_econ(uid,name,username=user.get('username'))
-    return jsonify({'ok':True,'rows':list(reversed((econ.get('mini_transactions',[]) or [])[-50:]))})
-
-@app.route('/api/mini/notifications', methods=['POST'])
-def mini_notifications_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    econ=get_user_econ(uid,name,username=user.get('username'))
-    return jsonify({'ok':True,'rows':list(reversed((econ.get('mini_notifications',[]) or [])[-50:]))})
-
-@app.route('/api/mini/shop', methods=['POST'])
-def mini_shop_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    cats=[]
-    for cid,title,data in [('coins','💰 Коин-паки',STARS_COIN_PACKS),('vip','⭐ VIP Pass',STARS_VIP_PASS),('badges','👑 VIP-значки',VIP_BADGES)]:
-        rows=[]
-        for key,v in data.items():
-            rows.append({'id':key,'name':v.get('name') or v.get('emoji') or key,'stars':int(v.get('stars',0) or 0),'desc':v.get('desc','')})
-        cats.append({'id':cid,'title':title,'items':rows})
-    return jsonify({'ok':True,'categories':cats})
-
-@app.route('/api/mini/stats', methods=['POST'])
-def mini_stats_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    econ=get_user_econ(uid,name,username=user.get('username'))
-    return jsonify({'ok':True,'games_played':int(econ.get('mini_games_played',0) or 0),'wins':int(econ.get('mini_games_wins',0) or 0),'records':econ.get('mini_records',{}) or {},'balance':int(econ.get('balance',0) or 0),'xp':int(econ.get('account_exp',0) or 0)})
-
-@app.route('/api/mini/admin/health', methods=['POST'])
-def mini_admin_health_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user or int(user.get('id',0)) != int(ADMIN_ID or 0): return jsonify({'ok':False,'error':'forbidden'}),403
-    return jsonify({'ok':True,'economy_users':len(db.get('economy',{}) or {}),'active_games':len(MINIAPP_GAMES),'dirty':bool(DATA_DIRTY),'miniapp_url':bool(MINIAPP_URL),'db_channel_backup':bool(DB_CHANNEL_ID)})
+    return send_from_directory(MINIAPP_DIR, filename)
 
 @app.route('/api/mini/profile', methods=['POST'])
 def mini_profile_api():
@@ -182,7 +83,7 @@ def mini_profile_api():
     econ = get_user_econ(uid, name, username=user.get('username'))
     lvl, exp, nxt, bar = get_account_level(econ.get('account_exp', 0))
     st = econ.get('msg_stats', {}) or {}
-    return jsonify({'ok': True, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}, 'notifications': len(econ.get('mini_notifications',[]) or []), 'transactions': len(econ.get('mini_transactions',[]) or {})})
+    return jsonify({'ok': True, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}})
 
 @app.route('/api/mini/bonus', methods=['POST'])
 def mini_bonus_api():
@@ -192,18 +93,15 @@ def mini_bonus_api():
     uid = int(user['id']); name = user.get('first_name') or user.get('username') or 'Игрок'
     econ = get_user_econ(uid, name, username=user.get('username'))
     now = now_msk().date().isoformat()
-    with MINIAPP_BONUS_LOCK:
-        econ = get_user_econ(uid, name, username=user.get('username'))
-        if econ.get('mini_daily_claimed') == now:
-            return jsonify({'ok': False, 'error': 'already_claimed'})
-        last = econ.get('mini_daily_date')
-        streak = int(econ.get('mini_daily_streak',0) or 0)
-        yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
-        streak = streak + 1 if last == yesterday else 1
-        reward = min(5000, 500 + streak * 100)
-        econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
+    if econ.get('mini_daily_claimed') == now:
+        return jsonify({'ok': False, 'error': 'already_claimed'})
+    last = econ.get('mini_daily_date')
+    streak = int(econ.get('mini_daily_streak',0) or 0)
+    yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
+    streak = streak + 1 if last == yesterday else 1
+    reward = min(5000, 500 + streak * 100)
+    econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
     econ['balance'] = int(econ.get('balance',0) or 0) + reward
-    _mini_log(econ, 'daily_bonus', reward, f'Ежедневный бонус: +{reward} 🪙 (серия {streak})')
     add_account_exp(uid, name, 25, user.get('username'))
     mark_dirty(); save_data(send_backup=False)
     return jsonify({'ok': True, 'reward': reward, 'streak': streak})
@@ -213,151 +111,52 @@ def mini_leaderboard_api():
     user = _miniapp_auth(request.get_json(silent=True) or {})
     if not user:
         return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
-    game_filter = str((request.get_json(silent=True) or {}).get('game','')).lower()
     rows=[]
     for uid, econ in db.get('economy', {}).items():
         if not isinstance(econ, dict): continue
-        try: exp=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
+        try: score=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
         except: continue
-        rec=int((econ.get('mini_records',{}) or {}).get(game_filter,0) or 0) if game_filter else exp
-        rows.append({'name': clean_tag(econ.get('name') or econ.get('tag') or str(uid)), 'level': get_account_level(exp)[0], 'exp': exp, 'balance': balance, 'score': rec})
-    rows.sort(key=lambda x: (x['score'], x['exp'], x['balance']), reverse=True)
+        rows.append({'name': clean_tag(econ.get('name') or econ.get('tag') or str(uid)), 'level': get_account_level(score)[0], 'exp': score, 'balance': balance})
+    rows.sort(key=lambda x: (x['exp'], x['balance']), reverse=True)
     return jsonify({'ok': True, 'rows': rows[:20]})
-
-MINIAPP_MINES_CONFIG = {
-    'easy': {'rows': 9, 'cols': 9, 'mines': 10, 'reward': 250},
-    'medium': {'rows': 16, 'cols': 16, 'mines': 40, 'reward': 1000},
-    'hard': {'rows': 24, 'cols': 16, 'mines': 80, 'reward': 2500},
-    'insane': {'rows': 30, 'cols': 20, 'mines': 150, 'reward': 6000},
-}
-MINIAPP_SNAKE_CONFIG = {
-    'easy': {'cols': 10, 'rows': 10, 'step_ms': 180, 'apple_reward': 10},
-    'medium': {'cols': 15, 'rows': 15, 'step_ms': 145, 'apple_reward': 25},
-    'hard': {'cols': 20, 'rows': 16, 'step_ms': 115, 'apple_reward': 50},
-    'insane': {'cols': 26, 'rows': 20, 'step_ms': 90, 'apple_reward': 100},
-}
 
 @app.route('/api/mini/game/start', methods=['POST'])
 def mini_game_start_api():
-    payload = request.get_json(silent=True) or {}
-    user = _miniapp_auth(payload)
-    if not user:
-        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
-    game = str(payload.get('game', '')).lower()
-    if game not in {'mines', 'snake', 'flappy', '2048', 'reaction', 'shooter'}:
-        return jsonify({'ok': False, 'error': 'unknown_game'}), 400
-    difficulty = str(payload.get('difficulty', 'easy')).lower()
-    if game == 'mines' and difficulty not in MINIAPP_MINES_CONFIG:
-        return jsonify({'ok': False, 'error': 'unknown_difficulty'}), 400
-    if game == 'snake' and difficulty not in MINIAPP_SNAKE_CONFIG:
-        return jsonify({'ok': False, 'error': 'unknown_difficulty'}), 400
-
-    uid = int(user['id'])
-    now = time.time()
-    with MINIAPP_LOCK:
-        for old_id, old in list(MINIAPP_GAMES.items()):
-            if now - float(old.get('started', now)) > 45 * 60:
-                MINIAPP_GAMES.pop(old_id, None)
-            elif old.get('user_id') == uid:
-                MINIAPP_GAMES.pop(old_id, None)
-        gid = secrets.token_urlsafe(16)
-        MINIAPP_GAMES[gid] = {
-            'user_id': uid,
-            'game': game,
-            'difficulty': difficulty,
-            'started': now,
-            'last_activity': now,
-        }
-    out = {'ok': True, 'game_id': gid}
-    if game == 'mines':
-        out['difficulty'] = MINIAPP_MINES_CONFIG[difficulty]
-    elif game == 'snake':
-        out['difficulty'] = MINIAPP_SNAKE_CONFIG[difficulty]
-    elif game == 'flappy':
-        out['difficulty'] = {'gravity': 1.05, 'speed': 0.32, 'gap': 0.40}
-    return jsonify(out)
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    game = str((request.get_json(silent=True) or {}).get('game','')).lower()
+    if game not in {'mines','snake','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
+    gid=secrets.token_urlsafe(12)
+    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'started':time.time()}
+    return jsonify({'ok':True,'game_id':gid})
 
 @app.route('/api/mini/game/finish', methods=['POST'])
 def mini_game_finish_api():
-    payload = request.get_json(silent=True) or {}
-    user = _miniapp_auth(payload)
-    if not user:
-        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
-    gid = str(payload.get('game_id', ''))
-    try:
-        score = max(0, min(int(payload.get('score', 0) or 0), 100000))
-        won = bool(payload.get('won', False))
-    except Exception:
-        score = 0
-        won = False
-
-    with MINIAPP_LOCK:
-        game = MINIAPP_GAMES.pop(gid, None)
-    if not game or game['user_id'] != int(user['id']):
-        return jsonify({'ok': False, 'error': 'invalid_game'}), 400
-
-    elapsed = time.time() - float(game['started'])
-    if elapsed < 0.8:
-        return jsonify({'ok': False, 'error': 'too_fast'}), 400
-
-    uid = int(user['id'])
-    name = user.get('first_name') or user.get('username') or 'Игрок'
-    econ = get_user_econ(uid, name, username=user.get('username'))
-    game_name = game['game']
-    difficulty = game.get('difficulty', 'easy')
-    caps = {'mines': 6000, 'snake': 2000, 'flappy': 1500, '2048': 2500, 'reaction': 500, 'shooter': 1500}
-    if game_name == 'snake':
-        step_ms = MINIAPP_SNAKE_CONFIG.get(difficulty, MINIAPP_SNAKE_CONFIG['easy'])['step_ms']
-        max_score = max(1, int((elapsed * 1000) / step_ms) + 3)
-    elif game_name == 'flappy':
-        max_score = max(1, int(elapsed * 1.5) + 2)
-    elif game_name == 'reaction':
-        max_score = 500
-    elif game_name == 'shooter':
-        max_score = min(10, max(1, int(elapsed * 2) + 1))
-    elif game_name == '2048':
-        max_score = max(100, int(elapsed * 120))
-    else:
-        max_score = 100000
-    score = min(score, max_score)
-
-    if game_name == 'mines':
-        reward = MINIAPP_MINES_CONFIG.get(difficulty, MINIAPP_MINES_CONFIG['easy'])['reward'] if won and score > 0 else 0
-    elif game_name == 'snake':
-        reward = min(caps['snake'], score * MINIAPP_SNAKE_CONFIG.get(difficulty, MINIAPP_SNAKE_CONFIG['easy'])['apple_reward'])
-    elif game_name == 'flappy':
-        reward = min(caps['flappy'], max(0, score * 50))
-    elif game_name == 'reaction':
-        reward = min(caps['reaction'], max(0, score))
-    elif game_name == '2048':
-        reward = min(caps['2048'], max(0, score // 5))
-    else:  # shooter
-        reward = min(caps['shooter'], max(0, score * 15))
-
-    econ['mini_games_played'] = int(econ.get('mini_games_played', 0) or 0) + 1
-    records = econ.setdefault('mini_records', {})
-    old = int(records.get(game_name, 0) or 0)
-    if score > old:
-        records[game_name] = score
-    if won and score > 0:
-        econ['mini_games_wins'] = int(econ.get('mini_games_wins', 0) or 0) + 1
+    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    gid=str(payload.get('game_id','')); score=max(0,min(int(payload.get('score',0) or 0),100000))
+    with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
+    if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
+    elapsed=time.time()-game['started']
+    if elapsed < 0.5: return jsonify({'ok':False,'error':'too_fast'}),400
+    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
+    econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
+    records=econ.setdefault('mini_records',{}); old=int(records.get(game['game'],0) or 0)
+    if score>old: records[game['game']]=score
+    reward=0
+    # Only modest server-side rewards; client cannot choose the reward.
+    caps={'mines':2500,'snake':2000,'2048':2500,'reaction':1500,'shooter':2500}
+    reward=min(caps[game['game']], max(0, score//10))
     if reward:
-        econ['balance'] = int(econ.get('balance', 0) or 0) + reward
-        _mini_log(econ, f'game:{game_name}', reward, f'{game_name}: +{reward} 🪙, score {score}')
-    else:
-        _mini_log(econ, f'game:{game_name}', 0, f'{game_name}: score {score}')
-    if won and game_name == 'mines':
-        check_achievements(uid, name, 'mines_wins', 1, username=user.get('username'))
-    mark_dirty()
-    save_data(send_backup=False)
-    return jsonify({'ok': True, 'reward': reward, 'score': score, 'record': records.get(game_name, score)})
+        econ['balance']=int(econ.get('balance',0) or 0)+reward
+    mark_dirty(); save_data(send_backup=False)
+    return jsonify({'ok':True,'reward':reward,'record':records.get(game['game'],score)})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
     'moog': 'CQACAgIAAxkBAAI7c2qxoKtO0jM_j2VfHWHg3qzIkYhuAAK0mAACt-8pS74P-OfxOrdgPQQ',
     'doki': 'CQACAgIAAxkBAAI8OGqye6dxzMArn5Z8_oN-Zfxpwad_AAKjlQACzEIhSbF9j2pSNFhAPQQ',
     'plenka': 'CQACAgIAAxkBAAI8O2qye8_F-Q_cGII2umP6qPi8-zcoAAJWgQACw5kBSoZ0PAKSKD5uPQQ',
-    'hands_up': 'CQACAgIAAxkBAAI8Y2qyw1qBIONTcCL9WT8v_vStZCdeAAKPhwACiNQISuKEWVava6gtPQQ',
 }
 
 @app.route('/api/mini/music/<track>')
@@ -386,16 +185,6 @@ def keep_alive():
     t = threading.Thread(target=run_web)
     t.daemon = True
     t.start()
-
-def cleanup_mini_games_loop():
-    while True:
-        try:
-            cutoff=time.time()-45*60
-            with MINIAPP_LOCK:
-                for gid,g in list(MINIAPP_GAMES.items()):
-                    if float(g.get('started',0))<cutoff: MINIAPP_GAMES.pop(gid,None)
-        except Exception as e: print(f'[MINI GAME CLEANUP] {e}')
-        time.sleep(300)
 
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
@@ -596,7 +385,7 @@ PREMIUM_EMOJI_ALTS = {
     "5211052776213198370": "😵‍💫", "5316736601219425876": "🤍",
     "5316785439292547859": "🖤", "5449468596952507859": "💜",
     "5449759615346548186": "💙", "5222325171284622461": "🩷",
-    "5215211631700622222": "🐭", "5348466539702001502": "🌈",
+    "5215211631700622222": "😵‍💫", "5348466539702001502": "🌈",
     "5465173398273413127": "🦄", "5470088387048266598": "🐉",
     "5445096582238181549": "🦋", "5276289730256842699": "🐺",
     "5373250605533896134": "🐈‍⬛", "5280947338821524402": "🌹",
@@ -605,19 +394,24 @@ PREMIUM_EMOJI_ALTS = {
     "54295027628722231956": "🏅",
 }
 PREMIUM_EMOJI_METADATA_LOADED = False
-PREMIUM_EMOJI_RUNTIME_ALTS = {}
-PREMIUM_EMOJI_RUNTIME_LOCK = threading.RLock()
-PREMIUM_EMOJI_RUNTIME_READY = set()
+PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
 
 
 def _valid_custom_emoji_id(emoji_id):
-    """Telegram exposes custom_emoji_id as a string; keep the full ID intact."""
-    value = str(emoji_id or '').strip()
-    return bool(value) and bool(re.fullmatch(r'\d+', value))
+    """Telegram custom_emoji_id is a 64-bit signed integer string.
+    Invalid/overflowing IDs must never be sent to Bot API.
+    """
+    try:
+        value = int(str(emoji_id))
+        return 0 < value <= 9223372036854775807
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_premium_markup_error(exc):
-    """Only markup/emoji parse errors are safe to retry as plain text."""
+    """Return True only for errors where removing tg-emoji markup is a safe retry.
+    Network/timeouts must not be retried automatically because that can duplicate a message.
+    """
     code = getattr(exc, 'error_code', None)
     description = str(getattr(exc, 'description', exc)).lower()
     return code == 400 and any(token in description for token in (
@@ -626,74 +420,29 @@ def _is_premium_markup_error(exc):
     ))
 
 
-def _load_premium_emoji_metadata():
-    """Load exact custom-emoji alternatives from Telegram once at startup.
+def load_premium_emoji_metadata():
+    """Оставлено для совместимости со старым кодом.
 
-    Telegram's Bot API exposes getCustomEmojiStickers and accepts up to 200 IDs per
-    request. Using the returned Sticker.emoji avoids guessed alternative emoji.
+    Важно: здесь НЕТ сетевого запроса. Ранее вызов Bot API во время обработки
+    первой команды мог задерживать/ломать команды. Для известных ID используем
+    проверенные alt-значения из наборов; Telegram требует, чтобы alt совпадал
+    с исходным emoji custom emoji.
     """
     global PREMIUM_EMOJI_METADATA_LOADED
-    if not TOKEN:
-        return
-    ids=[]
-    seen=set()
-    for raw in PREMIUM_EMOJI_IDS.values():
-        raw=str(raw)
-        if raw in seen or not _valid_custom_emoji_id(raw):
-            continue
-        seen.add(raw)
-        ids.append(raw)
-    if not ids:
-        PREMIUM_EMOJI_METADATA_LOADED = True
-        return
-    try:
-        payload=json.dumps({'custom_emoji_ids': ids}, ensure_ascii=False).encode('utf-8')
-        req=UrlRequest(
-            f'https://api.telegram.org/bot{TOKEN}/getCustomEmojiStickers',
-            data=payload,
-            headers={'Content-Type':'application/json'},
-            method='POST'
-        )
-        with urlopen(req, timeout=10) as response:
-            data=json.loads(response.read().decode('utf-8'))
-        if not data.get('ok'):
-            raise RuntimeError(data.get('description','getCustomEmojiStickers failed'))
-        loaded=0
-        with PREMIUM_EMOJI_RUNTIME_LOCK:
-            for sticker in data.get('result',[]) or []:
-                sid=str(sticker.get('custom_emoji_id',''))
-                alt=str(sticker.get('emoji','') or '')
-                if _valid_custom_emoji_id(sid) and alt:
-                    PREMIUM_EMOJI_RUNTIME_ALTS[sid]=alt
-                    PREMIUM_EMOJI_RUNTIME_READY.add(sid)
-                    loaded+=1
-            PREMIUM_EMOJI_METADATA_LOADED=True
-        print(f'[PREMIUM EMOJI] Loaded exact metadata for {loaded}/{len(ids)} IDs from Telegram.')
-    except Exception as exc:
-        print(f'[PREMIUM EMOJI] Metadata load failed; static verified alts remain active: {exc}')
-        PREMIUM_EMOJI_METADATA_LOADED = False
-
-
-def load_premium_emoji_metadata():
-    """Load custom emoji metadata before Telegram polling starts."""
-    if not PREMIUM_EMOJI_METADATA_LOADED:
-        _load_premium_emoji_metadata()
+    PREMIUM_EMOJI_METADATA_LOADED = True
+    return
 
 
 def premium_emoji(name, fallback="✨"):
+    """Возвращает Telegram Custom Emoji в HTML-формате с корректным alt."""
     key = PREMIUM_EMOJI_ALIASES.get(name, name)
     emoji_id = PREMIUM_EMOJI_IDS.get(key)
     if not emoji_id or not _valid_custom_emoji_id(emoji_id):
         return fallback
-    sid=str(emoji_id)
-    with PREMIUM_EMOJI_RUNTIME_LOCK:
-        alt=PREMIUM_EMOJI_RUNTIME_ALTS.get(sid)
-    if not alt:
-        alt=PREMIUM_EMOJI_ALTS.get(sid)
-    if not alt:
-        # Do not send guessed custom emoji markup before Telegram metadata is known.
-        return fallback
-    return f'<tg-emoji emoji-id="{html.escape(sid)}">{html.escape(str(alt))}</tg-emoji>'
+
+    # Метаданные загружаются лениво после создания bot.
+    alt = PREMIUM_EMOJI_ALTS.get(str(emoji_id), fallback)
+    return f'<tg-emoji emoji-id="{html.escape(str(emoji_id))}">{html.escape(str(alt))}</tg-emoji>'
 
 
 def premium_emoji_id(name):
@@ -757,42 +506,27 @@ def format_large_numbers(text):
 
 
 def apply_global_premium_emojis(text):
-    """Replace each known emoji exactly once, without recursively rewriting inserted alt text."""
+    """Заменяет UI-эмодзи на Custom Emoji в HTML-сообщениях."""
     if not isinstance(text, str) or not text:
         return text
+
+    # Сначала форматируем числа, затем защищаем HTML-теги. Это даёт единый
+    # вид 1,000,000 по всему интерфейсу и не меняет custom_emoji_id внутри тегов.
     text = format_large_numbers(text)
 
-    protected=[]
+    protected = []
     def protect(match):
         protected.append(match.group(0))
-        return f'\x00TGEMOJI{len(protected)-1}\x00'
+        return f"\x00TGEMOJI{len(protected)-1}\x00"
 
-    # Existing custom-emoji entities must never be touched again.
     text = re.sub(r'<tg-emoji\b[^>]*>.*?</tg-emoji>', protect, text, flags=re.DOTALL)
 
-    mapping=dict(GLOBAL_PREMIUM_EMOJI_MAP)
-    with PREMIUM_EMOJI_RUNTIME_LOCK:
-        runtime_items=list(PREMIUM_EMOJI_RUNTIME_ALTS.items())
-    reverse={}
-    for sid, alt in runtime_items:
-        reverse.setdefault(alt, sid)
-    id_to_alias={str(v):k for k,v in PREMIUM_EMOJI_IDS.items() if _valid_custom_emoji_id(v)}
-    for alt,sid in reverse.items():
-        alias=id_to_alias.get(str(sid))
-        if alias:
-            mapping[alt]=alias
-
-    keys=sorted(mapping, key=len, reverse=True)
-    if keys:
-        pattern=re.compile('|'.join(re.escape(k) for k in keys))
-        def replace(match):
-            emoji=match.group(0)
-            alias=mapping[emoji]
-            return premium_emoji(alias, emoji)
-        text=pattern.sub(replace, text)
+    for emoji in sorted(GLOBAL_PREMIUM_EMOJI_MAP, key=len, reverse=True):
+        alias = GLOBAL_PREMIUM_EMOJI_MAP[emoji]
+        text = text.replace(emoji, premium_emoji(alias, emoji))
 
     for i, tag in enumerate(protected):
-        text=text.replace(f'\x00TGEMOJI{i}\x00', tag)
+        text = text.replace(f"\x00TGEMOJI{i}\x00", tag)
     return text
 
 
@@ -813,14 +547,8 @@ def _patch_telegram_text_methods():
     def _transform(text):
         return apply_global_premium_emojis(text)
 
-    def _html_requested(args, kwargs):
-        mode=kwargs.get('parse_mode')
-        if mode is None and args:
-            mode=args[0]
-        return str(mode or '').upper() == 'HTML'
-
     def send_message(chat_id, text, *args, **kwargs):
-        if _html_requested(args, kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
             original_text = text
             transformed = _transform(text)
             try:
@@ -833,7 +561,7 @@ def _patch_telegram_text_methods():
         return original_send_message(chat_id, text, *args, **kwargs)
 
     def reply_to(message, text, *args, **kwargs):
-        if _html_requested(args, kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
             original_text = text
             transformed = _transform(text)
             try:
@@ -846,7 +574,7 @@ def _patch_telegram_text_methods():
         return original_reply_to(message, text, *args, **kwargs)
 
     def edit_message_text(text, *args, **kwargs):
-        if _html_requested(args, kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
             original_text = text
             transformed = _transform(text)
             try:
@@ -859,7 +587,7 @@ def _patch_telegram_text_methods():
         return original_edit_text(text, *args, **kwargs)
 
     def edit_message_caption(*args, **kwargs):
-        if _html_requested(args, kwargs):
+        if kwargs.get('parse_mode') == 'HTML':
             original_args = tuple(args)
             original_kwargs = dict(kwargs)
             call_args = list(args)
@@ -879,7 +607,7 @@ def _patch_telegram_text_methods():
         return original_edit_caption(*args, **kwargs)
 
     def _media_sender(original, chat_id, media, *args, **kwargs):
-        if _html_requested(args, kwargs) and 'caption' in kwargs:
+        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
             original_caption = kwargs['caption']
             kwargs['caption'] = _transform(original_caption)
             try:
@@ -1710,6 +1438,7 @@ CASINO_LOCK = threading.RLock()
 GUILD_LOCK = threading.RLock()
 SAFE_LOCK = threading.RLock()
 PLAYER_MARKET_LOCK = threading.RLock()
+LOTTERY_LOCK = threading.RLock()
 MEME_LOCK = threading.RLock()
 MARKET_LOCK = threading.RLock()
 
@@ -2108,11 +1837,23 @@ def setup_bot_commands():
     # Короткое меню Telegram. Остальные команды остаются рабочими при ручном вводе.
     commands = [
         BotCommand('menu', '📱 Меню'),
-        BotCommand('games', '🎮 Mini Games'),
         BotCommand('profile', '👤 Профиль'),
+        BotCommand('balance', '🪙 Баланс'),
+        BotCommand('business', '🏢 Бизнесы: купить и улучшать'),
+        BotCommand('collect', '💰 Собрать прибыль бизнесов'),
+        BotCommand('shop', '🏪 Обычный магазин'),
+        BotCommand('bank', '🏦 Банк'),
+        BotCommand('miner', '💻 Крипто-ферма'),
+        BotCommand('market', '📈 Биржа'),
+        BotCommand('portfolio', '💼 Крипто-портфель'),
+        BotCommand('pet', '🐾 Питомец'),
+        BotCommand('tasks', '📋 Задания'),
+        BotCommand('achievements', '🏆 Достижения'),
+        BotCommand('lottery', '🎟 Лотерея'),
+        BotCommand('garage', '🏎 Гараж'),
         BotCommand('stars', '⭐️ Stars магазин'),
-        BotCommand('gift_stars', '🎁 Подарить Stars товар другу'),
-        BotCommand('settings', '🌐 Язык / настройки'),
+        BotCommand('help', '❓ Помощь'),
+        BotCommand('settings', '⚙️ Настройки'),
     ]
     try:
         bot.set_my_commands(commands)
@@ -2248,9 +1989,10 @@ def get_user_cd_reduction(econ):
     if not econ or not isinstance(econ, dict):
         return 0.0
     reduction = 0.0
-    veh = econ.get('vehicle')
-    if veh and veh in VEHICLES:
-        reduction += VEHICLES[veh].get('cd_cut', 0.0)
+    veh = econ.get('equipped_vehicle') or econ.get('vehicle')
+    veh_info = VEHICLES.get(veh) or DONOR_VEHICLES.get(veh)
+    if veh_info:
+        reduction += float(veh_info.get('cd_cut', 0.0) or 0.0)
 
     active_t = econ.get('active_title')
     if active_t and active_t in TITLES:
@@ -2563,8 +2305,8 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('titles', []), ('active_title', None), ('custom_title', None),
         ('has_custom_title_cert', False), ('rings', []), ('active_ring', None),
         ('marriage', None), ('businesses', {}), ('biz_levels', {}),
-        ('last_biz_collect', time.time()), ('vehicle', None), ('vehicle_inventory', []), ('equipped_vehicle', None), ('donor_businesses', {}),
-        ('equipped_rod', None), ('equipped_bow', None), ('daily_tasks_date', ''),
+        ('last_biz_collect', time.time()), ('biz_last_collect', {}), ('biz_income_carry', {}), ('donor_business_purchased_at', {}), ('vehicle', None), ('vehicle_inventory', []), ('equipped_vehicle', None), ('donor_businesses', {}),
+        ('equipped_rod', None), ('equipped_bow', None), ('rod_inventory', []), ('bow_inventory', []), ('daily_tasks_date', ''),
         ('daily_progress', {}), ('daily_claimed', []), ('weekly_tasks_yearweek', ''),
         ('weekly_progress', {}), ('weekly_claimed', []), ('fish_inventory', {}),
         ('hunt_inventory', {}), ('cooked_meals', 0), ('crypto_portfolio', {}),
@@ -2582,11 +2324,22 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('karma', 0), ('chat_ids', []), ('garden', None), ('garden_capacity', 1), ('pet_clothes', []), ('equipped_pet_clothes', None), ('public_business', None), ('public_business_workers', []), ('employer_salary', None), ('home', None), ('home_installment', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""), ('last_activity_reward_time', 0),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
-        ('bonus_streak', 0), ('last_streak_time', 0), ('mini_transactions', []), ('mini_notifications', []),
+        ('bonus_streak', 0), ('last_streak_time', 0),
         ('last_energy_drink_time', 0), ('vip_until', 0), ('vip_forever', False), ('stars_donated', 0), ('is_sheriff', False), ('jail_until', 0), ('disease', None), ('disease_immunity_until', 0), ('bp_exp', 0), ('bp_claimed_free', []), ('bp_claimed_prem', []), ('bp_premium', False), ('last_safe_try', 0), ('guild_id', None), ('season_points', 0), ('season_claimed', False), ('crafted_items', {})
     ]:
         if field not in u_data:
             u_data[field] = default
+
+    # Старые сохранения: уже надетая снасть считается купленной, чтобы после
+    # обновления игрок не мог потерять её статус или быть ошибочно списан повторно.
+    if u_data.get('equipped_rod') and u_data.get('equipped_rod') in RODS:
+        rods = u_data.setdefault('rod_inventory', [])
+        if u_data['equipped_rod'] not in rods:
+            rods.append(u_data['equipped_rod'])
+    if u_data.get('equipped_bow') and u_data.get('equipped_bow') in BOWS:
+        bows = u_data.setdefault('bow_inventory', [])
+        if u_data['equipped_bow'] not in bows:
+            bows.append(u_data['equipped_bow'])
 
     if 'msg_stats' not in u_data:
         u_data['msg_stats'] = {
@@ -3733,7 +3486,7 @@ def random_chat_drops_worker():
             with CALLBACK_STATE_LOCK:
                 active_drops[drop_id] = {'chat_id': target_chat, 'reward': reward, 'claimed': False}
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🎁 Забрать подарок! 😻", callback_data=f"claim_drop_{drop_id}"))
+            markup.add(InlineKeyboardButton("🎁 Забрать подарок! 😻", callback_data=f"claim_{drop_id}"))
             msg_text = (
                 "📦 <b>ВНЕЗАПНЫЙ ДРОП В ЧАТЕ!</b> 😺\n"
                 "──────────────────────\n"
@@ -3919,14 +3672,11 @@ def welcome_new_members(message):
 @serialize_user_action
 def cmd_mini_games(message):
     if not can_process_user_message(message): return
-    if getattr(message.chat, 'type', '') != 'private':
-        bot.reply_to(message, '🎮 <b>Игры нужно открывать в ЛС Боту.</b>\nНапиши мне <code>/games</code> в личных сообщениях, и я открою Nya Mini Games.', parse_mode='HTML')
-        return
     if not MINIAPP_URL:
         bot.reply_to(message, '❌ MINIAPP_URL не настроен в Render. Укажи URL Mini App в переменной окружения.')
         return
     kb=InlineKeyboardMarkup(); kb.add(InlineKeyboardButton('🎮 Открыть Nya Mini Games', web_app=WebAppInfo(url=MINIAPP_URL + '/minigames')))
-    bot.reply_to(message, '🎮 <b>Nya Mini Games 2.0</b>\nСапёр • Змейка • 🐦 Flappy Bird • 2048 • Реакция • Тир\n\n🌐 Язык Mini App можно сменить в настройках.', reply_markup=kb, parse_mode='HTML')
+    bot.reply_to(message, '🎮 <b>Nya Mini Games 2.0</b>\nСапёр • Змейка • 2048 • Реакция • Тир\n\n👤 Профиль, 🏆 рейтинг, 🎁 бонусы и ⚙️ настройки внутри Mini App.', reply_markup=kb, parse_mode='HTML')
 
 @bot.message_handler(commands=['start', 'help', 'menu', 'info'])
 @serialize_user_action
@@ -4474,10 +4224,10 @@ def render_public_business_view(chat_id, user_id, user_name, message_id=None):
             markup.add(InlineKeyboardButton("💰 Выплатить зарплаты", callback_data=f"pubbiz_pay:{user_id}"))
         markup.add(InlineKeyboardButton("📋 Обновить", callback_data=f"pubbiz_view:{user_id}"))
     if message_id:
-        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
+        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
         except Exception: pass
     else:
-        bot.send_message(chat_id, text, parse_mode='HTML')
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 def render_public_jobs(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
@@ -6015,9 +5765,18 @@ def cmd_gear(message):
     for b_id, b in BOWS.items(): lines.append(f"• <b>{b['name']}</b> — <code>{b['price']} 🪙</code> (+{b['luck']}% к удаче)")
     lines.append("──────────────────────")
 
+    econ = get_user_econ(user_id, user_name)
+    owned_rods = set(econ.get('rod_inventory', []) or [])
+    owned_bows = set(econ.get('bow_inventory', []) or [])
     markup = InlineKeyboardMarkup(row_width=2)
-    rod_btns = [InlineKeyboardButton(f"{r_info['short']} — {r_info['price']} 🪙", callback_data=f"buy_rod_{r_id}:{user_id}") for r_id, r_info in RODS.items()]
-    bow_btns = [InlineKeyboardButton(f"{b_info['short']} — {b_info['price']} 🪙", callback_data=f"buy_bow_{b_id}:{user_id}") for b_id, b_info in BOWS.items()]
+    rod_btns = []
+    for r_id, r_info in RODS.items():
+        label = f"✅ Надеть {r_info['short']}" if r_id in owned_rods else f"🛒 Купить {r_info['short']} — {r_info['price']} 🪙"
+        rod_btns.append(InlineKeyboardButton(label, callback_data=f"buy_rod_{r_id}:{user_id}"))
+    bow_btns = []
+    for b_id, b_info in BOWS.items():
+        label = f"✅ Надеть {b_info['short']}" if b_id in owned_bows else f"🏹 Купить {b_info['short']} — {b_info['price']} 🪙"
+        bow_btns.append(InlineKeyboardButton(label, callback_data=f"buy_bow_{b_id}:{user_id}"))
     
     for i in range(0, len(rod_btns), 2):
         markup.add(*rod_btns[i:i+2])
@@ -6027,44 +5786,219 @@ def cmd_gear(message):
     bot.reply_to(message, "\n".join(lines), reply_markup=markup, parse_mode='HTML')
 
 # ---------------------------------------------------------
-# БИЗНЕСЫ 2.0 (СБАЛАНСИРОВАННЫЙ ДОХОД)
+# БИЗНЕСЫ 2.1 — АУДИТ: РАЗДЕЛЬНОЕ НАКОПЛЕНИЕ И ЕДИНЫЙ РАСЧЁТ
 # ---------------------------------------------------------
+def _business_info(b_id):
+    return BUSINESSES.get(b_id) or DONOR_BUSINESSES.get(b_id)
+
+
+def _business_level(econ, b_id):
+    levels = econ.get('biz_levels', {}) or {}
+    try:
+        return max(1, min(5, int(levels.get(b_id, 1))))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _business_hourly_income(b_id, level):
+    info = _business_info(b_id)
+    if not info:
+        return 0
+    level = max(1, min(5, int(level or 1)))
+    return int(info.get('base_income', 0) * (1 + (level - 1) * 0.45))
+
+
+def _ensure_business_clocks(econ, now=None):
+    """Migrate old global business timing to per-business timing without retroactive overpayment."""
+    now = float(now or time.time())
+    clocks = econ.get('biz_last_collect')
+    if not isinstance(clocks, dict):
+        clocks = {}
+        econ['biz_last_collect'] = clocks
+    carries = econ.get('biz_income_carry')
+    if not isinstance(carries, dict):
+        carries = {}
+        econ['biz_income_carry'] = carries
+    try:
+        global_last = float(econ.get('last_biz_collect', now) or now)
+    except (TypeError, ValueError):
+        global_last = now
+
+    for b_id, purchased_at in (econ.get('businesses', {}) or {}).items():
+        if b_id not in BUSINESSES or b_id in clocks:
+            continue
+        try:
+            purchase_ts = float(purchased_at)
+        except (TypeError, ValueError):
+            purchase_ts = global_last
+        # Never pay a normal business for time before its purchase.
+        clocks[b_id] = max(global_last, purchase_ts)
+        carries.setdefault(b_id, 0.0)
+
+    donor_purchases = econ.get('donor_business_purchased_at', {})
+    if not isinstance(donor_purchases, dict):
+        donor_purchases = {}
+        econ['donor_business_purchased_at'] = donor_purchases
+    for b_id in (econ.get('donor_businesses', {}) or {}).keys():
+        if b_id not in DONOR_BUSINESSES or b_id in clocks:
+            continue
+        try:
+            purchase_ts = float(donor_purchases.get(b_id, global_last) or global_last)
+        except (TypeError, ValueError):
+            purchase_ts = global_last
+        clocks[b_id] = max(global_last, purchase_ts)
+        carries.setdefault(b_id, 0.0)
+
+    return clocks, carries
+
+
+def _business_pending_amount(econ, b_id, now=None):
+    now = float(now or time.time())
+    clocks, carries = _ensure_business_clocks(econ, now)
+    if b_id not in clocks:
+        return 0
+    try:
+        last = float(clocks.get(b_id, now))
+    except (TypeError, ValueError):
+        last = now
+    elapsed = max(0.0, now - last)
+    try:
+        carry = float(carries.get(b_id, 0.0) or 0.0)
+    except (TypeError, ValueError):
+        carry = 0.0
+    raw = (_business_hourly_income(b_id, _business_level(econ, b_id)) * elapsed / 3600.0) + carry
+    return max(0, int(raw))
+
+
+def _settle_one_business(econ, b_id, now=None, credit=True):
+    """Settle one business at its CURRENT level and preserve fractional income."""
+    now = float(now or time.time())
+    clocks, carries = _ensure_business_clocks(econ, now)
+    if b_id not in clocks:
+        return 0
+    try:
+        last = float(clocks.get(b_id, now))
+    except (TypeError, ValueError):
+        last = now
+    elapsed = max(0.0, now - last)
+    try:
+        carry = float(carries.get(b_id, 0.0) or 0.0)
+    except (TypeError, ValueError):
+        carry = 0.0
+    raw = (_business_hourly_income(b_id, _business_level(econ, b_id)) * elapsed / 3600.0) + carry
+    amount = max(0, int(raw))
+    clocks[b_id] = now
+    carries[b_id] = max(0.0, raw - amount)
+    if credit and amount > 0:
+        econ['balance'] = int(econ.get('balance', 0) or 0) + amount
+    return amount
+
+
+def collect_business_base_profit(econ, now=None):
+    """Collect all ordinary/donor business income using exactly the same engine everywhere."""
+    now = float(now or time.time())
+    total = 0
+    _ensure_business_clocks(econ, now)
+    ordinary = econ.get('businesses', {}) or {}
+    donor = econ.get('donor_businesses', {}) or {}
+    for b_id in list(ordinary.keys()) + list(donor.keys()):
+        if b_id not in BUSINESSES and b_id not in DONOR_BUSINESSES:
+            continue
+        total += _settle_one_business(econ, b_id, now, credit=False)
+    if total > 0:
+        econ['last_biz_collect'] = now
+    return total
+
+
+def _apply_business_payout_modifiers(econ, base_profit, chat_id, user_id, user_name):
+    """Apply the same business bonuses/events for /collect and the inline Collect All button."""
+    if base_profit <= 0:
+        return 0, ''
+    profit = int(base_profit)
+    event_text = ''
+    econ_event = get_economic_event() if 'get_economic_event' in globals() else None
+    if econ_event and econ_event.get('biz_income'):
+        mult = float(econ_event['biz_income'])
+        profit = int(profit * mult)
+        event_text = f"\n🌍 Событие <b>{econ_event['name']}</b>: прибыль {mult:.0%} от обычной."
+
+    if random.random() < 0.15:
+        if random.random() < 0.70:
+            boost = int(profit * 0.5)
+            profit += boost
+            event_text += f"\n🌟 <b>Вирусный тренд в сети!</b> Приток клиентов дал <b>+{boost} 🪙</b>! 😻"
+        else:
+            tax = int(profit * 0.15)
+            profit = max(0, profit - tax)
+            event_text += f"\n⚠️ <b>Плановое техобслуживание:</b> расход <b>-{tax} 🪙</b>. 😿"
+
+    active_t = econ.get('active_title')
+    if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'biz_bonus':
+        bonus_t = int(profit * (TITLES[active_t]['val'] / 100.0))
+        profit += bonus_t
+        event_text += f"\n👑 Бонус титула: <b>+{bonus_t} 🪙</b>"
+
+    donor_biz = get_title_business_bonus(econ)
+    vip_biz = get_vip_business_bonus(econ)
+    if donor_biz or vip_biz:
+        bonus_biz = int(profit * (donor_biz + vip_biz))
+        profit += bonus_biz
+        event_text += f"\n💎 VIP/донат-бонус бизнеса: <b>+{bonus_biz} 🪙</b>"
+
+    rest_state = db.get('rests', {}).get(str(chat_id), {})
+    in_rest, _, _ = check_user_rest(rest_state, user_id=user_id, user_name=user_name)
+    if in_rest:
+        rest_bonus = int(profit * 0.20)
+        profit += rest_bonus
+        event_text += f"\n🌴 Курортный бонус реста (+20%): <b>+{rest_bonus} 🪙</b>"
+
+    return max(0, int(profit)), event_text
+
+
 def render_business_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     user_biz = econ.setdefault('businesses', {})
     biz_levels = econ.setdefault('biz_levels', {})
     donor_owned = econ.setdefault('donor_businesses', {})
+    now = time.time()
+    _ensure_business_clocks(econ, now)
+
+    total_hourly = 0
     lines = [
         "🏢 <b>МОИ БИЗНЕСЫ</b> 😺",
         "──────────────────────",
-        "Все купленные предприятия находятся здесь. Обычные покупаются за 🪙, донатные — только в ⭐️ донатном магазине. И те и другие можно прокачивать за 🪙 до 5 уровня.\n",
-        "<b>Мои предприятия:</b>"
+        f"💵 Баланс: <b>{int(econ.get('balance', 0) or 0):,} 🪙</b>",
+        "👇 <i>Чтобы купить обычный бизнес, нажмите кнопку «Купить» напротив него. После покупки он сразу начинает накапливать доход.</i>",
+        "",
+        "<b>Обычные предприятия:</b>"
     ]
     markup = InlineKeyboardMarkup(row_width=2)
     btns = []
 
-    # Обычные бизнесы: показываем купленные и доступные для покупки.
     for b_id, b_info in BUSINESSES.items():
         if b_id in user_biz:
-            lvl = max(1, min(5, int(biz_levels.get(b_id, 1))))
-            inc = int(b_info['base_income'] * (1 + (lvl - 1) * 0.45))
-            lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — ~{inc:,} 🪙/ч")
+            lvl = _business_level(econ, b_id)
+            inc = _business_hourly_income(b_id, lvl)
+            pending = _business_pending_amount(econ, b_id, now)
+            total_hourly += inc
+            lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — <b>{inc:,} 🪙/ч</b> | накоплено <b>~{pending:,} 🪙</b>")
             if lvl < 5:
-                cost = b_info['upgrade_cost'] * lvl
+                cost = int(b_info['upgrade_cost']) * lvl
                 btns.append(InlineKeyboardButton(f"⬆️ {b_info['short']} {lvl+1} — {cost:,} 🪙", callback_data=f"upg_biz_{b_id}:{user_id}"))
         else:
             lines.append(f"• {b_info['name']} — <code>{b_info['price']:,} 🪙</code>")
-            btns.append(InlineKeyboardButton(f"Купить {b_info['short']} — {b_info['price']:,} 🪙", callback_data=f"buy_biz_{b_id}:{user_id}"))
+            btns.append(InlineKeyboardButton(f"🛒 Купить {b_info['short']} — {b_info['price']:,} 🪙", callback_data=f"buy_biz_{b_id}:{user_id}"))
 
-    # Донатные бизнесы: после покупки попадают сюда же, но кнопки покупки за коины нет.
     if donor_owned:
         lines.append("\n💎 <b>ДОНАТНЫЕ ПРЕДПРИЯТИЯ</b>")
     for b_id, b_info in DONOR_BUSINESSES.items():
         if b_id not in donor_owned:
             continue
-        lvl = max(1, min(5, int(biz_levels.get(b_id, 1))))
-        inc = int(b_info['base_income'] * (1 + (lvl - 1) * 0.45))
-        lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — ~{inc:,} 🪙/ч 💎")
+        lvl = _business_level(econ, b_id)
+        inc = _business_hourly_income(b_id, lvl)
+        pending = _business_pending_amount(econ, b_id, now)
+        total_hourly += inc
+        lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — <b>{inc:,} 🪙/ч</b> | накоплено <b>~{pending:,} 🪙</b> 💎")
         if lvl < 5:
             cost = int(b_info.get('upgrade_cost', 5000)) * lvl
             btns.append(InlineKeyboardButton(f"💎⬆️ {b_info['name']} {lvl+1} — {cost:,} 🪙", callback_data=f"upg_donor_biz_{b_id}:{user_id}"))
@@ -6074,7 +6008,7 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
     markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data=f"collect_biz_profit:{user_id}"))
     markup.add(InlineKeyboardButton("⭐️ Купить донатный бизнес", callback_data=f"stars_cat_businesses:{user_id}"))
     markup.add(InlineKeyboardButton("🏢 Мой публичный бизнес", callback_data=f"pubbiz_view:{user_id}"), InlineKeyboardButton("💼 Вакансии", callback_data=f"pubbiz_jobs:{user_id}"))
-    lines += ["──────────────────────", "🌴 <i>В ресте действует курортный бонус: +20% к прибыли.</i>"]
+    lines += ["──────────────────────", f"📈 Общий доход: <b>{total_hourly:,} 🪙/ч</b>", "🌴 <i>В ресте действует курортный бонус: +20% к прибыли.</i>"]
     text = "\n".join(lines)
     if message_id:
         try:
@@ -6083,6 +6017,7 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
         except Exception:
             pass
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
 
 @bot.message_handler(commands=['business', 'бизнес', 'бизнесы', 'biz'])
 @serialize_user_action
@@ -6093,6 +6028,7 @@ def cmd_business(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     render_business_view(message.chat.id, user_id, user_name)
 
+
 @bot.message_handler(commands=['miner', 'майнер', 'майнинг', 'ферма'])
 @serialize_user_action
 def cmd_miner(message):
@@ -6101,7 +6037,6 @@ def cmd_miner(message):
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-
     user_biz = econ.get('businesses', {})
     biz_levels = econ.get('biz_levels', {})
     has_farm = 'crypto_farm' in user_biz
@@ -6110,36 +6045,40 @@ def cmd_miner(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("💻 Купить Крипто-Ферму (18,000 🪙)", callback_data=f"buy_biz_crypto_farm:{user_id}"))
         text = (
-            "💻 <b>КРИПТО-МАЙНИНГ СТАНЦИЯ</b> 😺\n"
+            "💻 <b>КРИПТО-ФЕРМА</b> 😺\n"
             "──────────────────────\n"
-            "У вас пока не установлена <b>Крипто-Ферма</b>! 😿\n\n"
-            "Купите её, чтобы автоматически майнить монеты <b>NYA</b> каждый час и продавать их на бирже на пике цен! 😻\n"
+            "Крипто-Ферма — это обычный пассивный бизнес. Она приносит <b>Ня-коины 🪙</b> как предприятие; отдельного автоматического майнинга NYA в портфель здесь нет.\n"
+            "\nНажмите кнопку ниже, чтобы купить её. 😻\n"
             "──────────────────────"
         )
         bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
         return
 
-    lvl = biz_levels.get('crypto_farm', 1)
+    lvl = _business_level(econ, 'crypto_farm')
     market = get_market_data()
     nya_price = market.get('NYA', {}).get('price', 120.0)
+    pending = _business_pending_amount(econ, 'crypto_farm', time.time())
 
     markup = InlineKeyboardMarkup()
     if lvl < 5:
         upg_cost = BUSINESSES['crypto_farm']['upgrade_cost'] * lvl
-        markup.add(InlineKeyboardButton(f"⭐ Улучшить видеокарты (ур. {lvl+1}) — {upg_cost} 🪙", callback_data=f"upg_biz_crypto_farm:{user_id}"))
+        markup.add(InlineKeyboardButton(f"⬆️ Улучшить видеокарты (ур. {lvl+1}) — {upg_cost:,} 🪙", callback_data=f"upg_biz_crypto_farm:{user_id}"))
     markup.add(InlineKeyboardButton("💰 Собрать прибыль с фермы", callback_data=f"collect_biz_profit:{user_id}"))
+    markup.add(InlineKeyboardButton("🏢 Открыть все бизнесы", callback_data=f"business_refresh:{user_id}"))
 
     text = (
-        f"💻 <b>ВАША КРИПТО-ФЕРМА (УРОВЕНЬ {lvl}/5)</b> 😺\n"
+        f"💻 <b>КРИПТО-ФЕРМА (УРОВЕНЬ {lvl}/5)</b> 😺\n"
         f"──────────────────────\n"
         f"👤 Владелец: {make_link(message.chat.id, user_name, user_id, ping=False)}\n"
         f"⚡️ Хешрейт: <b>{lvl * 145} MH/s</b>\n"
-        f"💵 Доходность: <b>~{int(BUSINESSES['crypto_farm']['base_income'] * (1 + (lvl-1)*0.45))} 🪙 в час</b>\n"
-        f"📈 Текущий курс NYA: <b>{nya_price:.2f} 🪙</b>\n"
+        f"💵 Доходность: <b>{_business_hourly_income('crypto_farm', lvl):,} 🪙/ч</b>\n"
+        f"💰 Накоплено: <b>~{pending:,} 🪙</b>\n"
+        f"📈 Курс NYA: <b>{nya_price:.2f} 🪙</b> (информационный)\n"
         f"──────────────────────\n"
-        f"💡 Доход накапливается в общем пуле бизнесов! Нажмите кнопку ниже для сбора. 😸"
+        f"💡 Прибыль фермы собирается вместе с остальными бизнесами."
     )
     bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+
 
 @bot.message_handler(commands=['collect', 'прибыль'])
 @serialize_user_action
@@ -6149,79 +6088,21 @@ def cmd_collect(message):
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-    user_biz = econ.get('businesses', {})
-    donor_biz_owned = econ.get('donor_businesses', {})
-    biz_levels = econ.get('biz_levels', {})
 
-    if not user_biz and not donor_biz_owned:
-        bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>бизнесы</code> для покупки. 😾", parse_mode='HTML')
+    if not (econ.get('businesses') or econ.get('donor_businesses')):
+        bot.reply_to(message, "❌ У вас нет купленных бизнесов! Откройте <code>/business</code> и нажмите «Купить» напротив нужного предприятия. 😾", parse_mode='HTML')
         return
 
     now = time.time()
-    last_collect = econ.get('last_biz_collect', now)
-    hours_passed = (now - last_collect) / 3600.0
-
-    if hours_passed < 0.05:
-        bot.reply_to(message, "⏳ Прибыль еще не накопилась, загляните чуть позже! 😿")
-        return
-
-    base_profit = 0
-    for b_id in user_biz.keys():
-        if b_id in BUSINESSES:
-            lvl = biz_levels.get(b_id, 1)
-            inc = int(BUSINESSES[b_id]['base_income'] * (1 + (lvl - 1) * 0.45) * hours_passed)
-            base_profit += inc
-    for b_id, stored_lvl in donor_biz_owned.items():
-        if b_id in DONOR_BUSINESSES:
-            lvl = max(1, min(5, int(biz_levels.get(b_id, stored_lvl or 1))))
-            inc = int(DONOR_BUSINESSES[b_id]['base_income'] * (1 + (lvl - 1) * 0.45) * hours_passed)
-            base_profit += inc
-
+    base_profit = collect_business_base_profit(econ, now)
     if base_profit <= 0:
-        bot.reply_to(message, "⏳ Накоплений пока нет, подождите немного! 😿")
+        bot.reply_to(message, "⏳ Пока накопилось меньше 1 🪙. Подождите немного! 😿")
         return
 
-    econ_event = get_economic_event() if 'get_economic_event' in globals() else None
-    if econ_event and econ_event.get('biz_income'):
-        mult = float(econ_event['biz_income'])
-        old_profit = base_profit
-        base_profit = int(base_profit * mult)
-        event_text = f"\n🌍 Событие <b>{econ_event['name']}</b>: прибыль {mult:.0%} от обычной."
-    else:
-        event_text = ""
-    if random.random() < 0.15:
-        if random.random() < 0.70:
-            boost = int(base_profit * 0.5)
-            base_profit += boost
-            event_text = f"\n🌟 <b>Вирусный тренд в сети!</b> Приток клиентов дал <b>+{boost} 🪙</b>! 😻"
-        else:
-            tax = int(base_profit * 0.15)
-            base_profit -= tax
-            event_text = f"\n⚠️ <b>Плановое техобслуживание:</b> расход <b>-{tax} 🪙</b>. 😿"
-
-    active_t = econ.get('active_title')
-    if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'biz_bonus':
-        bonus_t = int(base_profit * (TITLES[active_t]['val'] / 100.0))
-        base_profit += bonus_t
-        event_text += f"\n👑 Бонус титула: <b>+{bonus_t} 🪙</b>"
-    donor_biz = get_title_business_bonus(econ)
-    vip_biz = get_vip_business_bonus(econ)
-    if donor_biz or vip_biz:
-        bonus_biz = int(base_profit * (donor_biz + vip_biz))
-        base_profit += bonus_biz
-        event_text += f"\n💎 VIP/донат-бонус бизнеса: <b>+{bonus_biz} 🪙</b>"
-
-    in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(message.chat.id), {}), user_id=user_id, user_name=user_name)
-    if in_rest:
-        rest_bonus = int(base_profit * 0.20)
-        base_profit += rest_bonus
-        event_text += f"\n🌴 Курортный бонус реста (+20%): <b>+{rest_bonus} 🪙</b>"
-
-    econ['balance'] += base_profit
-    econ['last_biz_collect'] = now
+    total_profit, event_text = _apply_business_payout_modifiers(econ, base_profit, message.chat.id, user_id, user_name)
+    econ['balance'] += total_profit
     mark_dirty()
-
-    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{base_profit} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']} 🪙</b> 😸", parse_mode='HTML')
+    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{total_profit:,} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']:,} 🪙</b> 😸", parse_mode='HTML')
 
 # ---------------------------------------------------------
 # БАНК, КЕЙС, ЛОТЕРЕЯ
@@ -6346,10 +6227,10 @@ def render_lottery_view(chat_id, user_id, user_name, message_id=None):
     total_tickets = sum(tickets.values())
 
     markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🎟 Купить 1 билет (100 🪙)", callback_data=f"buy_ticket_1:{user_id}"),
-        InlineKeyboardButton("🎟 Купить 5 билетов (500 🪙)", callback_data=f"buy_ticket_5:{user_id}")
-    )
+    markup.add(InlineKeyboardButton("🎟 Купить 1 билет (100 🪙)", callback_data=f"buy_ticket_1:{user_id}"))
+    # При 6–9 билетах кнопка на 5 скрывается: иначе старый callback мог перевести тираж за лимит 10.
+    if total_tickets <= 5:
+        markup.add(InlineKeyboardButton("🎟 Купить 5 билетов (500 🪙)", callback_data=f"buy_ticket_5:{user_id}"))
 
     my_tickets = tickets.get(str(user_id), 0)
 
@@ -6420,12 +6301,12 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
 
     uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp:{user_id}"))
-    markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood:{user_id}"))
-    markup.add(InlineKeyboardButton(f"👮 Антифлуд для админов: {flood_admin_status}", callback_data=f"toggle_flood_admins:{user_id}"))
-    markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions:{user_id}"))
-    markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome:{user_id}"))
-    markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time:{user_id}"))
+    markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"👮 Антифлуд для админов: {flood_admin_status}", callback_data=f"toggle_flood_admins{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
 
     text = (
         f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺\n"
@@ -6448,27 +6329,10 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
     try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
     except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
-def render_language_settings(chat_id, user_id, message_id=None):
-    econ = get_user_econ(user_id)
-    current = econ.get('language', 'ru')
-    labels = {'ru':'🇷🇺 Русский','uk':'🇺🇦 Українська','en':'🇬🇧 English'}
-    markup = InlineKeyboardMarkup(row_width=1)
-    for code, label in labels.items():
-        mark = ' ✅' if current == code else ''
-        markup.add(InlineKeyboardButton(label + mark, callback_data=f'set_language_{code}:{user_id}'))
-    text = '🌐 <b>ЯЗЫК БОТА</b>\n──────────────────────\nВыберите язык интерфейса и быстрых разделов. В ЛС эта кнопка открывает только смену языка.'
-    if message_id:
-        bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-    else:
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-
 @bot.message_handler(commands=['settings', 'настройки'])
 @serialize_user_action
 def cmd_settings(message):
     if not can_process_user_message(message):
-        return
-    if getattr(message.chat, 'type', '') == 'private':
-        render_language_settings(message.chat.id, message.from_user.id)
         return
     if not is_admin(message.chat.id, message.from_user.id):
         bot.reply_to(message, "❌ Настройки доступны только администраторам чата! 😾")
@@ -6663,43 +6527,96 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     streak_days = econ.get('bonus_streak', 0)
     streak_str = f"🔥 Стрик бонусов: <b>{streak_days} дн.</b> (Множитель: x{min(2.0, 1.0 + (streak_days * 0.15)):.1f})\n"
 
-    raw_text=(
-        f"{header}\n{border}\n"
-        f"🐱 {t_icon} 👤 Игрок: {make_link(chat_id,user_tag,user_id,ping=False)}\n"
-        f"⭐ {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}]\n"
-        f"💰 {t_icon} Баланс: <b>{econ['balance']} 🪙</b> | 🏦 <b>{econ.get('bank_deposit',0)} 🪙</b>\n"
-        f"{vip_line}{stars_line}"
-        f"{t_icon} 🔥 Бонусная серия: <b>{streak_days} дн.</b> | 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b>\n"
+    raw_text = (
+        f"{header}\n"
+        f"{border}\n"
+        f"{premium_emoji('profile', '🐱')} {t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
+        f"{premium_emoji('star', '⭐')} {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}]\n"
+        f"{t_icon} 📈 EXP: <b>{cur_exp:,}/{next_exp:,}</b>\n"
+        f"{premium_emoji('money', '💰')} {t_icon} Баланс: <b>{econ['balance']} 🪙</b>\n"
+        f"{t_icon} 🏦 Банк: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
+        f"{vip_line}"
+        f"{stars_line}"
+        f"{t_icon} 🔥 Бонусная серия: <b>{streak_days} дн.</b>\n"
         f"{t_icon} 💍 Семья: <b>{marriage_info}</b>\n"
-        f"{t_icon} 🏢 Бизнесы: <b>{biz_str}</b> | 🐾 Питомец: <b>{pet_info}</b>\n"
-        f"📊 <b>Активность:</b> день <b>{m_st.get('day_count',0)}</b> | неделя <b>{m_st.get('week_count',0)}</b> | месяц <b>{m_st.get('month_count',0)}</b> | всё время <b>{m_st.get('total_count',0)}</b>\n"
-        f"{t_icon} 🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n{border}"
+        f"{t_icon} 🏢 Бизнесы: <b>{biz_str}</b> | 💵 Доход: <b>{sum(_business_hourly_income(b, _business_level(econ, b)) for b in list(user_biz.keys()) + list(econ.get('donor_businesses', {}).keys()) if _business_info(b)):,.0f} 🪙/ч</b>\n"
+        f"{t_icon} 🐾 Питомец: <b>{pet_info}</b>\n"
+        f"{t_icon} 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b>\n"
+        f"{border}\n"
+        f"📊 <b>Активность:</b> день <b>{m_st.get('day_count', 0)}</b> | неделя <b>{m_st.get('week_count', 0)}</b> | месяц <b>{m_st.get('month_count', 0)}</b> | всё время <b>{m_st.get('total_count', 0)}</b>\n"
+        f"{t_icon} 🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n"
+        f"{border}"
     )
-    text=raw_text
-    gif_key=econ.get('profile_gif'); gif_info=PROFILE_GIFS.get(gif_key) if gif_key else None
-    if len(text)>1000: text=text[:995]+'…'
-    gif_caption = html.unescape(re.sub(r'<[^>]+>', '', text))
-    if len(gif_caption)>1000: gif_caption=gif_caption[:997]+'…'
+
+    text = raw_text
+
+    # GIF отправляется отдельным сообщением, поэтому полный профиль всегда
+    # отправляется обычным текстом без обрезания и без caption-лимита.
+    # ВАЖНО: Telegram ограничивает caption animation 1024 символами. Поэтому
+    # мы НЕ обрезаем готовый профиль. Для GIF строится компактная версия,
+    # в которой сохраняются все поля профиля, но убираются повторяющиеся
+    # декоративные разделители и лишние подписи.
+    gif_key = econ.get('profile_gif')
+    gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
+    gif_text = text
+
     def _send_profile_gif(reply_to=None):
-        kwargs={'reply_markup':markup,'caption':gif_caption}
-        if reply_to is not None: return bot.send_animation(chat_id,gif_info['url'],reply_to_message_id=reply_to.message_id,**kwargs)
-        return bot.send_animation(chat_id,gif_info['url'],**kwargs)
+        # GIF отправляется отдельным сообщением, а карточка профиля — отдельно.
+        # Поэтому Telegram caption limit для animation больше не влияет на профиль.
+        # Сначала GIF, затем полноценная карточка профиля.
+        if message_to_reply is not None:
+            bot.send_animation(chat_id, gif_info['url'], reply_to_message_id=message_to_reply.message_id)
+            card_msg = bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
+        else:
+            bot.send_animation(chat_id, gif_info['url'])
+            card_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        return card_msg
+
     if message_id_to_edit:
+        # Если GIF активен, сама карточка должна быть animation-сообщением.
+        # Сначала пытаемся изменить media (если старое сообщение уже GIF),
+        # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
         if gif_info:
-            try: bot.delete_message(chat_id,message_id_to_edit)
-            except Exception: pass
-            try: _send_profile_gif(); return
-            except Exception as e: print(f"[PROFILE GIF EDIT ERROR] {e}")
+            # Раньше GIF пытался стать самой карточкой через caption. Теперь
+            # карточка и GIF — два отдельных сообщения, поэтому при обновлении
+            # просто заменяем старую карточку новой и отправляем GIF отдельно.
+            try:
+                bot.delete_message(chat_id, message_id_to_edit)
+            except Exception as delete_error:
+                print(f"[PROFILE GIF CARD DELETE] {delete_error}")
+            try:
+                _send_profile_gif()
+                return
+            except Exception as gif_error:
+                print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
+
+        # GIF выключен: обычная текстовая карточка. Если старое сообщение было
+        # animation, edit_message_text не сработает — тогда заменяем его текстом.
         try:
-            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id_to_edit,reply_markup=markup,parse_mode='HTML'); return
-        except Exception:
-            try: bot.delete_message(chat_id,message_id_to_edit)
-            except Exception: pass
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception as profile_edit_error:
+            print(f"[PROFILE EDIT ERROR] {profile_edit_error}")
+            try:
+                bot.delete_message(chat_id, message_id_to_edit)
+            except Exception:
+                pass
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                return
+            except Exception as text_error:
+                print(f"[PROFILE TEXT REPLACE ERROR] {text_error}")
+
     if gif_info:
         try:
-            _send_profile_gif(message_to_reply) if message_to_reply else _send_profile_gif()
+            if message_to_reply:
+                _send_profile_gif(message_to_reply)
+            else:
+                _send_profile_gif()
             return
-        except Exception as e: print(f"[PROFILE GIF ERROR] {e}")
+        except Exception as gif_error:
+            print(f"[PROFILE GIF ERROR] {gif_error}")
+
     if message_to_reply:
         try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
         except Exception as e: print(f"[NONFATAL ERROR] {e}")
@@ -7740,18 +7657,18 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("💰 Богачи", callback_data=f"top_cat_rich:{user_id}"),
-        InlineKeyboardButton("🍆 Писюн", callback_data=f"top_cat_dick:{user_id}")
+        InlineKeyboardButton("💰 Богачи", callback_data=f"top_cat_rich{uid_tag}"),
+        InlineKeyboardButton("🍆 Писюн", callback_data=f"top_cat_dick{uid_tag}")
     )
     markup.add(
-        InlineKeyboardButton("🧠 IQ", callback_data=f"top_cat_iq:{user_id}"),
-        InlineKeyboardButton("⚖️ Карма", callback_data=f"top_cat_karma:{user_id}")
+        InlineKeyboardButton("🧠 IQ", callback_data=f"top_cat_iq{uid_tag}"),
+        InlineKeyboardButton("⚖️ Карма", callback_data=f"top_cat_karma{uid_tag}")
     )
     markup.add(
-        InlineKeyboardButton("🦶 Пятки", callback_data=f"top_cat_foot:{user_id}"),
-        InlineKeyboardButton("🧬 Хромосомы", callback_data=f"top_cat_chr:{user_id}")
+        InlineKeyboardButton("🦶 Пятки", callback_data=f"top_cat_foot{uid_tag}"),
+        InlineKeyboardButton("🧬 Хромосомы", callback_data=f"top_cat_chr{uid_tag}")
     )
-    markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg:{user_id}"))
+    markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg{uid_tag}"))
 
     # Только пользователи, которые были замечены в этом чате. Для старых
     # аккаунтов без chat_ids оставляем их вне чатового топа до следующего сообщения.
@@ -8725,7 +8642,13 @@ def _grant_all_donations(econ):
         elif item_type == 'donor_business':
             bid = item.get('business_id')
             if bid in DONOR_BUSINESSES:
+                already_owned = bid in donor_businesses
                 donor_businesses[bid] = max(1, int(donor_businesses.get(bid, 1)))
+                if not already_owned:
+                    purchase_now = time.time()
+                    econ.setdefault('donor_business_purchased_at', {})[bid] = purchase_now
+                    econ.setdefault('biz_last_collect', {})[bid] = purchase_now
+                    econ.setdefault('biz_income_carry', {})[bid] = 0.0
 
     # Старые отдельные VIP-значки тоже возвращаем, чтобы у старого владельца
     # после миграций не исчезали ранее купленные варианты.
@@ -8969,7 +8892,14 @@ def _admin_grant(message):
         elif t == 'donor_business':
             bid = c.get('business_id')
             if bid in DONOR_BUSINESSES:
-                econ.setdefault('donor_businesses', {})[bid] = max(1, int(econ.get('donor_businesses', {}).get(bid, 1)))
+                donor_owned = econ.setdefault('donor_businesses', {})
+                already_owned = bid in donor_owned
+                donor_owned[bid] = max(1, int(donor_owned.get(bid, 1)))
+                if not already_owned:
+                    purchase_now = time.time()
+                    econ.setdefault('donor_business_purchased_at', {})[bid] = purchase_now
+                    econ.setdefault('biz_last_collect', {})[bid] = purchase_now
+                    econ.setdefault('biz_income_carry', {})[bid] = 0.0
         paid = econ.setdefault('paid_stars_items', [])
         if item not in paid: paid.append(item)
         changed.append(c.get('name', item))
@@ -10089,7 +10019,6 @@ def handle_messages(message):
     elif text_lower in ['лотерея']: cmd_lottery(message); return
     elif text_lower in ['задания', 'квесты']: cmd_tasks(message); return
     elif text_lower in ['помощь', 'меню', 'навигатор', 'инфо']: send_welcome(message); return
-    elif text_lower in ['games', 'игры', 'миниигры']: cmd_mini_games(message); return
     elif text_lower in ['настройки']: cmd_settings(message); return
     elif text_lower in ['сад', 'оранжерея']: cmd_garden(message); return
     elif text_lower.startswith('история'): cmd_history(message); return
@@ -10108,7 +10037,7 @@ def handle_messages(message):
     elif text_lower.startswith(('мем', '/meme')): cmd_meme(message); return
     elif text_lower.startswith(('фанфик', '/story', '/fanfic')): cmd_story(message); return
     elif text_lower in ['аптека', 'больница', '/pharmacy']: cmd_pharmacy(message); return
-    elif text_lower.startswith(('подарить звезды', 'подарок звезды', 'подарок за стар', 'подарок за stars', 'подарить stars', '/gift_stars')): cmd_gift_stars(message); return
+    elif text_lower.startswith(('подарить звезды', 'подарок звезды', '/gift_stars')): cmd_gift_stars(message); return
 
     # ТОПЫ ТЕКСТОМ
     elif text_lower in ['топ', 'топы', 'лидеры', 'топ богачей', 'топ баланс', 'топ денег']: render_top_menu(chat_id, user_id=user_id, category='rich'); return
@@ -10734,10 +10663,26 @@ def cmd_guild(message):
 def render_player_market(chat_id, user_id, user_name, message_id=None):
     listings = db.setdefault('player_market', {})
     now = time.time()
-    # Просроченные объявления живут 24 часа.
-    for lid, item in list(listings.items()):
-        if now - float(item.get('created_at', now)) > 86400:
+    # Просроченное объявление возвращает товар продавцу, а не сжигает его.
+    with PLAYER_MARKET_LOCK:
+        for lid, item in list(listings.items()):
+            try:
+                expired = now - float(item.get('created_at', now)) > 86400
+            except (TypeError, ValueError):
+                expired = True
+            if not expired:
+                continue
+            seller_id = item.get('seller_id')
+            kind = item.get('kind')
+            item_name = item.get('item_name')
+            qty = max(1, int(item.get('qty', 1) or 1))
+            if seller_id and item_name and kind in ('fish', 'hunt'):
+                seller = get_user_econ(user_id=int(seller_id), user_tag=item.get('seller_name', 'Игрок'))
+                inv_key = 'fish_inventory' if kind == 'fish' else 'hunt_inventory'
+                inv = seller.setdefault(inv_key, {})
+                inv[item_name] = int(inv.get(item_name, 0) or 0) + qty
             listings.pop(lid, None)
+            mark_dirty()
     lines = ['🛒 <b>РЫНОК ИГРОКОВ</b>', '──────────────────────']
     markup = InlineKeyboardMarkup(row_width=1)
     visible = 0
@@ -11009,8 +10954,6 @@ def callback_inline(call):
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🎉 Вы приобрели {h_info['name']}! 😻", show_alert=True)
                 render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            else:
-                bot.answer_callback_query(call.id, '❌ Дом не найден.', show_alert=True)
             return
 
         elif action_data.startswith('buy_furn_'):
@@ -11019,9 +10962,7 @@ def callback_inline(call):
                 f_info = FAMILY_FURNITURE[f_k]
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 m = econ.get('marriage')
-                if not m:
-                    bot.answer_callback_query(call.id, '❌ Только для пар в браке!', show_alert=True)
-                    return
+                if not m: return
                 furn_list = m.setdefault('furniture', [])
                 if f_k in furn_list:
                     bot.answer_callback_query(call.id, "❌ Этот предмет мебели уже куплен!", show_alert=True)
@@ -11037,8 +10978,6 @@ def callback_inline(call):
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🛋 Куплена мебель: {f_info['name']}! 😻", show_alert=True)
                 render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            else:
-                bot.answer_callback_query(call.id, '❌ Предмет мебели не найден.', show_alert=True)
             return
 
         elif action_data == 'house_refresh':
@@ -11049,16 +10988,12 @@ def callback_inline(call):
         # САД: НЕСКОЛЬКО ГРЯДОК
         elif action_data.startswith('water_slot_') or action_data.startswith('fertilize_slot_') or action_data.startswith('harvest_slot_') or action_data.startswith('uproot_slot_'):
             m=re.match(r'(water|fertilize|harvest|uproot)_slot_(\d+)$',action_data)
-            if not m:
-                bot.answer_callback_query(call.id, '❌ Некорректная грядка.', show_alert=True)
-                return
+            if not m: return
             idx=int(m.group(2)); econ=get_user_econ(user_id,user_name,username=user_username); slots=econ.get('garden') or []
             if not isinstance(slots,list): slots=[slots]
             if idx<0 or idx>=len(slots): bot.answer_callback_query(call.id,'Грядка уже исчезла.',show_alert=True); return
             g=slots[idx]; seed=GARDEN_SEEDS.get(g.get('seed'))
-            if not seed:
-                bot.answer_callback_query(call.id, '❌ Растение больше не существует.', show_alert=True)
-                return
+            if not seed: return
             if m.group(1)=='water':
                 if econ['balance']<15: bot.answer_callback_query(call.id,'Нужно 15 🪙!',show_alert=True); return
                 if g.get('water_count',0)>=seed['water_req']: bot.answer_callback_query(call.id,'Земля уже достаточно влажная.',show_alert=True); return
@@ -11088,21 +11023,17 @@ def callback_inline(call):
             econ=get_user_econ(user_id,user_name,username=user_username)
             if econ.get('public_business'):
                 bot.answer_callback_query(call.id,'У вас уже есть публичный бизнес!',show_alert=True); return
-            if b_id not in BUSINESSES:
-                bot.answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
-                return
+            if b_id not in BUSINESSES: return
             price=max(3000,BUSINESSES[b_id]['price']*2)
             if econ['balance']<price:
                 bot.answer_callback_query(call.id,f'Нужно {price:,} 🪙!',show_alert=True); return
             econ['balance']-=price
-            econ['public_business']={'name':BUSINESSES[b_id]['name'],'salary_per_worker':max(100,BUSINESSES[b_id]['base_income']*20),'created_at':time.time(),'last_salary':0}
+            creation_now=time.time(); econ['public_business']={'name':BUSINESSES[b_id]['name'],'salary_per_worker':max(100,BUSINESSES[b_id]['base_income']*20),'created_at':creation_now,'last_salary':creation_now}
             econ['public_business_workers']=[]
             mark_dirty(); bot.answer_callback_query(call.id,'🏢 Публичный бизнес создан!'); render_public_business_view(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data.startswith('pubbiz_join_'):
             owner_id=int(action_data.replace('pubbiz_join_',''))
-            if owner_id==user_id:
-                bot.answer_callback_query(call.id, '❌ Нельзя устроиться к самому себе.', show_alert=True)
-                return
+            if owner_id==user_id: return
             owner=get_user_econ(owner_id)
             pb=owner.get('public_business')
             workers=owner.setdefault('public_business_workers',[])
@@ -11120,23 +11051,55 @@ def callback_inline(call):
         elif action_data == 'pubbiz_pay':
             econ=get_user_econ(user_id,user_name,username=user_username); pb=econ.get('public_business'); workers=econ.get('public_business_workers',[])
             if not pb or not workers:
-                bot.answer_callback_query(call.id, '❌ Сначала создайте бизнес и наймите сотрудников.', show_alert=True)
-                return
-            if time.time()-pb.get('last_salary',0)<3*86400:
+                bot.answer_callback_query(call.id, '❌ Некому выплачивать зарплату.', show_alert=True); return
+            now = time.time()
+            if now-float(pb.get('last_salary',0) or 0)<3*86400:
                 left=cooldown_text(pb.get('last_salary',0),3*86400,econ); bot.answer_callback_query(call.id,f'⏳ Следующая выплата через {left}.',show_alert=True); return
-            total=0; bonus=1+pet_bonus(econ,'business_bonus')+get_title_business_bonus(econ)+get_vip_business_bonus(econ)
-            for w in workers:
-                we=get_user_econ(w.get('id'),w.get('name')); salary=int(pb.get('salary_per_worker',100)*bonus); we['balance']+=salary; total+=salary
-                es=we.get('employer_salary') or {}; es['next_due']=time.time()+3*86400; we['employer_salary']=es
-            pb['last_salary']=time.time(); econ['balance']+=total; mark_dirty()
-            bot.answer_callback_query(call.id,f'💰 Зарплаты выплачены. Вам начислено +{total:,} 🪙 прибыли.',show_alert=True); render_public_business_view(chat_id,user_id,user_name,call.message.message_id); return
+            eligible=[]
+            for w in list(workers):
+                wid=w.get('id')
+                if not wid: continue
+                we=get_user_econ(wid,w.get('name','Игрок'))
+                es=we.get('employer_salary') or {}
+                if float(es.get('next_due', now+3*86400) or now+3*86400) <= now:
+                    eligible.append((w,we,es))
+            if not eligible:
+                due_times=[]
+                for w in workers:
+                    wid=w.get('id')
+                    if not wid:
+                        continue
+                    we=get_user_econ(wid,w.get('name','Игрок'))
+                    due_times.append(max(now, float((we.get('employer_salary') or {}).get('next_due', now+3*86400) or now+3*86400)))
+                left=max(0.0, (min(due_times) if due_times else now+3*86400) - now)
+                bot.answer_callback_query(call.id,f'⏳ Зарплата ещё не готова. Ближайшая выплата через {_fmt_duration(left)}.',show_alert=True)
+                return
+            bonus=1+pet_bonus(econ,'business_bonus')+get_title_business_bonus(econ)+get_vip_business_bonus(econ)
+            salary_each=max(1,int(pb.get('salary_per_worker',100)*bonus))
+            gross=salary_each*len(eligible)
+            profit=max(1,int(gross*0.25))
+            with TRANSFER_LOCK:
+                owner=get_user_econ(user_id,user_name,username=user_username)
+                if owner.get('balance',0)<gross:
+                    bot.answer_callback_query(call.id,f'❌ Для выплаты выбранным сотрудникам нужно {gross:,} 🪙. У вас: {owner.get("balance",0):,} 🪙.',show_alert=True); return
+                owner['balance']-=gross
+                paid=0
+                for w,we,es in eligible:
+                    we['balance']+=salary_each
+                    es['next_due']=now+3*86400
+                    we['employer_salary']=es
+                    paid += salary_each
+                owner['balance']+=profit
+                pb=owner.get('public_business') or pb
+                pb['last_salary']=now
+                owner['public_business']=pb
+                mark_dirty()
+            bot.answer_callback_query(call.id,f'💰 Зарплаты выплачены: {paid:,} 🪙. Ваша чистая прибыль: +{profit:,} 🪙.',show_alert=True); render_public_business_view(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data == 'pet_clothes':
             render_pet_clothes(chat_id,user_id,user_name,call.message.message_id); bot.answer_callback_query(call.id); return
         elif action_data.startswith('petcloth_buy_'):
             k=action_data.replace('petcloth_buy_',''); v=PET_CLOTHES.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
-            if not v:
-                bot.answer_callback_query(call.id, '❌ Такая одежда не найдена.', show_alert=True)
-                return
+            if not v: return
             if not econ.get('pet'):
                 bot.answer_callback_query(call.id,'❌ Сначала заведите питомца!',show_alert=True); return
             if k in econ.setdefault('pet_clothes',[]): bot.answer_callback_query(call.id,'Уже куплено!',show_alert=True); return
@@ -11145,12 +11108,11 @@ def callback_inline(call):
         elif action_data.startswith('petcloth_equip_'):
             k=action_data.replace('petcloth_equip_',''); econ=get_user_econ(user_id,user_name,username=user_username)
             if k in econ.setdefault('pet_clothes',[]): econ['equipped_pet_clothes']=k; mark_dirty(); bot.answer_callback_query(call.id,'👗 Одежда надета!'); render_pet_clothes(chat_id,user_id,user_name,call.message.message_id)
-            else: bot.answer_callback_query(call.id, '❌ Эта одежда не куплена.', show_alert=True)
             return
         elif action_data == 'garden_seeds':
             markup=InlineKeyboardMarkup(row_width=2)
             for k,v in GARDEN_SEEDS.items(): markup.add(InlineKeyboardButton(f"{v['emoji']} {v['price']} 🪙",callback_data=f"garden_buy_{k}:{user_id}"))
-            bot.edit_message_text('🌱 <b>ВЫБЕРИТЕ РАСТЕНИЕ</b>',chat_id=chat_id,message_id=call.message.message_id,reply_markup=markup,parse_mode='HTML'); bot.answer_callback_query(call.id); return
+            bot.edit_message_text('🌱 <b>ВЫБЕРИТЕ РАСТЕНИЕ</b>',chat_id=chat_id,message_id=call.message.message_id,reply_markup=markup,parse_mode='HTML'); return
         elif action_data.startswith('garden_buy_'):
             k=action_data.replace('garden_buy_',''); v=GARDEN_SEEDS.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
             slots=econ.get('garden') or []; slots=slots if isinstance(slots,list) else [slots]
@@ -11159,20 +11121,13 @@ def callback_inline(call):
             econ['balance']-=v['price']; slots.append({'seed':k,'planted_at':time.time(),'water_count':0,'last_dry_calc':time.time()}); econ['garden']=slots; mark_dirty(); bot.answer_callback_query(call.id,'🌱 Растение посажено!'); render_garden_view(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data.startswith('home_buy_'):
             k=action_data.replace('home_buy_',''); h=PERSONAL_HOUSES.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
-            if not h:
-                bot.answer_callback_query(call.id, '❌ Дом не найден.', show_alert=True)
-                return
-            if econ.get('home') or econ.get('home_installment'):
-                bot.answer_callback_query(call.id, '❌ У вас уже есть дом или активная рассрочка.', show_alert=True)
-                return
+            if not h or econ.get('home') or econ.get('home_installment'): return
             down=int(h['price']*0.25); remaining=h['price']-down; payment=max(1,remaining//8)
             if econ['balance']<down: bot.answer_callback_query(call.id,f'Первый взнос: {down:,} 🪙',show_alert=True); return
             econ['balance']-=down; econ['home_installment']={'id':k,'remaining':remaining,'payment':payment,'next_due':time.time()+2*86400,'down':down}; mark_dirty(); bot.answer_callback_query(call.id,'🏠 Дом оформлен в рассрочку!'); render_personal_home(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data == 'home_pay':
             econ=get_user_econ(user_id,user_name,username=user_username); inst=econ.get('home_installment')
-            if not inst:
-                bot.answer_callback_query(call.id, '❌ Активной рассрочки нет.', show_alert=True)
-                return
+            if not inst: return
             if time.time()<inst.get('next_due',0): bot.answer_callback_query(call.id,'⏳ Следующий платёж ещё не наступил.',show_alert=True); return
             pay=min(inst['payment'],inst['remaining'])
             if econ['balance']<pay: bot.answer_callback_query(call.id,f'Нужно {pay:,} 🪙!',show_alert=True); return
@@ -11186,9 +11141,7 @@ def callback_inline(call):
             if not game: bot.answer_callback_query(call.id,'Игра завершена.',show_alert=True); return
             uid=user_id
             if action_data.startswith('mono_join'):
-                if game['started']:
-                    bot.answer_callback_query(call.id, '❌ Игра уже началась.', show_alert=True)
-                    return
+                if game['started']: return
                 if uid not in game['players'] and len(game['players'])<6: game['players'][uid]={'name':user_name,'money':30000,'pos':0}
                 render_monopoly(chat_id,game,call.message.message_id); bot.answer_callback_query(call.id); return
             if action_data.startswith('mono_start'):
@@ -11208,10 +11161,7 @@ def callback_inline(call):
                 if player['money']<cell[1]: bot.answer_callback_query(call.id,'Недостаточно денег.',show_alert=True); return
                 player['money']-=cell[1]; game['owners'][idx]=uid; bot.answer_callback_query(call.id,f'🏠 Куплено: {cell[0]}');
             elif action_data.startswith('mono_skip'):
-                bot.answer_callback_query(call.id)
-            else:
-                bot.answer_callback_query(call.id, '❌ Неизвестное действие Monopoly.', show_alert=True)
-
+                pass
             ids=list(game['players']); pos=ids.index(uid); game['turn']=ids[(pos+1)%len(ids)]; render_monopoly(chat_id,game,call.message.message_id); return
 
         # АПТЕКА: КНОПКИ
@@ -11236,8 +11186,6 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"💊 Препарат куплен, но у вас другой диагноз! 😸")
                 mark_dirty()
                 render_pharmacy_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            else:
-                bot.answer_callback_query(call.id, '❌ Препарат не найден.', show_alert=True)
             return
 
         # ХЕЛЛОУИН BATTLE PASS: КНОПКИ
@@ -11307,19 +11255,6 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "⭐️ Счёт на 4 ⭐️ выставлен!")
             except Exception as e:
                 bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
-            return
-
-        # ЯЗЫК ПОЛЬЗОВАТЕЛЯ
-        elif action_data.startswith('set_language_'):
-            code = action_data.replace('set_language_', '', 1)
-            if code not in {'ru', 'uk', 'en'}:
-                bot.answer_callback_query(call.id, '❌ Неизвестный язык!', show_alert=True)
-                return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            econ['language'] = code
-            mark_dirty(); save_data(send_backup=False)
-            bot.answer_callback_query(call.id, '✅ Язык изменён!')
-            render_language_settings(chat_id, user_id, message_id=call.message.message_id)
             return
 
         # НАСТРОЙКИ ПРОФИЛЯ
@@ -11503,8 +11438,6 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {pack['stars']} ⭐️ выставлен!")
                 except Exception as e:
                     bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
-            else:
-                bot.answer_callback_query(call.id, '❌ Пакет коинов не найден.', show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: VIP PASS
@@ -11530,8 +11463,6 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
                 except Exception as e:
                     bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
-            else:
-                bot.answer_callback_query(call.id, '❌ VIP Pass не найден.', show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: КОСМЕТИКА И СТАТУС
@@ -11557,21 +11488,11 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
                 except Exception as e:
                     bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
-            else:
-                bot.answer_callback_query(call.id, '❌ Товар магазина не найден.', show_alert=True)
             return
 
         if action_data == 'shop_main':
             send_shop_menu(chat_id, user_id, user_name, message_id=call.message.message_id)
             bot.answer_callback_query(call.id)
-            return
-
-        elif action_data in ('business_refresh','pet_refresh','lottery_refresh','bp_refresh'):
-            if action_data == 'business_refresh': render_business_view(chat_id, user_id, user_name, call.message.message_id)
-            elif action_data == 'pet_refresh': render_pet_view(chat_id, user_id, user_name, call.message.message_id)
-            elif action_data == 'lottery_refresh': render_lottery_view(chat_id, user_id, user_name, call.message.message_id)
-            else: render_halloween_bp_view(chat_id, user_id, user_name, call.message.message_id)
-            bot.answer_callback_query(call.id, '🔄 Обновлено!')
             return
 
         elif action_data.startswith('stars_cat_'):
@@ -11658,13 +11579,8 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "🌱 Сад обновлён: выберите конкретную грядку.")
                 render_garden_view(chat_id, user_id, user_name, call.message.message_id)
                 return
-            if not garden:
-                bot.answer_callback_query(call.id, '🌱 Сейчас ничего не посажено.', show_alert=True)
-                return
-            seed_info = GARDEN_SEEDS.get(garden.get('seed'))
-            if not seed_info:
-                bot.answer_callback_query(call.id, '❌ Растение больше не существует.', show_alert=True)
-                return
+            if not garden: return
+            seed_info = GARDEN_SEEDS[garden['seed']]
             
             now = time.time()
             last_dry_calc = garden.get('last_dry_calc', garden.get('planted_at', now))
@@ -11924,7 +11840,6 @@ def callback_inline(call):
                 refresh_durak_group_board(game_id)
                 sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
-                bot.answer_callback_query(call.id, '🏁 Игра окончена!')
                 return
 
             refresh_durak_group_board(game_id)
@@ -11935,9 +11850,7 @@ def callback_inline(call):
         elif action_data.startswith('durak_take_'):
             game_id = action_data.replace('durak_take_', '')
             game = active_durak.get(game_id)
-            if not game:
-                bot.answer_callback_query(call.id, '❌ Игра уже завершена.', show_alert=True)
-                return
+            if not game: return
             p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
             if p_idx != game['defender_idx']:
                 bot.answer_callback_query(call.id, "Только защищающийся может взять карты!", show_alert=True)
@@ -11969,9 +11882,7 @@ def callback_inline(call):
         elif action_data.startswith('durak_bito_'):
             game_id = action_data.replace('durak_bito_', '')
             game = active_durak.get(game_id)
-            if not game:
-                bot.answer_callback_query(call.id, '❌ Игра уже завершена.', show_alert=True)
-                return
+            if not game: return
             players_now = game.get('players', [])
             attacker_idx = int(game.get('attacker_idx', 0))
             if attacker_idx < 0 or attacker_idx >= len(players_now) or players_now[attacker_idx].get('id') != user_id:
@@ -12027,7 +11938,6 @@ def callback_inline(call):
                 except Exception:
                     pass
                 del active_brick[game_id]
-                bot.answer_callback_query(call.id, '💥 Кирпич сорвался — ставка потеряна.', show_alert=True)
                 return
 
             game['step'] = step + 1
@@ -12280,13 +12190,8 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "🌱 Сад обновлён: выберите конкретную грядку.")
                 render_garden_view(chat_id, user_id, user_name, call.message.message_id)
                 return
-            if not garden:
-                bot.answer_callback_query(call.id, '🌱 Сейчас ничего не посажено.', show_alert=True)
-                return
-            seed_info = GARDEN_SEEDS.get(garden.get('seed'))
-            if not seed_info:
-                bot.answer_callback_query(call.id, '❌ Растение больше не существует.', show_alert=True)
-                return
+            if not garden: return
+            seed_info = GARDEN_SEEDS[garden['seed']]
             elapsed = time.time() - garden['planted_at']
             if elapsed < seed_info['grow_time']:
                 bot.answer_callback_query(call.id, "❌ Урожай еще не созрел! 😿", show_alert=True)
@@ -12478,7 +12383,6 @@ def callback_inline(call):
                 try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_mines[game_id]
-                bot.answer_callback_query(call.id, '💥 Мина! Игра окончена.', show_alert=True)
                 return
             else:
                 game['revealed'].add(cell_idx)
@@ -12503,7 +12407,6 @@ def callback_inline(call):
                     try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_mines[game_id]
-                    bot.answer_callback_query(call.id, '🏆 Поле полностью очищено!', show_alert=True)
                     return
 
                 text_board, markup = render_mines_board(game_id)
@@ -12536,7 +12439,6 @@ def callback_inline(call):
             try: bot.edit_message_text(cash_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             del active_mines[game_id]
-            bot.answer_callback_query(call.id, '💰 Куш забран!', show_alert=True)
 
         elif action_data.startswith('mcancel_'):
             game_id = action_data.replace('mcancel_', '')
@@ -12586,19 +12488,12 @@ def callback_inline(call):
                 text_board, markup = render_classic_mines_board(game_id)
                 try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
-                bot.answer_callback_query(call.id, '🎮 Классический сапёр запущен!')
-            else:
-                bot.answer_callback_query(call.id, '❌ Такой уровень сапёра не найден.', show_alert=True)
 
         elif action_data.startswith('cmmode_'):
             game_id = action_data.replace('cmmode_', '')
             game = active_c_mines.get(game_id)
-            if not game or game.get('finished'):
-                bot.answer_callback_query(call.id, '❌ Игра уже завершена.', show_alert=True)
-                return
-            if user_id != game['user_id']:
-                bot.answer_callback_query(call.id, '❌ Это не ваша игра!', show_alert=True)
-                return
+            if not game or game.get('finished'): return
+            if user_id != game['user_id']: return
 
             game['mode'] = 'flag' if game.get('mode', 'dig') == 'dig' else 'dig'
             bot.answer_callback_query(call.id, "🚩 Режим флага" if game['mode'] == 'flag' else "⛏ Режим копания")
@@ -12629,9 +12524,7 @@ def callback_inline(call):
                 return
 
             if game.get('mode') == 'flag':
-                if cell_idx in game['revealed']:
-                    bot.answer_callback_query(call.id, '❌ Открытую клетку нельзя пометить флагом.', show_alert=True)
-                    return
+                if cell_idx in game['revealed']: return
                 if cell_idx in game['flags']: game['flags'].remove(cell_idx)
                 else: game['flags'].add(cell_idx)
                 text_board, markup = render_classic_mines_board(game_id)
@@ -12665,7 +12558,6 @@ def callback_inline(call):
                 try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_c_mines[game_id]
-                bot.answer_callback_query(call.id, '💥 Мина! Игра окончена.', show_alert=True)
                 return
 
             reveal_cascade_cells(game, cell_idx)
@@ -12683,7 +12575,6 @@ def callback_inline(call):
                 try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_c_mines[game_id]
-                bot.answer_callback_query(call.id, '🏆 Поле полностью очищено!', show_alert=True)
                 return
 
             text_board, markup = render_classic_mines_board(game_id)
@@ -12695,9 +12586,7 @@ def callback_inline(call):
         elif action_data == 'pet_feed':
             econ = get_user_econ(user_id, user_name, username=user_username)
             pet = econ.get('pet')
-            if not pet:
-                bot.answer_callback_query(call.id, '❌ Сначала заведите питомца.', show_alert=True)
-                return
+            if not pet: return
             if pet.get('hunger', 100) >= 100:
                 bot.answer_callback_query(call.id, "🍖 Питомец сыт! 😸", show_alert=True)
                 return
@@ -12715,9 +12604,7 @@ def callback_inline(call):
         elif action_data == 'pet_wash':
             econ = get_user_econ(user_id, user_name, username=user_username)
             pet = econ.get('pet')
-            if not pet:
-                bot.answer_callback_query(call.id, '❌ Сначала заведите питомца.', show_alert=True)
-                return
+            if not pet: return
             if pet.get('cleanliness', 100) >= 100:
                 bot.answer_callback_query(call.id, "🧼 Питомец уже чистый! 😸", show_alert=True)
                 return
@@ -12756,11 +12643,16 @@ def callback_inline(call):
             if econ.get('balance', 0) < cost:
                 bot.answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙.', show_alert=True)
                 return
+            # Сначала фиксируем накопленное по старой ставке. Иначе апгрейд
+            # задним числом применился бы ко всему времени с прошлого сбора.
+            old_profit = _settle_one_business(econ, b_id, time.time(), credit=True)
             econ['balance'] -= cost
             biz_levels[b_id] = cur_lvl + 1
             owned[b_id] = cur_lvl + 1
             mark_dirty()
-            bot.answer_callback_query(call.id, f'🎉 {DONOR_BUSINESSES[b_id]["name"]} улучшен до {cur_lvl+1} уровня!')
+            settled_note = f' Накопленное до апгрейда: +{old_profit:,} 🪙.' if old_profit else ''
+            bot.answer_callback_query(call.id, f'🎉 {DONOR_BUSINESSES[b_id]["name"]} улучшен до {cur_lvl+1} уровня!{settled_note}')
+            # Показываем уже новую ставку и новый баланс.
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
         elif action_data.startswith('upg_biz_'):
@@ -12769,14 +12661,16 @@ def callback_inline(call):
                 b_info = BUSINESSES[b_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 biz_levels = econ.setdefault('biz_levels', {})
-                cur_lvl = biz_levels.get(b_id, 1)
+                cur_lvl = max(1, min(5, int(biz_levels.get(b_id, 1) or 1)))
                 if cur_lvl >= 5:
                     bot.answer_callback_query(call.id, "❌ Достигнут максимальный 5-й уровень! 😸", show_alert=True)
                     return
                 cost = b_info['upgrade_cost'] * cur_lvl
                 if econ['balance'] < cost:
-                    bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
+                    bot.answer_callback_query(call.id, f"❌ Нужно {cost:,} 🪙! 😿", show_alert=True)
                     return
+                # Зафиксировать старую ставку до повышения уровня.
+                _settle_one_business(econ, b_id, time.time(), credit=True)
                 econ['balance'] -= cost
                 biz_levels[b_id] = cur_lvl + 1
                 mark_dirty()
@@ -12796,38 +12690,36 @@ def callback_inline(call):
                 if econ['balance'] < b_info['price']:
                     bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
                     return
+                purchase_now = time.time()
                 econ['balance'] -= b_info['price']
-                user_biz[b_id] = time.time()
+                user_biz[b_id] = purchase_now
+                econ.setdefault('biz_last_collect', {})[b_id] = purchase_now
+                econ.setdefault('biz_income_carry', {})[b_id] = 0.0
                 biz_levels[b_id] = 1
                 check_achievements(user_id, user_name, 'biz_bought', 1, chat_id, username=user_username)
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}! 😻")
                 render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
+        elif action_data == 'business_refresh':
+            render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            bot.answer_callback_query(call.id, '🔄 Бизнесы обновлены! 😸')
+            return
+
         elif action_data == 'collect_biz_profit':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            user_biz = econ.get('businesses', {})
-            biz_levels = econ.get('biz_levels', {})
-            now = time.time()
-            hours_passed = (now - econ.get('last_biz_collect', now)) / 3600.0
-            donor_biz_owned = econ.get('donor_businesses', {})
-            base_profit = sum(int(BUSINESSES[b]['base_income'] * (1 + (biz_levels.get(b, 1) - 1) * 0.45) * hours_passed) for b in user_biz.keys() if b in BUSINESSES)
-            base_profit += sum(int(DONOR_BUSINESSES[b]['base_income'] * max(1, int(lvl or 1)) * hours_passed) for b, lvl in donor_biz_owned.items() if b in DONOR_BUSINESSES)
-            if base_profit <= 0:
-                bot.answer_callback_query(call.id, "⏳ Прибыль еще не накопилась! 😿", show_alert=True)
+            if not (econ.get('businesses') or econ.get('donor_businesses')):
+                bot.answer_callback_query(call.id, '❌ Сначала купите обычный бизнес через /business или донатный через /stars.', show_alert=True)
                 return
-
-            in_rest, _, _ = check_user_rest(db.get('rests', {}).get(str(chat_id), {}), user_id=user_id, user_name=user_name)
-            total_profit = base_profit
-            biz_bonus = get_title_business_bonus(econ) + get_vip_business_bonus(econ)
-            if biz_bonus:
-                total_profit += int(base_profit * biz_bonus)
-            if in_rest: total_profit += int(base_profit * 0.20)
-
+            now = time.time()
+            base_profit = collect_business_base_profit(econ, now)
+            if base_profit <= 0:
+                bot.answer_callback_query(call.id, "⏳ Пока накопилось меньше 1 🪙. Подождите немного! 😿", show_alert=True)
+                return
+            total_profit, event_text = _apply_business_payout_modifiers(econ, base_profit, chat_id, user_id, user_name)
             econ['balance'] += total_profit
-            econ['last_biz_collect'] = now
             mark_dirty()
-            bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit} 🪙! 😻")
+            bot.answer_callback_query(call.id, f"💰 Собрано: +{total_profit:,} 🪙! 😻")
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
         elif action_data.startswith('equip_veh_'):
@@ -12872,42 +12764,55 @@ def callback_inline(call):
             if r_id in RODS:
                 r_info = RODS[r_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ['balance'] < r_info['price']:
-                    bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙! 😿", show_alert=True)
-                    return
-                econ['balance'] -= r_info['price']
+                owned = econ.setdefault('rod_inventory', [])
+                if r_id not in owned:
+                    if econ['balance'] < r_info['price']:
+                        bot.answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙! 😿", show_alert=True)
+                        return
+                    econ['balance'] -= r_info['price']
+                    owned.append(r_id)
+                    action_text = f"🎉 Куплена и надета {r_info['name']}! 😻"
+                else:
+                    action_text = f"✅ Надета {r_info['name']}! 😸"
                 econ['equipped_rod'] = r_id
                 mark_dirty()
-                bot.answer_callback_query(call.id, f"🎉 Вы экипировали {r_info['name']}! 😻")
+                bot.answer_callback_query(call.id, action_text)
+                return
 
         elif action_data.startswith('buy_bow_'):
             b_id = action_data.replace('buy_bow_', '')
             if b_id in BOWS:
                 b_info = BOWS[b_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ['balance'] < b_info['price']:
-                    bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
-                    return
-                econ['balance'] -= b_info['price']
+                owned = econ.setdefault('bow_inventory', [])
+                if b_id not in owned:
+                    if econ['balance'] < b_info['price']:
+                        bot.answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
+                        return
+                    econ['balance'] -= b_info['price']
+                    owned.append(b_id)
+                    action_text = f"🎉 Куплен и надет {b_info['name']}! 😻"
+                else:
+                    action_text = f"✅ Надет {b_info['name']}! 😸"
                 econ['equipped_bow'] = b_id
                 mark_dirty()
-                bot.answer_callback_query(call.id, f"🎉 Вы экипировали {b_info['name']}! 😻")
+                bot.answer_callback_query(call.id, action_text)
+                return
 
         # БАНК КНОПКИ
         elif action_data == 'bank_refresh':
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-        elif action_data in ('bank_dep_100','bank_dep_1000'):
-            amount = 1000 if action_data == 'bank_dep_1000' else 100
+        elif action_data == 'bank_dep_100':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if econ['balance'] < amount:
-                bot.answer_callback_query(call.id, f"❌ Недостаточно: нужно {amount:,} 🪙! 😿".replace(',', ' '), show_alert=True)
+            if econ['balance'] < 100:
+                bot.answer_callback_query(call.id, "❌ Недостаточно средств на руках! 😿", show_alert=True)
                 return
-            econ['balance'] -= amount
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amount
-            check_achievements(user_id, user_name, 'bank_deposit', amount, chat_id, username=user_username)
+            econ['balance'] -= 100
+            econ['bank_deposit'] = econ.get('bank_deposit', 0) + 100
+            check_achievements(user_id, user_name, 'bank_deposit', 100, chat_id, username=user_username)
             mark_dirty()
-            bot.answer_callback_query(call.id, f"✅ Внесено {amount:,} 🪙! 😸".replace(',', ' '))
+            bot.answer_callback_query(call.id, "✅ Внесено 100 🪙 на депозит! 😸")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_dep_all':
@@ -12923,16 +12828,15 @@ def callback_inline(call):
             bot.answer_callback_query(call.id, f"✅ Внесено {b} 🪙 на депозит! 😻")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
-        elif action_data in ('bank_wd_100','bank_wd_1000'):
-            amount = 1000 if action_data == 'bank_wd_1000' else 100
+        elif action_data == 'bank_wd_100':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if econ.get('bank_deposit', 0) < amount:
-                bot.answer_callback_query(call.id, f"❌ В банке меньше {amount:,} 🪙! 😿".replace(',', ' '), show_alert=True)
+            if econ.get('bank_deposit', 0) < 100:
+                bot.answer_callback_query(call.id, "❌ В банке меньше 100 🪙! 😿", show_alert=True)
                 return
-            econ['bank_deposit'] -= amount
-            econ['balance'] += amount
+            econ['bank_deposit'] -= 100
+            econ['balance'] += 100
             mark_dirty()
-            bot.answer_callback_query(call.id, f"✅ Снято {amount:,} 🪙! 😸".replace(',', ' '))
+            bot.answer_callback_query(call.id, "✅ Снято 100 🪙 с депозита! 😸")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_wd_all':
@@ -12950,39 +12854,48 @@ def callback_inline(call):
         # ЛОТЕРЕЯ
         elif action_data in ['buy_ticket_1', 'buy_ticket_5']:
             count = 1 if action_data == 'buy_ticket_1' else 5
-            cost = count * 100
-            econ = get_user_econ(user_id, user_name, username=user_username)
+            with LOTTERY_LOCK:
+                lottery = db.setdefault('lottery', {'tickets': {}, 'pot': 0, 'last_draw': 0})
+                t_dict = lottery.setdefault('tickets', {})
+                current_total = sum(int(v or 0) for v in t_dict.values())
+                if current_total + count > 10:
+                    remaining = max(0, 10 - current_total)
+                    bot.answer_callback_query(call.id, f'❌ Свободно только {remaining} мест(а) до тиража. Купите по 1 билету.', show_alert=True)
+                    return
+                cost = count * 100
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                if econ['balance'] < cost:
+                    bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
+                    return
 
-            if econ['balance'] < cost:
-                bot.answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
-                return
+                econ['balance'] -= cost
+                t_dict[str(user_id)] = t_dict.get(str(user_id), 0) + count
+                lottery['pot'] = lottery.get('pot', 0) + cost
 
-            econ['balance'] -= cost
-            lottery = db.setdefault('lottery', {'tickets': {}, 'pot': 0, 'last_draw': 0})
-            t_dict = lottery.setdefault('tickets', {})
-            t_dict[str(user_id)] = t_dict.get(str(user_id), 0) + count
-            lottery['pot'] = lottery.get('pot', 0) + cost
+                total_tickets = sum(int(v or 0) for v in t_dict.values())
+                draw_result = None
+                if total_tickets >= 10:
+                    pool = []
+                    for uid, t_count in t_dict.items(): pool.extend([uid] * int(t_count or 0))
+                    winner_id = int(random.choice(pool))
+                    win_pot = int(lottery.get('pot', 0) or 0)
+                    w_econ = get_user_econ(user_id=winner_id)
+                    w_econ['balance'] += win_pot
+                    lottery['tickets'] = {}
+                    lottery['pot'] = 0
+                    lottery['last_draw'] = time.time()
+                    draw_result = (winner_id, win_pot, w_econ.get('display_name', 'Игрок'))
+                    mark_dirty()
+                else:
+                    mark_dirty()
 
             bot.answer_callback_query(call.id, f"🎟 Куплено {count} бил.! 😸")
-            total_tickets = sum(t_dict.values())
-
-            if total_tickets >= 10:
-                pool = []
-                for uid, t_count in t_dict.items(): pool.extend([uid] * t_count)
-                winner_id = int(random.choice(pool))
-                win_pot = lottery['pot']
-                w_econ = get_user_econ(user_id=winner_id)
-                w_econ['balance'] += win_pot
-                lottery['tickets'] = {}
-                lottery['pot'] = 0
-                lottery['last_draw'] = time.time()
-                mark_dirty()
-
-                w_link = make_link(chat_id, w_econ.get('display_name', 'Игрок'), winner_id, ping=True)
+            if draw_result:
+                winner_id, win_pot, winner_name = draw_result
+                w_link = make_link(chat_id, winner_name, winner_id, ping=True)
                 log_event('ЛОТЕРЕЯ: ДЖЕКПОТ', f'Победитель {w_link} сорвал джекпот <b>{win_pot} 🪙</b>!')
                 bot.send_message(chat_id, f"🎉 <b>РОЗЫГРЫШ ЛОТЕРЕИ СОСТОЯЛСЯ!</b> 😻\n\n🏆 Джекпот <b>+{win_pot} Ня-коинов 🪙</b> забирает {w_link}!\nСледующий тираж уже открыт! 😸", parse_mode='HTML')
             else:
-                mark_dirty()
                 render_lottery_view(chat_id, user_id, user_name, call.message.message_id)
 
         # ЧАТ-ДРОПЫ
@@ -13083,7 +12996,6 @@ def callback_inline(call):
                     )
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
             del pending_marriages[prop_id]
-            bot.answer_callback_query(call.id, '💍 Решение принято.')
 
         # БЛЭКДЖЕК
         elif action_data.startswith('bj_hit_') or action_data.startswith('bj_stand_'):
@@ -13108,7 +13020,6 @@ def callback_inline(call):
                         bot.edit_message_text(f"💥 <b>Перебор ({p_score})!</b> Вы проиграли <b>{game['bet']} 🪙</b>. 😿\nВаши карты: {game['p_cards']}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
                     except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_bj_games[game_id]
-                    bot.answer_callback_query(call.id, '💥 Перебор — вы проиграли.', show_alert=True)
                     return
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}:{user_id}"), InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}:{user_id}"))
@@ -13259,7 +13170,6 @@ def callback_inline(call):
             if not chat_rests:
                 try: bot.edit_message_text('🌴 В данный момент никто не находится в ресте. 😸', chat_id=chat_id, message_id=call.message.message_id)
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
-                bot.answer_callback_query(call.id, '🌴 Сейчас активных рестов нет.')
                 return
 
             resp = '📋 <b>СПИСОК АКТИВНЫХ РЕСТОВ:</b> 😺\n──────────────────────\n'
@@ -13273,13 +13183,10 @@ def callback_inline(call):
             markup.add(InlineKeyboardButton("🗑 Снять рест (Выбрать)", callback_data=f"rest_remove_menu:{user_id}"))
             try: bot.edit_message_text(resp, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
-            bot.answer_callback_query(call.id)
 
         # НАСТРОЙКИ
         elif action_data == 'set_max_days':
-            if not is_admin(chat_id, user_id):
-                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
-                return
+            if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
             sett['max_days'] = None
             mark_dirty()
@@ -13287,9 +13194,7 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_rp':
-            if not is_admin(chat_id, user_id):
-                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
-                return
+            if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
             sett['rp_enabled'] = not sett.get('rp_enabled', True)
             mark_dirty()
@@ -13297,9 +13202,7 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_flood':
-            if not is_admin(chat_id, user_id):
-                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
-                return
+            if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
             sett['flood_protection'] = not sett.get('flood_protection', False)
             mark_dirty()
@@ -13317,9 +13220,7 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_reactions':
-            if not is_admin(chat_id, user_id):
-                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
-                return
+            if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
             sett['auto_reactions'] = not sett.get('auto_reactions', True)
             mark_dirty()
@@ -13327,9 +13228,7 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_welcome':
-            if not is_admin(chat_id, user_id):
-                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
-                return
+            if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
             sett['welcome_enabled'] = not sett.get('welcome_enabled', True)
             mark_dirty()
@@ -13337,9 +13236,7 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'set_remind_time':
-            if not is_admin(chat_id, user_id):
-                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
-                return
+            if not is_admin(chat_id, user_id): return
             sett = get_chat_settings(chat_id)
             opts = [10, 60, 1440]
             next_opt = opts[(opts.index(sett.get('remind_minutes', 60)) + 1) % len(opts)]
@@ -13538,6 +13435,9 @@ def callback_inline(call):
                     return
                 p_data = PETS_DATA[pet_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
+                if econ.get('pet', {}).get('id') == pet_id:
+                    bot.answer_callback_query(call.id, "❌ Этот питомец уже у вас. 😸", show_alert=True)
+                    return
                 if pet_id == 'vip_griffin':
                     # Грифон — Stars-only. Нулевой price в каталоге никогда не означает бесплатную выдачу.
                     if 'pet_griffin' not in econ.setdefault('paid_stars_items', []):
@@ -13725,10 +13625,6 @@ def callback_inline(call):
             mark_dirty()
             bot.answer_callback_query(call.id, "❌ Значок снят! 😿", show_alert=True)
             render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
-
-        else:
-            print(f'[CALLBACK] Unhandled callback: {raw_data!r}')
-            bot.answer_callback_query(call.id)
 
     except Exception as e:
         print(f"[CALLBACK ERROR] Исключение в callback: {e}")
@@ -14045,7 +13941,14 @@ def process_stars_successful_payment(message):
                 elif c_type == 'donor_business':
                     bid = cosm.get('business_id')
                     if bid in DONOR_BUSINESSES:
-                        target_econ.setdefault('donor_businesses', {})[bid] = max(1, int(target_econ.get('donor_businesses', {}).get(bid, 1)))
+                        donor_owned = target_econ.setdefault('donor_businesses', {})
+                        already_owned = bid in donor_owned
+                        donor_owned[bid] = max(1, int(donor_owned.get(bid, 1)))
+                        if not already_owned:
+                            purchase_now = time.time()
+                            target_econ.setdefault('donor_business_purchased_at', {})[bid] = purchase_now
+                            target_econ.setdefault('biz_last_collect', {})[bid] = purchase_now
+                            target_econ.setdefault('biz_income_carry', {})[bid] = 0.0
                     prod_name = cosm.get('name', actual_prod)
                 elif c_type == 'gif':
                     gif_id = cosm.get('gif_id')
@@ -14282,7 +14185,14 @@ def process_stars_successful_payment(message):
                         bot.reply_to(message, '❌ Донатный бизнес не найден.', parse_mode='HTML')
                         mark_stars_charge_processed(charge_id)
                         return
-                    econ.setdefault('donor_businesses', {})[bid] = max(1, int(econ.get('donor_businesses', {}).get(bid, 1)))
+                    donor_owned = econ.setdefault('donor_businesses', {})
+                    already_owned = bid in donor_owned
+                    donor_owned[bid] = max(1, int(donor_owned.get(bid, 1)))
+                    if not already_owned:
+                        purchase_now = time.time()
+                        econ.setdefault('donor_business_purchased_at', {})[bid] = purchase_now
+                        econ.setdefault('biz_last_collect', {})[bid] = purchase_now
+                        econ.setdefault('biz_income_carry', {})[bid] = 0.0
                     mark_dirty()
                     info = DONOR_BUSINESSES[bid]
                     log_event('STARS DONOR BUSINESS', f'Игрок {user_link} получил {info["name"]} за {stars_amount} ⭐️!')
@@ -14318,223 +14228,12 @@ def process_stars_successful_payment(message):
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
-
-# =========================================================
-# NYABOT 3.0 — UX-УЛУЧШЕНИЯ СУЩЕСТВУЮЩИХ ФУНКЦИЙ
-# Не добавляем новые игровые механики: улучшаем отображение,
-# навигацию, расчёты и последствия уже существующих действий.
-# =========================================================
-
-def _n3_num(value):
-    try:
-        return f"{int(value):,}".replace(',', ' ')
-    except Exception:
-        return str(value)
-
-def _n3_bar(cur, total, width=10):
-    try:
-        cur=float(cur); total=max(1,float(total))
-        filled=max(0,min(width,int(cur/total*width)))
-        return '█'*filled+'░'*(width-filled)
-    except Exception:
-        return '░'*width
-
-def _n3_business_snapshot(econ):
-    user_biz=econ.get('businesses',{}) or {}; donor=econ.get('donor_businesses',{}) or {}; levels=econ.get('biz_levels',{}) or {}
-    income=0; count=0
-    for bid in list(user_biz)+list(donor):
-        info=BUSINESSES.get(bid) or DONOR_BUSINESSES.get(bid)
-        if not info: continue
-        lvl=max(1,min(5,int(levels.get(bid, user_biz.get(bid, donor.get(bid,1)) or 1))))
-        income += int(info['base_income']*(1+(lvl-1)*0.45)); count+=1
-    last=econ.get('last_biz_collect',time.time()); elapsed=max(0,time.time()-last)
-    stored=int(income*elapsed/3600) if income else 0
-    return income,count,stored
-
-def _n3_send_or_edit(chat_id,text,markup,message_id=None):
-    if message_id:
-        try:
-            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=markup,parse_mode='HTML')
-            return
-        except Exception: pass
-    bot.send_message(chat_id,text,reply_markup=markup,parse_mode='HTML')
-
-# ---- Профиль: компактный, но с реальным прогрессом и общей экономикой ----
-def send_user_profile(chat_id,user_tag,user_id,message_to_reply=None,message_id_to_edit=None,username=None):
-    try:
-        econ=get_user_econ(user_id,user_tag,username=username)
-        lvl,exp,next_exp,bar=get_account_level(econ.get('account_exp',0))
-        biz_income,biz_count,_=_n3_business_snapshot(econ)
-        pet=econ.get('pet')
-        pet_text='нет'
-        if pet:
-            pexp=int(pet.get('pet_exp',0)); plvl=1+pexp//100
-            pet_text=f"{pet.get('name','Питомец')} • ур. {plvl} • {pexp%100}/100 EXP"
-        streak=int(econ.get('bonus_streak',0) or 0)
-        ach=len(econ.get('achievements',[]) or [])
-        total=len(ACHIEVEMENTS)
-        text=(f"👤 <b>ПРОФИЛЬ</b> 😺\n──────────────────────\n"
-              f"🐱 Игрок: {make_link(chat_id,user_tag,user_id,ping=False)}\n"
-              f"⭐ Уровень: <b>{lvl}</b> [{bar}]\n"
-              f"📈 EXP: <b>{_n3_num(exp)}/{_n3_num(next_exp)}</b>\n"
-              f"💰 Баланс: <b>{_n3_num(econ.get('balance',0))} 🪙</b> | 🏦 {_n3_num(econ.get('bank_deposit',0))} 🪙\n"
-              f"🏢 Бизнесы: <b>{biz_count}</b> • доход <b>{_n3_num(biz_income)} 🪙/ч</b>\n"
-              f"🐾 Питомец: <b>{html.escape(str(pet_text))}</b>\n"
-              f"🔥 Серия: <b>{streak} дн.</b> • 🏆 Ачивки: <b>{ach}/{total}</b>\n"
-              f"──────────────────────")
-        markup=InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton('⚙️ Настройки профиля',callback_data=f'open_profile_settings:{user_id}'))
-        gif_key=econ.get('profile_gif'); gif=PROFILE_GIFS.get(gif_key) if gif_key else None
-        if gif:
-            cap=re.sub(r'<[^>]+>','',html.unescape(text))[:1000]
-            bot.send_animation(chat_id,gif['url'],caption=cap,reply_markup=markup)
-        elif message_id_to_edit:
-            _n3_send_or_edit(chat_id,text,markup,message_id_to_edit)
-        elif message_to_reply:
-            bot.reply_to(message_to_reply,text,reply_markup=markup,parse_mode='HTML')
-        else: bot.send_message(chat_id,text,reply_markup=markup,parse_mode='HTML')
-    except Exception as e:
-        print(f'[PROFILE 3.0 ERROR] {e}')
-        try: bot.reply_to(message_to_reply,text,parse_mode='HTML') if message_to_reply else bot.send_message(chat_id,text,parse_mode='HTML')
-        except Exception: pass
-
-# ---- Бизнесы: доход, накоплено, окупаемость и быстрый сбор ----
-def render_business_view(chat_id,user_id,user_name,message_id=None):
-    econ=get_user_econ(user_id,user_name); income,count,stored=_n3_business_snapshot(econ)
-    levels=econ.get('biz_levels',{}) or {}; owned=econ.get('businesses',{}) or {}; donor=econ.get('donor_businesses',{}) or {}
-    lines=["🏢 <b>МОИ БИЗНЕСЫ 3.0</b> 😺","──────────────────────",
-           f"📊 Общий доход: <b>{_n3_num(income)} 🪙/ч</b>",f"💰 Накоплено сейчас: <b>{_n3_num(stored)} 🪙</b>",""]
-    btns=[]
-    for bid in list(owned)+list(donor):
-        info=BUSINESSES.get(bid) or DONOR_BUSINESSES.get(bid)
-        if not info: continue
-        lvl=max(1,min(5,int(levels.get(bid,owned.get(bid,donor.get(bid,1)) or 1))))
-        inc=int(info['base_income']*(1+(lvl-1)*0.45)); line=f"• <b>{info['name']}</b> — ур. <b>{lvl}/5</b> • <b>{_n3_num(inc)} 🪙/ч</b>"
-        if lvl<5:
-            cost=int(info['upgrade_cost']*lvl); delta=max(1,int(inc*0.45)); pay=cost/delta if delta else 0
-            line += f"\n  ⬆️ След. уровень: <b>{_n3_num(cost)} 🪙</b> • окупаемость ≈ <b>{pay:.1f} ч</b>"
-            btns.append(InlineKeyboardButton(f"⬆️ {info.get('short',info['name'])} → {lvl+1}",callback_data=f"upg_biz_{bid}:{user_id}"))
-        lines.append(line)
-    if not count: lines.append("😿 Пока нет купленных предприятий.")
-    markup=InlineKeyboardMarkup(row_width=2)
-    for i in range(0,len(btns),2): markup.add(*btns[i:i+2])
-    markup.add(InlineKeyboardButton(f"💰 Собрать всё (+{_n3_num(stored)} 🪙)",callback_data=f"collect_biz_profit:{user_id}"))
-    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'business_refresh:{user_id}'))
-    markup.add(InlineKeyboardButton('⭐️ Донатные бизнесы',callback_data=f'stars_cat_businesses:{user_id}'))
-    lines += ["──────────────────────","💡 После улучшения доход и окупаемость пересчитываются сразу."]
-    _n3_send_or_edit(chat_id,'\n'.join(lines),markup,message_id)
-
-# ---- Банк: сумма, начисленные проценты и время следующего периода ----
-def render_bank_view(chat_id,user_id,user_name,message_id=None):
-    econ=get_user_econ(user_id,user_name); earned=update_bank_interest(econ); mark_dirty()
-    dep=int(econ.get('bank_deposit',0) or 0); pocket=int(econ.get('balance',0) or 0)
-    last=float(econ.get('last_bank_calc',time.time())); left=max(0,6*3600-(time.time()-last)); h=int(left//3600); m=int((left%3600)//60)
-    rate_gain=int(dep*0.0025) if dep else 0
-    markup=InlineKeyboardMarkup(row_width=2)
-    markup.add(InlineKeyboardButton('📥 +1 000',callback_data=f'bank_dep_1000:{user_id}'),InlineKeyboardButton('📥 Внести всё',callback_data=f'bank_dep_all:{user_id}'))
-    markup.add(InlineKeyboardButton('📤 1 000',callback_data=f'bank_wd_1000:{user_id}'),InlineKeyboardButton('📤 Снять всё',callback_data=f'bank_wd_all:{user_id}'))
-    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'bank_refresh:{user_id}'))
-    text=(f"🏦 <b>НЯ-БАНК</b> 😺\n──────────────────────\n"
-          f"💳 На депозите: <b>{_n3_num(dep)} 🪙</b>\n💵 В кармане: <b>{_n3_num(pocket)} 🪙</b>\n"
-          f"📈 Начислено процентов: <b>+{_n3_num(earned)} 🪙</b>\n"
-          f"💎 Следующий период: <b>через {h}ч {m}м</b> • примерно <b>+{_n3_num(rate_gain)} 🪙</b>\n"
-          f"📊 Ставка: <b>+0.25% каждые 6 часов</b>\n──────────────────────\n"
-          f"💡 Используйте кнопки или команды <code>банк положить 500</code> / <code>банк снять 500</code>.")
-    _n3_send_or_edit(chat_id,text,markup,message_id)
-
-# ---- Питомец: уровень, EXP и фактический бонус от состояния ----
-def render_pet_view(chat_id,user_id,user_name,message_id=None):
-    econ=get_user_econ(user_id,user_name); pet=econ.get('pet')
-    if not pet:
-        markup=InlineKeyboardMarkup(); markup.add(InlineKeyboardButton('🐾 Открыть зоомагазин',callback_data=f'shop_cat_pets_0:{user_id}'))
-        _n3_send_or_edit(chat_id,'🐾 <b>У вас пока нет питомца!</b> 😿\n\nКупите друга в зоомагазине.',markup,message_id); return
-    update_pet_stats(pet); mark_dirty()
-    pexp=int(pet.get('pet_exp',0)); plvl=1+pexp//100; cur=pexp%100
-    hunger=int(pet.get('hunger',100)); clean=int(pet.get('cleanliness',100)); state=max(0,min(100,(hunger+clean)//2))
-    base=int(pet.get('luck_bonus',10)); effective=max(0,int(base*state/100))
-    hbar=_n3_bar(hunger,100,10); cbar=_n3_bar(clean,100,10); ebar=_n3_bar(cur,100,10)
-    markup=InlineKeyboardMarkup(row_width=2)
-    markup.add(InlineKeyboardButton('🍖 Покормить 30 🪙',callback_data=f'pet_feed:{user_id}'),InlineKeyboardButton('🧼 Искупать 20 🪙',callback_data=f'pet_wash:{user_id}'))
-    markup.add(InlineKeyboardButton('🦮 Гулять',callback_data=f'pet_walk_btn:{user_id}'),InlineKeyboardButton('👗 Одежда',callback_data=f'pet_clothes:{user_id}'))
-    markup.add(InlineKeyboardButton('🐾 Зоомагазин',callback_data=f'shop_cat_pets_0:{user_id}'),InlineKeyboardButton('🔄 Обновить',callback_data=f'pet_refresh:{user_id}'))
-    text=(f"🐾 <b>ПИТОМЕЦ: {html.escape(str(pet.get('name','Питомец')))}</b> 😺\n──────────────────────\n"
-          f"⭐ Уровень: <b>{plvl}</b> • EXP <b>{cur}/100</b> [{ebar}]\n"
-          f"🍗 Сытость: <b>{hunger}%</b> [{hbar}]\n🧼 Чистота: <b>{clean}%</b> [{cbar}]\n"
-          f"✨ Базовый бонус: <b>+{base}%</b> • сейчас: <b>+{effective}%</b>\n"
-          f"💡 Состояние питомца: <b>{state}%</b> — чем лучше уход, тем выше действующий бонус.\n──────────────────────")
-    _n3_send_or_edit(chat_id,text,markup,message_id)
-
-# ---- Задания: визуальный прогресс и награда в одной строке ----
-def format_daily_tasks(user_id,user_tag):
-    tasks,econ=get_daily_tasks(user_id,user_tag); w_tasks,_=get_weekly_tasks(user_id,user_tag)
-    day=['Понедельник','Вторник','Среда','Четверг','Пятница','Суббота','Воскресенье'][now_msk().weekday()]
-    lines=[f"📋 <b>ЗАДАНИЯ — {day.upper()}</b>","──────────────────────","☀️ <b>Ежедневные</b>"]
-    done_count=0
-    for key,desc,target,reward in tasks:
-        cur=min(int(econ.get('daily_progress',{}).get(key,0)),target); done=key in econ.get('daily_claimed',[])
-        if done: done_count+=1
-        lines.append(f"{'✅' if done else '🔄'} {desc}\n   [{_n3_bar(cur,target,8)}] <b>{cur}/{target}</b> • 🎁 +{_n3_num(reward)} 🪙")
-    lines.append(f"\n📅 <b>Еженедельные</b>")
-    for key,desc,target,reward in w_tasks:
-        cur=min(int(econ.get('weekly_progress',{}).get(key,0)),target); done=key in econ.get('weekly_claimed',[])
-        lines.append(f"{'✅' if done else '🔄'} {desc}\n   [{_n3_bar(cur,target,8)}] <b>{cur}/{target}</b> • 🎁 +{_n3_num(reward)} 🪙")
-    lines += ["──────────────────────",f"📊 Сегодня выполнено: <b>{done_count}/{len(tasks)}</b>"]
-    if tasks and done_count==len(tasks): lines.append("🎉 <b>Все ежедневные задания выполнены!</b> 😻")
-    return '\n'.join(lines)
-
-# ---- Лотерея: участники, свои билеты и время/состояние розыгрыша ----
-def render_lottery_view(chat_id,user_id,user_name,message_id=None):
-    lottery=db.setdefault('lottery',{'tickets':{},'pot':0,'last_draw':0}); tickets=lottery.get('tickets',{}) or {}; total=sum(tickets.values()); mine=tickets.get(str(user_id),0); pot=int(lottery.get('pot',0) or 0)
-    participants=sum(1 for v in tickets.values() if v>0)
-    markup=InlineKeyboardMarkup(row_width=2); markup.add(InlineKeyboardButton('🎟 1 билет • 100 🪙',callback_data=f'buy_ticket_1:{user_id}'),InlineKeyboardButton('🎟 5 билетов • 500 🪙',callback_data=f'buy_ticket_5:{user_id}'))
-    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'lottery_refresh:{user_id}'))
-    text=(f"🎟 <b>ДЖЕКПОТ-ЛОТЕРЕЯ</b> 😺\n──────────────────────\n💰 Джекпот: <b>{_n3_num(pot)} 🪙</b>\n"
-          f"🎫 Билетов: <b>{total}/10</b> • 👥 Участников: <b>{participants}</b>\n🎟 Ваших билетов: <b>{mine}</b>\n"
-          f"🎯 Шанс зависит от количества ваших билетов.\n──────────────────────\n💡 При достижении 10 билетов розыгрыш запускается автоматически.")
-    _n3_send_or_edit(chat_id,text,markup,message_id)
-
-# ---- Battle Pass: понятный прогресс и статус каждой ключевой награды ----
-def render_halloween_bp_view(chat_id,user_id,user_name,message_id=None):
-    econ=get_user_econ(user_id,user_name); bp_exp=int(econ.get('bp_exp',0) or 0); prem=bool(econ.get('bp_premium')); lvl,in_exp,req,bar=get_user_bp_level(bp_exp)
-    pct=int(in_exp/max(1,req)*100)
-    status='👑 Премиум активен' if prem else '🔒 Бесплатная ветка'
-    rewards=[(15,'🎃 Значок Тыквы',False),(20,'🐱 Тыквоголовый Кот',True),(30,'👑 Титул «🎃 Повелитель Тыкв»',False),(30,'🎨 Тёмная тема Хэллоуина',True)]
-    lines=["🎃 <b>ХЕЛЛОУИНСКИЙ BATTLE PASS</b> 🦇","──────────────────────",f"🏆 Уровень: <b>{lvl}/30</b> [{bar}] <b>{pct}%</b>",f"📈 До следующего уровня: <b>{max(0,req-in_exp)} EXP</b>",f"⭐ Статус: <b>{status}</b>","","<b>Ключевые награды:</b>"]
-    for rl,name,pr in rewards:
-        got=lvl>=rl; locked=(not got) or (pr and not prem)
-        icon='🔒' if locked else '🎁' if not got else '✅'
-        need='' if got and not(pr and not prem) else f' • нужно LVL {rl}' + (' + Premium' if pr else '')
-        lines.append(f"{icon} {name}{need}")
-    markup=InlineKeyboardMarkup(); markup.add(InlineKeyboardButton('🎁 Забрать доступные награды',callback_data=f'claim_bp_rewards:{user_id}'))
-    if not prem: markup.add(InlineKeyboardButton('⭐️ Премиум за 4 Stars',callback_data=f'buy_bp_prem_stars:{user_id}'))
-    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'bp_refresh:{user_id}'))
-    _n3_send_or_edit(chat_id,'\n'.join(lines),markup,message_id)
-
-# ---- Обычный магазин: статусы и быстрый вход в Stars-магазин ----
-def send_shop_menu(chat_id,user_id,user_tag,message_id=None):
-    econ=get_user_econ(user_id,user_tag); owned=sum(1 for k in ['badge','custom_title','equipped_vehicle','pet'] if econ.get(k));
-    markup=InlineKeyboardMarkup(row_width=2)
-    markup.add(InlineKeyboardButton('⭐️ Stars-магазин',callback_data=f'shop_cat_stars_main:{user_id}'))
-    markup.add(InlineKeyboardButton('✨ Значки',callback_data=f'shop_cat_badges_0:{user_id}'),InlineKeyboardButton('👑 Титулы',callback_data=f'shop_cat_titles_0:{user_id}'))
-    markup.add(InlineKeyboardButton('🎨 Темы',callback_data=f'shop_cat_themes:{user_id}'),InlineKeyboardButton('🧰 Расходники',callback_data=f'shop_cat_buffs:{user_id}'))
-    markup.add(InlineKeyboardButton('💍 Кольца',callback_data=f'shop_cat_rings:{user_id}'),InlineKeyboardButton('🐾 Питомцы',callback_data=f'shop_cat_pets_0:{user_id}'))
-    markup.add(InlineKeyboardButton('🏎 Гараж',callback_data=f'shop_cat_garage:{user_id}'),InlineKeyboardButton('🪴 Семена',callback_data=f'shop_cat_garden:{user_id}'))
-    markup.add(InlineKeyboardButton('🎙 Стример',callback_data=f'shop_cat_stream:{user_id}'),InlineKeyboardButton('🎞 GIF профиля',callback_data=f'shop_cat_gifs:{user_id}'))
-    markup.add(InlineKeyboardButton('🔄 Обновить',callback_data=f'shop_main:{user_id}'))
-    text=(f"🏪 <b>МАГАЗИН NYA</b> 😺\n──────────────────────\n"
-          f"💰 Баланс: <b>{_n3_num(econ.get('balance',0))} 🪙</b>\n"
-          f"📦 Уже экипировано/есть: <b>{owned}</b>\n\n"
-          f"💡 Внутри категории после покупки предмет можно использовать/экипировать, а донатные товары вынесены в ⭐ Stars-магазин.")
-    _n3_send_or_edit(chat_id,text,markup,message_id)
-
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ---------------------------------------------------------
-load_premium_emoji_metadata()
 setup_bot_commands()
 start_background_threads()
 keep_alive()
-threading.Thread(target=cleanup_mini_games_loop,daemon=True).start()
 
 print('Бот успешно запущен со всеми обновлениями и исправлениями! 😸')
 bot.infinity_polling()
