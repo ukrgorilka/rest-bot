@@ -2510,10 +2510,6 @@ def can_process_user_message(message):
     except Exception as e:
         print(f"[CHAT TRACK ERROR] {e}")
 
-    bot_is_active = db.get('bot_active', True)
-    if not bot_is_active and not is_super_admin:
-        return False
-
     # АНТИФЛУД КОМАНД: проверяем здесь, чтобы лимит работал и для
     # отдельных command-handler'ов, которые завершаются до общего обработчика.
     # Настройка действует только в конкретной группе/супергруппе.
@@ -8793,20 +8789,26 @@ def handle_messages(message):
 
     is_super_admin = (user_id == ADMIN_ID)
 
-    bot_is_active = db.get('bot_active', True)
-    if not bot_is_active:
-        if is_super_admin and text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
-            db['bot_active'] = True
-            save_data()
-            log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде ID:{user_id}')
-            bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b> 😻", parse_mode='HTML')
-            return
-        elif is_super_admin:
-            pass
-        else:
-            return
+    # bot_active больше не блокирует обычных пользователей.
+    # Старое значение False в Neon не должно переводить бота в режим "только владелец".
+    if not db.get('bot_active', True) and is_super_admin and text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
+        db['bot_active'] = True
+        save_data()
+        log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде ID:{user_id}')
+        bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b> 😻", parse_mode='HTML')
+        return
 
     last_chat_activity[chat_id] = now_ts
+
+    # Регистрируем пользователя в чатовых данных до текстовой маршрутизации.
+    try:
+        econ_for_chat = get_user_econ(user_id, user_name, username=user_username)
+        chat_ids = econ_for_chat.setdefault('chat_ids', [])
+        if chat_id not in chat_ids:
+            chat_ids.append(chat_id)
+            mark_dirty()
+    except Exception as e:
+        print(f'[GENERAL CHAT REGISTER ERROR] {e}')
 
     if text.startswith('/'):
         cmd_part = text.split()[0]
