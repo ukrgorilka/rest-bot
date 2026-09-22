@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import secrets
 from urllib.parse import parse_qsl
+from urllib.request import Request as UrlRequest, urlopen
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -67,18 +68,28 @@ def _miniapp_user(init_data):
     except Exception:
         return None
 
-def _miniapp_auth(payload):
-    return _miniapp_user(str((payload or {}).get('initData', '')))
+def _miniapp_auth(payload=None):
+    payload = payload or {}
+    init_data = str(payload.get('initData', '') or request.headers.get('X-Telegram-Init-Data', ''))
+    return _miniapp_user(init_data)
 
 @app.route('/minigames')
 def miniapp_index():
     if not os.path.exists(os.path.join(MINIAPP_DIR, 'index.html')):
         return 'Mini App is not installed', 404
-    return send_from_directory(MINIAPP_DIR, 'index.html')
+    response = send_from_directory(MINIAPP_DIR, 'index.html')
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 @app.route('/minigames/<path:filename>')
 def miniapp_static(filename):
-    return send_from_directory(MINIAPP_DIR, filename)
+    response = send_from_directory(MINIAPP_DIR, filename)
+    # Telegram WebView can keep old JS/CSS longer than a normal browser.
+    # Never cache our own Mini App assets so a deploy immediately picks up fixes.
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 @app.route('/api/mini/profile', methods=['POST'])
 def mini_profile_api():
@@ -129,55 +140,122 @@ def mini_leaderboard_api():
     rows.sort(key=lambda x: (x['exp'], x['balance']), reverse=True)
     return jsonify({'ok': True, 'rows': rows[:20]})
 
+MINIAPP_MINES_CONFIG = {
+    'easy': {'rows': 9, 'cols': 9, 'mines': 10, 'reward': 250},
+    'medium': {'rows': 16, 'cols': 16, 'mines': 40, 'reward': 1000},
+    'hard': {'rows': 24, 'cols': 16, 'mines': 80, 'reward': 2500},
+    'insane': {'rows': 30, 'cols': 20, 'mines': 150, 'reward': 6000},
+}
+MINIAPP_SNAKE_CONFIG = {
+    'easy': {'cols': 10, 'rows': 10, 'step_ms': 180, 'apple_reward': 10},
+    'medium': {'cols': 15, 'rows': 15, 'step_ms': 145, 'apple_reward': 25},
+    'hard': {'cols': 20, 'rows': 16, 'step_ms': 115, 'apple_reward': 50},
+    'insane': {'cols': 26, 'rows': 20, 'step_ms': 90, 'apple_reward': 100},
+}
+
 @app.route('/api/mini/game/start', methods=['POST'])
 def mini_game_start_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    game=str(payload.get('game','')).lower()
-    if game not in {'mines','snake','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
-    difficulty=str(payload.get('difficulty','easy')).lower()
-    mines_cfg={'easy':{'rows':9,'cols':9,'mines':10,'reward':250},'medium':{'rows':16,'cols':16,'mines':40,'reward':1000},'hard':{'rows':16,'cols':24,'mines':80,'reward':2500},'insane':{'rows':20,'cols':30,'mines':150,'reward':6000}}
-    if game=='mines' and difficulty not in mines_cfg: return jsonify({'ok':False,'error':'unknown_difficulty'}),400
-    uid=int(user['id']); now=time.time()
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    game = str(payload.get('game', '')).lower()
+    if game not in {'mines', 'snake', '2048', 'reaction', 'shooter'}:
+        return jsonify({'ok': False, 'error': 'unknown_game'}), 400
+    difficulty = str(payload.get('difficulty', 'easy')).lower()
+    if game == 'mines' and difficulty not in MINIAPP_MINES_CONFIG:
+        return jsonify({'ok': False, 'error': 'unknown_difficulty'}), 400
+    if game == 'snake' and difficulty not in MINIAPP_SNAKE_CONFIG:
+        return jsonify({'ok': False, 'error': 'unknown_difficulty'}), 400
+
+    uid = int(user['id'])
+    now = time.time()
     with MINIAPP_LOCK:
-        for old_id,old in list(MINIAPP_GAMES.items()):
-            if now-float(old.get('started',now))>45*60: MINIAPP_GAMES.pop(old_id,None)
-            elif old.get('user_id')==uid: MINIAPP_GAMES.pop(old_id,None)
-        gid=secrets.token_urlsafe(16)
-        MINIAPP_GAMES[gid]={'user_id':uid,'game':game,'difficulty':difficulty,'started':now,'last_activity':now}
-    out={'ok':True,'game_id':gid}
-    if game=='mines': out['difficulty']=mines_cfg[difficulty]
+        for old_id, old in list(MINIAPP_GAMES.items()):
+            if now - float(old.get('started', now)) > 45 * 60:
+                MINIAPP_GAMES.pop(old_id, None)
+            elif old.get('user_id') == uid:
+                MINIAPP_GAMES.pop(old_id, None)
+        gid = secrets.token_urlsafe(16)
+        MINIAPP_GAMES[gid] = {
+            'user_id': uid,
+            'game': game,
+            'difficulty': difficulty,
+            'started': now,
+            'last_activity': now,
+        }
+    out = {'ok': True, 'game_id': gid}
+    if game == 'mines':
+        out['difficulty'] = MINIAPP_MINES_CONFIG[difficulty]
+    elif game == 'snake':
+        out['difficulty'] = MINIAPP_SNAKE_CONFIG[difficulty]
     return jsonify(out)
 
 @app.route('/api/mini/game/finish', methods=['POST'])
 def mini_game_finish_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    gid=str(payload.get('game_id',''))
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    gid = str(payload.get('game_id', ''))
     try:
-        score=max(0,min(int(payload.get('score',0) or 0),100000))
-        won=bool(payload.get('won',False))
+        score = max(0, min(int(payload.get('score', 0) or 0), 100000))
+        won = bool(payload.get('won', False))
     except Exception:
-        score=0
-        won=False
-    with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
-    if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
-    elapsed=time.time()-float(game['started'])
-    if elapsed<0.8: return jsonify({'ok':False,'error':'too_fast'}),400
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
-    game_name=game['game']; caps={'mines':6000,'snake':2000,'2048':2500,'reaction':500,'shooter':2500}
-    max_score={'snake':max(0,int(elapsed/0.12*2)),'reaction':5000,'shooter':max(50,int(elapsed*8)),'2048':max(100,int(elapsed*120)),'mines':100000}
-    score=min(score,max_score.get(game_name,100000))
-    if game_name=='mines': reward_caps={'easy':250,'medium':1000,'hard':2500,'insane':6000}; reward=reward_caps.get(game.get('difficulty','easy'),250) if (won and score>0) else 0
-    elif game_name=='reaction': reward=max(0,min(500,500-max(0,score-250))) if 0<score<=1000 else 0
-    else: reward=min(caps[game_name],max(0,score//10))
-    econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
-    records=econ.setdefault('mini_records',{}); old=int(records.get(game_name,0) or 0)
-    if score>old: records[game_name]=score
-    if won and score>0: econ['mini_games_wins']=int(econ.get('mini_games_wins',0) or 0)+1
-    if reward: econ['balance']=int(econ.get('balance',0) or 0)+reward
-    mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok':True,'reward':reward,'record':records.get(game_name,score)})
+        score = 0
+        won = False
+
+    with MINIAPP_LOCK:
+        game = MINIAPP_GAMES.pop(gid, None)
+    if not game or game['user_id'] != int(user['id']):
+        return jsonify({'ok': False, 'error': 'invalid_game'}), 400
+
+    elapsed = time.time() - float(game['started'])
+    if elapsed < 0.8:
+        return jsonify({'ok': False, 'error': 'too_fast'}), 400
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    game_name = game['game']
+    difficulty = game.get('difficulty', 'easy')
+    caps = {'mines': 6000, 'snake': 2000, '2048': 2500, 'reaction': 500, 'shooter': 1500}
+    if game_name == 'snake':
+        step_ms = MINIAPP_SNAKE_CONFIG.get(difficulty, MINIAPP_SNAKE_CONFIG['easy'])['step_ms']
+        max_score = max(1, int((elapsed * 1000) / step_ms) + 3)
+    elif game_name == 'reaction':
+        max_score = 500
+    elif game_name == 'shooter':
+        max_score = min(10, max(1, int(elapsed * 2) + 1))
+    elif game_name == '2048':
+        max_score = max(100, int(elapsed * 120))
+    else:
+        max_score = 100000
+    score = min(score, max_score)
+
+    if game_name == 'mines':
+        reward = MINIAPP_MINES_CONFIG.get(difficulty, MINIAPP_MINES_CONFIG['easy'])['reward'] if won and score > 0 else 0
+    elif game_name == 'snake':
+        reward = min(caps['snake'], score * MINIAPP_SNAKE_CONFIG.get(difficulty, MINIAPP_SNAKE_CONFIG['easy'])['apple_reward'])
+    elif game_name == 'reaction':
+        reward = min(caps['reaction'], max(0, score))
+    elif game_name == '2048':
+        reward = min(caps['2048'], max(0, score // 5))
+    else:  # shooter
+        reward = min(caps['shooter'], max(0, score * 15))
+
+    econ['mini_games_played'] = int(econ.get('mini_games_played', 0) or 0) + 1
+    records = econ.setdefault('mini_records', {})
+    old = int(records.get(game_name, 0) or 0)
+    if score > old:
+        records[game_name] = score
+    if won and score > 0:
+        econ['mini_games_wins'] = int(econ.get('mini_games_wins', 0) or 0) + 1
+    if reward:
+        econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+    mark_dirty()
+    save_data(send_backup=False)
+    return jsonify({'ok': True, 'reward': reward, 'score': score, 'record': records.get(game_name, score)})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
@@ -422,7 +500,7 @@ PREMIUM_EMOJI_ALTS = {
     "5211052776213198370": "😵‍💫", "5316736601219425876": "🤍",
     "5316785439292547859": "🖤", "5449468596952507859": "💜",
     "5449759615346548186": "💙", "5222325171284622461": "🩷",
-    "5215211631700622222": "😵‍💫", "5348466539702001502": "🌈",
+    "5215211631700622222": "🐭", "5348466539702001502": "🌈",
     "5465173398273413127": "🦄", "5470088387048266598": "🐉",
     "5445096582238181549": "🦋", "5276289730256842699": "🐺",
     "5373250605533896134": "🐈‍⬛", "5280947338821524402": "🌹",
@@ -431,24 +509,19 @@ PREMIUM_EMOJI_ALTS = {
     "54295027628722231956": "🏅",
 }
 PREMIUM_EMOJI_METADATA_LOADED = False
-PREMIUM_EMOJI_METADATA_LOCK = threading.Lock()
+PREMIUM_EMOJI_RUNTIME_ALTS = {}
+PREMIUM_EMOJI_RUNTIME_LOCK = threading.RLock()
+PREMIUM_EMOJI_RUNTIME_READY = set()
 
 
 def _valid_custom_emoji_id(emoji_id):
-    """Telegram custom_emoji_id is a 64-bit signed integer string.
-    Invalid/overflowing IDs must never be sent to Bot API.
-    """
-    try:
-        value = int(str(emoji_id))
-        return 0 < value <= 9223372036854775807
-    except (TypeError, ValueError):
-        return False
+    """Telegram exposes custom_emoji_id as a string; keep the full ID intact."""
+    value = str(emoji_id or '').strip()
+    return bool(value) and bool(re.fullmatch(r'\d+', value))
 
 
 def _is_premium_markup_error(exc):
-    """Return True only for errors where removing tg-emoji markup is a safe retry.
-    Network/timeouts must not be retried automatically because that can duplicate a message.
-    """
+    """Only markup/emoji parse errors are safe to retry as plain text."""
     code = getattr(exc, 'error_code', None)
     description = str(getattr(exc, 'description', exc)).lower()
     return code == 400 and any(token in description for token in (
@@ -457,29 +530,74 @@ def _is_premium_markup_error(exc):
     ))
 
 
-def load_premium_emoji_metadata():
-    """Оставлено для совместимости со старым кодом.
+def _load_premium_emoji_metadata():
+    """Load exact custom-emoji alternatives from Telegram once at startup.
 
-    Важно: здесь НЕТ сетевого запроса. Ранее вызов Bot API во время обработки
-    первой команды мог задерживать/ломать команды. Для известных ID используем
-    проверенные alt-значения из наборов; Telegram требует, чтобы alt совпадал
-    с исходным emoji custom emoji.
+    Telegram's Bot API exposes getCustomEmojiStickers and accepts up to 200 IDs per
+    request. Using the returned Sticker.emoji avoids guessed alternative emoji.
     """
     global PREMIUM_EMOJI_METADATA_LOADED
-    PREMIUM_EMOJI_METADATA_LOADED = True
-    return
+    if not TOKEN:
+        return
+    ids=[]
+    seen=set()
+    for raw in PREMIUM_EMOJI_IDS.values():
+        raw=str(raw)
+        if raw in seen or not _valid_custom_emoji_id(raw):
+            continue
+        seen.add(raw)
+        ids.append(raw)
+    if not ids:
+        PREMIUM_EMOJI_METADATA_LOADED = True
+        return
+    try:
+        payload=json.dumps({'custom_emoji_ids': ids}, ensure_ascii=False).encode('utf-8')
+        req=UrlRequest(
+            f'https://api.telegram.org/bot{TOKEN}/getCustomEmojiStickers',
+            data=payload,
+            headers={'Content-Type':'application/json'},
+            method='POST'
+        )
+        with urlopen(req, timeout=10) as response:
+            data=json.loads(response.read().decode('utf-8'))
+        if not data.get('ok'):
+            raise RuntimeError(data.get('description','getCustomEmojiStickers failed'))
+        loaded=0
+        with PREMIUM_EMOJI_RUNTIME_LOCK:
+            for sticker in data.get('result',[]) or []:
+                sid=str(sticker.get('custom_emoji_id',''))
+                alt=str(sticker.get('emoji','') or '')
+                if _valid_custom_emoji_id(sid) and alt:
+                    PREMIUM_EMOJI_RUNTIME_ALTS[sid]=alt
+                    PREMIUM_EMOJI_RUNTIME_READY.add(sid)
+                    loaded+=1
+            PREMIUM_EMOJI_METADATA_LOADED=True
+        print(f'[PREMIUM EMOJI] Loaded exact metadata for {loaded}/{len(ids)} IDs from Telegram.')
+    except Exception as exc:
+        print(f'[PREMIUM EMOJI] Metadata load failed; static verified alts remain active: {exc}')
+        PREMIUM_EMOJI_METADATA_LOADED = False
+
+
+def load_premium_emoji_metadata():
+    """Load custom emoji metadata before Telegram polling starts."""
+    if not PREMIUM_EMOJI_METADATA_LOADED:
+        _load_premium_emoji_metadata()
 
 
 def premium_emoji(name, fallback="✨"):
-    """Возвращает Telegram Custom Emoji в HTML-формате с корректным alt."""
     key = PREMIUM_EMOJI_ALIASES.get(name, name)
     emoji_id = PREMIUM_EMOJI_IDS.get(key)
     if not emoji_id or not _valid_custom_emoji_id(emoji_id):
         return fallback
-
-    # Метаданные загружаются лениво после создания bot.
-    alt = PREMIUM_EMOJI_ALTS.get(str(emoji_id), fallback)
-    return f'<tg-emoji emoji-id="{html.escape(str(emoji_id))}">{html.escape(str(alt))}</tg-emoji>'
+    sid=str(emoji_id)
+    with PREMIUM_EMOJI_RUNTIME_LOCK:
+        alt=PREMIUM_EMOJI_RUNTIME_ALTS.get(sid)
+    if not alt:
+        alt=PREMIUM_EMOJI_ALTS.get(sid)
+    if not alt:
+        # Do not send guessed custom emoji markup before Telegram metadata is known.
+        return fallback
+    return f'<tg-emoji emoji-id="{html.escape(sid)}">{html.escape(str(alt))}</tg-emoji>'
 
 
 def premium_emoji_id(name):
@@ -543,27 +661,42 @@ def format_large_numbers(text):
 
 
 def apply_global_premium_emojis(text):
-    """Заменяет UI-эмодзи на Custom Emoji в HTML-сообщениях."""
+    """Replace each known emoji exactly once, without recursively rewriting inserted alt text."""
     if not isinstance(text, str) or not text:
         return text
-
-    # Сначала форматируем числа, затем защищаем HTML-теги. Это даёт единый
-    # вид 1,000,000 по всему интерфейсу и не меняет custom_emoji_id внутри тегов.
     text = format_large_numbers(text)
 
-    protected = []
+    protected=[]
     def protect(match):
         protected.append(match.group(0))
-        return f"\x00TGEMOJI{len(protected)-1}\x00"
+        return f'\x00TGEMOJI{len(protected)-1}\x00'
 
+    # Existing custom-emoji entities must never be touched again.
     text = re.sub(r'<tg-emoji\b[^>]*>.*?</tg-emoji>', protect, text, flags=re.DOTALL)
 
-    for emoji in sorted(GLOBAL_PREMIUM_EMOJI_MAP, key=len, reverse=True):
-        alias = GLOBAL_PREMIUM_EMOJI_MAP[emoji]
-        text = text.replace(emoji, premium_emoji(alias, emoji))
+    mapping=dict(GLOBAL_PREMIUM_EMOJI_MAP)
+    with PREMIUM_EMOJI_RUNTIME_LOCK:
+        runtime_items=list(PREMIUM_EMOJI_RUNTIME_ALTS.items())
+    reverse={}
+    for sid, alt in runtime_items:
+        reverse.setdefault(alt, sid)
+    id_to_alias={str(v):k for k,v in PREMIUM_EMOJI_IDS.items() if _valid_custom_emoji_id(v)}
+    for alt,sid in reverse.items():
+        alias=id_to_alias.get(str(sid))
+        if alias:
+            mapping[alt]=alias
+
+    keys=sorted(mapping, key=len, reverse=True)
+    if keys:
+        pattern=re.compile('|'.join(re.escape(k) for k in keys))
+        def replace(match):
+            emoji=match.group(0)
+            alias=mapping[emoji]
+            return premium_emoji(alias, emoji)
+        text=pattern.sub(replace, text)
 
     for i, tag in enumerate(protected):
-        text = text.replace(f"\x00TGEMOJI{i}\x00", tag)
+        text=text.replace(f'\x00TGEMOJI{i}\x00', tag)
     return text
 
 
@@ -584,8 +717,14 @@ def _patch_telegram_text_methods():
     def _transform(text):
         return apply_global_premium_emojis(text)
 
+    def _html_requested(args, kwargs):
+        mode=kwargs.get('parse_mode')
+        if mode is None and args:
+            mode=args[0]
+        return str(mode or '').upper() == 'HTML'
+
     def send_message(chat_id, text, *args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML':
+        if _html_requested(args, kwargs):
             original_text = text
             transformed = _transform(text)
             try:
@@ -598,7 +737,7 @@ def _patch_telegram_text_methods():
         return original_send_message(chat_id, text, *args, **kwargs)
 
     def reply_to(message, text, *args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML':
+        if _html_requested(args, kwargs):
             original_text = text
             transformed = _transform(text)
             try:
@@ -611,7 +750,7 @@ def _patch_telegram_text_methods():
         return original_reply_to(message, text, *args, **kwargs)
 
     def edit_message_text(text, *args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML':
+        if _html_requested(args, kwargs):
             original_text = text
             transformed = _transform(text)
             try:
@@ -624,7 +763,7 @@ def _patch_telegram_text_methods():
         return original_edit_text(text, *args, **kwargs)
 
     def edit_message_caption(*args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML':
+        if _html_requested(args, kwargs):
             original_args = tuple(args)
             original_kwargs = dict(kwargs)
             call_args = list(args)
@@ -644,7 +783,7 @@ def _patch_telegram_text_methods():
         return original_edit_caption(*args, **kwargs)
 
     def _media_sender(original, chat_id, media, *args, **kwargs):
-        if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
+        if _html_requested(args, kwargs) and 'caption' in kwargs:
             original_caption = kwargs['caption']
             kwargs['caption'] = _transform(original_caption)
             try:
@@ -3496,7 +3635,7 @@ def random_chat_drops_worker():
             with CALLBACK_STATE_LOCK:
                 active_drops[drop_id] = {'chat_id': target_chat, 'reward': reward, 'claimed': False}
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🎁 Забрать подарок! 😻", callback_data=f"claim_{drop_id}"))
+            markup.add(InlineKeyboardButton("🎁 Забрать подарок! 😻", callback_data=f"claim_drop_{drop_id}"))
             msg_text = (
                 "📦 <b>ВНЕЗАПНЫЙ ДРОП В ЧАТЕ!</b> 😺\n"
                 "──────────────────────\n"
@@ -6180,12 +6319,12 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
 
     uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"👮 Антифлуд для админов: {flood_admin_status}", callback_data=f"toggle_flood_admins{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
+    markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp:{user_id}"))
+    markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood:{user_id}"))
+    markup.add(InlineKeyboardButton(f"👮 Антифлуд для админов: {flood_admin_status}", callback_data=f"toggle_flood_admins:{user_id}"))
+    markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions:{user_id}"))
+    markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome:{user_id}"))
+    markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time:{user_id}"))
 
     text = (
         f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺\n"
@@ -7483,18 +7622,18 @@ def render_top_menu(chat_id, user_id=None, category='rich', message_id=None):
     uid_tag = f":{user_id}" if user_id else ""
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("💰 Богачи", callback_data=f"top_cat_rich{uid_tag}"),
-        InlineKeyboardButton("🍆 Писюн", callback_data=f"top_cat_dick{uid_tag}")
+        InlineKeyboardButton("💰 Богачи", callback_data=f"top_cat_rich:{user_id}"),
+        InlineKeyboardButton("🍆 Писюн", callback_data=f"top_cat_dick:{user_id}")
     )
     markup.add(
-        InlineKeyboardButton("🧠 IQ", callback_data=f"top_cat_iq{uid_tag}"),
-        InlineKeyboardButton("⚖️ Карма", callback_data=f"top_cat_karma{uid_tag}")
+        InlineKeyboardButton("🧠 IQ", callback_data=f"top_cat_iq:{user_id}"),
+        InlineKeyboardButton("⚖️ Карма", callback_data=f"top_cat_karma:{user_id}")
     )
     markup.add(
-        InlineKeyboardButton("🦶 Пятки", callback_data=f"top_cat_foot{uid_tag}"),
-        InlineKeyboardButton("🧬 Хромосомы", callback_data=f"top_cat_chr{uid_tag}")
+        InlineKeyboardButton("🦶 Пятки", callback_data=f"top_cat_foot:{user_id}"),
+        InlineKeyboardButton("🧬 Хромосомы", callback_data=f"top_cat_chr:{user_id}")
     )
-    markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg{uid_tag}"))
+    markup.add(InlineKeyboardButton("💬 Сообщения (Актив)", callback_data=f"top_cat_msg:{user_id}"))
 
     # Только пользователи, которые были замечены в этом чате. Для старых
     # аккаунтов без chat_ids оставляем их вне чатового топа до следующего сообщения.
@@ -10751,6 +10890,8 @@ def callback_inline(call):
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🎉 Вы приобрели {h_info['name']}! 😻", show_alert=True)
                 render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            else:
+                bot.answer_callback_query(call.id, '❌ Дом не найден.', show_alert=True)
             return
 
         elif action_data.startswith('buy_furn_'):
@@ -10759,7 +10900,9 @@ def callback_inline(call):
                 f_info = FAMILY_FURNITURE[f_k]
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 m = econ.get('marriage')
-                if not m: return
+                if not m:
+                    bot.answer_callback_query(call.id, '❌ Только для пар в браке!', show_alert=True)
+                    return
                 furn_list = m.setdefault('furniture', [])
                 if f_k in furn_list:
                     bot.answer_callback_query(call.id, "❌ Этот предмет мебели уже куплен!", show_alert=True)
@@ -10775,6 +10918,8 @@ def callback_inline(call):
                 mark_dirty()
                 bot.answer_callback_query(call.id, f"🛋 Куплена мебель: {f_info['name']}! 😻", show_alert=True)
                 render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            else:
+                bot.answer_callback_query(call.id, '❌ Предмет мебели не найден.', show_alert=True)
             return
 
         elif action_data == 'house_refresh':
@@ -10785,12 +10930,16 @@ def callback_inline(call):
         # САД: НЕСКОЛЬКО ГРЯДОК
         elif action_data.startswith('water_slot_') or action_data.startswith('fertilize_slot_') or action_data.startswith('harvest_slot_') or action_data.startswith('uproot_slot_'):
             m=re.match(r'(water|fertilize|harvest|uproot)_slot_(\d+)$',action_data)
-            if not m: return
+            if not m:
+                bot.answer_callback_query(call.id, '❌ Некорректная грядка.', show_alert=True)
+                return
             idx=int(m.group(2)); econ=get_user_econ(user_id,user_name,username=user_username); slots=econ.get('garden') or []
             if not isinstance(slots,list): slots=[slots]
             if idx<0 or idx>=len(slots): bot.answer_callback_query(call.id,'Грядка уже исчезла.',show_alert=True); return
             g=slots[idx]; seed=GARDEN_SEEDS.get(g.get('seed'))
-            if not seed: return
+            if not seed:
+                bot.answer_callback_query(call.id, '❌ Растение больше не существует.', show_alert=True)
+                return
             if m.group(1)=='water':
                 if econ['balance']<15: bot.answer_callback_query(call.id,'Нужно 15 🪙!',show_alert=True); return
                 if g.get('water_count',0)>=seed['water_req']: bot.answer_callback_query(call.id,'Земля уже достаточно влажная.',show_alert=True); return
@@ -10820,7 +10969,9 @@ def callback_inline(call):
             econ=get_user_econ(user_id,user_name,username=user_username)
             if econ.get('public_business'):
                 bot.answer_callback_query(call.id,'У вас уже есть публичный бизнес!',show_alert=True); return
-            if b_id not in BUSINESSES: return
+            if b_id not in BUSINESSES:
+                bot.answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
+                return
             price=max(3000,BUSINESSES[b_id]['price']*2)
             if econ['balance']<price:
                 bot.answer_callback_query(call.id,f'Нужно {price:,} 🪙!',show_alert=True); return
@@ -10830,7 +10981,9 @@ def callback_inline(call):
             mark_dirty(); bot.answer_callback_query(call.id,'🏢 Публичный бизнес создан!'); render_public_business_view(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data.startswith('pubbiz_join_'):
             owner_id=int(action_data.replace('pubbiz_join_',''))
-            if owner_id==user_id: return
+            if owner_id==user_id:
+                bot.answer_callback_query(call.id, '❌ Нельзя устроиться к самому себе.', show_alert=True)
+                return
             owner=get_user_econ(owner_id)
             pb=owner.get('public_business')
             workers=owner.setdefault('public_business_workers',[])
@@ -10847,7 +11000,9 @@ def callback_inline(call):
             mark_dirty(); bot.answer_callback_query(call.id,'💼 Вы устроились на работу! Зарплата будет доступна через 3 дня.'); render_public_jobs(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data == 'pubbiz_pay':
             econ=get_user_econ(user_id,user_name,username=user_username); pb=econ.get('public_business'); workers=econ.get('public_business_workers',[])
-            if not pb or not workers: return
+            if not pb or not workers:
+                bot.answer_callback_query(call.id, '❌ Сначала создайте бизнес и наймите сотрудников.', show_alert=True)
+                return
             if time.time()-pb.get('last_salary',0)<3*86400:
                 left=cooldown_text(pb.get('last_salary',0),3*86400,econ); bot.answer_callback_query(call.id,f'⏳ Следующая выплата через {left}.',show_alert=True); return
             total=0; bonus=1+pet_bonus(econ,'business_bonus')+get_title_business_bonus(econ)+get_vip_business_bonus(econ)
@@ -10860,7 +11015,9 @@ def callback_inline(call):
             render_pet_clothes(chat_id,user_id,user_name,call.message.message_id); bot.answer_callback_query(call.id); return
         elif action_data.startswith('petcloth_buy_'):
             k=action_data.replace('petcloth_buy_',''); v=PET_CLOTHES.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
-            if not v: return
+            if not v:
+                bot.answer_callback_query(call.id, '❌ Такая одежда не найдена.', show_alert=True)
+                return
             if not econ.get('pet'):
                 bot.answer_callback_query(call.id,'❌ Сначала заведите питомца!',show_alert=True); return
             if k in econ.setdefault('pet_clothes',[]): bot.answer_callback_query(call.id,'Уже куплено!',show_alert=True); return
@@ -10869,11 +11026,12 @@ def callback_inline(call):
         elif action_data.startswith('petcloth_equip_'):
             k=action_data.replace('petcloth_equip_',''); econ=get_user_econ(user_id,user_name,username=user_username)
             if k in econ.setdefault('pet_clothes',[]): econ['equipped_pet_clothes']=k; mark_dirty(); bot.answer_callback_query(call.id,'👗 Одежда надета!'); render_pet_clothes(chat_id,user_id,user_name,call.message.message_id)
+            else: bot.answer_callback_query(call.id, '❌ Эта одежда не куплена.', show_alert=True)
             return
         elif action_data == 'garden_seeds':
             markup=InlineKeyboardMarkup(row_width=2)
             for k,v in GARDEN_SEEDS.items(): markup.add(InlineKeyboardButton(f"{v['emoji']} {v['price']} 🪙",callback_data=f"garden_buy_{k}:{user_id}"))
-            bot.edit_message_text('🌱 <b>ВЫБЕРИТЕ РАСТЕНИЕ</b>',chat_id=chat_id,message_id=call.message.message_id,reply_markup=markup,parse_mode='HTML'); return
+            bot.edit_message_text('🌱 <b>ВЫБЕРИТЕ РАСТЕНИЕ</b>',chat_id=chat_id,message_id=call.message.message_id,reply_markup=markup,parse_mode='HTML'); bot.answer_callback_query(call.id); return
         elif action_data.startswith('garden_buy_'):
             k=action_data.replace('garden_buy_',''); v=GARDEN_SEEDS.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
             slots=econ.get('garden') or []; slots=slots if isinstance(slots,list) else [slots]
@@ -10882,13 +11040,20 @@ def callback_inline(call):
             econ['balance']-=v['price']; slots.append({'seed':k,'planted_at':time.time(),'water_count':0,'last_dry_calc':time.time()}); econ['garden']=slots; mark_dirty(); bot.answer_callback_query(call.id,'🌱 Растение посажено!'); render_garden_view(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data.startswith('home_buy_'):
             k=action_data.replace('home_buy_',''); h=PERSONAL_HOUSES.get(k); econ=get_user_econ(user_id,user_name,username=user_username)
-            if not h or econ.get('home') or econ.get('home_installment'): return
+            if not h:
+                bot.answer_callback_query(call.id, '❌ Дом не найден.', show_alert=True)
+                return
+            if econ.get('home') or econ.get('home_installment'):
+                bot.answer_callback_query(call.id, '❌ У вас уже есть дом или активная рассрочка.', show_alert=True)
+                return
             down=int(h['price']*0.25); remaining=h['price']-down; payment=max(1,remaining//8)
             if econ['balance']<down: bot.answer_callback_query(call.id,f'Первый взнос: {down:,} 🪙',show_alert=True); return
             econ['balance']-=down; econ['home_installment']={'id':k,'remaining':remaining,'payment':payment,'next_due':time.time()+2*86400,'down':down}; mark_dirty(); bot.answer_callback_query(call.id,'🏠 Дом оформлен в рассрочку!'); render_personal_home(chat_id,user_id,user_name,call.message.message_id); return
         elif action_data == 'home_pay':
             econ=get_user_econ(user_id,user_name,username=user_username); inst=econ.get('home_installment')
-            if not inst: return
+            if not inst:
+                bot.answer_callback_query(call.id, '❌ Активной рассрочки нет.', show_alert=True)
+                return
             if time.time()<inst.get('next_due',0): bot.answer_callback_query(call.id,'⏳ Следующий платёж ещё не наступил.',show_alert=True); return
             pay=min(inst['payment'],inst['remaining'])
             if econ['balance']<pay: bot.answer_callback_query(call.id,f'Нужно {pay:,} 🪙!',show_alert=True); return
@@ -10902,7 +11067,9 @@ def callback_inline(call):
             if not game: bot.answer_callback_query(call.id,'Игра завершена.',show_alert=True); return
             uid=user_id
             if action_data.startswith('mono_join'):
-                if game['started']: return
+                if game['started']:
+                    bot.answer_callback_query(call.id, '❌ Игра уже началась.', show_alert=True)
+                    return
                 if uid not in game['players'] and len(game['players'])<6: game['players'][uid]={'name':user_name,'money':30000,'pos':0}
                 render_monopoly(chat_id,game,call.message.message_id); bot.answer_callback_query(call.id); return
             if action_data.startswith('mono_start'):
@@ -10922,7 +11089,10 @@ def callback_inline(call):
                 if player['money']<cell[1]: bot.answer_callback_query(call.id,'Недостаточно денег.',show_alert=True); return
                 player['money']-=cell[1]; game['owners'][idx]=uid; bot.answer_callback_query(call.id,f'🏠 Куплено: {cell[0]}');
             elif action_data.startswith('mono_skip'):
-                pass
+                bot.answer_callback_query(call.id)
+            else:
+                bot.answer_callback_query(call.id, '❌ Неизвестное действие Monopoly.', show_alert=True)
+
             ids=list(game['players']); pos=ids.index(uid); game['turn']=ids[(pos+1)%len(ids)]; render_monopoly(chat_id,game,call.message.message_id); return
 
         # АПТЕКА: КНОПКИ
@@ -10947,6 +11117,8 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"💊 Препарат куплен, но у вас другой диагноз! 😸")
                 mark_dirty()
                 render_pharmacy_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+            else:
+                bot.answer_callback_query(call.id, '❌ Препарат не найден.', show_alert=True)
             return
 
         # ХЕЛЛОУИН BATTLE PASS: КНОПКИ
@@ -11199,6 +11371,8 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {pack['stars']} ⭐️ выставлен!")
                 except Exception as e:
                     bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, '❌ Пакет коинов не найден.', show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: VIP PASS
@@ -11224,6 +11398,8 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
                 except Exception as e:
                     bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, '❌ VIP Pass не найден.', show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: КОСМЕТИКА И СТАТУС
@@ -11249,6 +11425,8 @@ def callback_inline(call):
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
                 except Exception as e:
                     bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, '❌ Товар магазина не найден.', show_alert=True)
             return
 
         if action_data == 'shop_main':
@@ -11340,8 +11518,13 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "🌱 Сад обновлён: выберите конкретную грядку.")
                 render_garden_view(chat_id, user_id, user_name, call.message.message_id)
                 return
-            if not garden: return
-            seed_info = GARDEN_SEEDS[garden['seed']]
+            if not garden:
+                bot.answer_callback_query(call.id, '🌱 Сейчас ничего не посажено.', show_alert=True)
+                return
+            seed_info = GARDEN_SEEDS.get(garden.get('seed'))
+            if not seed_info:
+                bot.answer_callback_query(call.id, '❌ Растение больше не существует.', show_alert=True)
+                return
             
             now = time.time()
             last_dry_calc = garden.get('last_dry_calc', garden.get('planted_at', now))
@@ -11601,6 +11784,7 @@ def callback_inline(call):
                 refresh_durak_group_board(game_id)
                 sync_durak_pm(game_id)
                 active_durak.pop(game_id, None)
+                bot.answer_callback_query(call.id, '🏁 Игра окончена!')
                 return
 
             refresh_durak_group_board(game_id)
@@ -11611,7 +11795,9 @@ def callback_inline(call):
         elif action_data.startswith('durak_take_'):
             game_id = action_data.replace('durak_take_', '')
             game = active_durak.get(game_id)
-            if not game: return
+            if not game:
+                bot.answer_callback_query(call.id, '❌ Игра уже завершена.', show_alert=True)
+                return
             p_idx = next((i for i, pl in enumerate(game['players']) if pl['id'] == user_id), None)
             if p_idx != game['defender_idx']:
                 bot.answer_callback_query(call.id, "Только защищающийся может взять карты!", show_alert=True)
@@ -11643,7 +11829,9 @@ def callback_inline(call):
         elif action_data.startswith('durak_bito_'):
             game_id = action_data.replace('durak_bito_', '')
             game = active_durak.get(game_id)
-            if not game: return
+            if not game:
+                bot.answer_callback_query(call.id, '❌ Игра уже завершена.', show_alert=True)
+                return
             players_now = game.get('players', [])
             attacker_idx = int(game.get('attacker_idx', 0))
             if attacker_idx < 0 or attacker_idx >= len(players_now) or players_now[attacker_idx].get('id') != user_id:
@@ -11699,6 +11887,7 @@ def callback_inline(call):
                 except Exception:
                     pass
                 del active_brick[game_id]
+                bot.answer_callback_query(call.id, '💥 Кирпич сорвался — ставка потеряна.', show_alert=True)
                 return
 
             game['step'] = step + 1
@@ -11951,8 +12140,13 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, "🌱 Сад обновлён: выберите конкретную грядку.")
                 render_garden_view(chat_id, user_id, user_name, call.message.message_id)
                 return
-            if not garden: return
-            seed_info = GARDEN_SEEDS[garden['seed']]
+            if not garden:
+                bot.answer_callback_query(call.id, '🌱 Сейчас ничего не посажено.', show_alert=True)
+                return
+            seed_info = GARDEN_SEEDS.get(garden.get('seed'))
+            if not seed_info:
+                bot.answer_callback_query(call.id, '❌ Растение больше не существует.', show_alert=True)
+                return
             elapsed = time.time() - garden['planted_at']
             if elapsed < seed_info['grow_time']:
                 bot.answer_callback_query(call.id, "❌ Урожай еще не созрел! 😿", show_alert=True)
@@ -12144,6 +12338,7 @@ def callback_inline(call):
                 try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_mines[game_id]
+                bot.answer_callback_query(call.id, '💥 Мина! Игра окончена.', show_alert=True)
                 return
             else:
                 game['revealed'].add(cell_idx)
@@ -12168,6 +12363,7 @@ def callback_inline(call):
                     try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_mines[game_id]
+                    bot.answer_callback_query(call.id, '🏆 Поле полностью очищено!', show_alert=True)
                     return
 
                 text_board, markup = render_mines_board(game_id)
@@ -12200,6 +12396,7 @@ def callback_inline(call):
             try: bot.edit_message_text(cash_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             del active_mines[game_id]
+            bot.answer_callback_query(call.id, '💰 Куш забран!', show_alert=True)
 
         elif action_data.startswith('mcancel_'):
             game_id = action_data.replace('mcancel_', '')
@@ -12249,12 +12446,19 @@ def callback_inline(call):
                 text_board, markup = render_classic_mines_board(game_id)
                 try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
+                bot.answer_callback_query(call.id, '🎮 Классический сапёр запущен!')
+            else:
+                bot.answer_callback_query(call.id, '❌ Такой уровень сапёра не найден.', show_alert=True)
 
         elif action_data.startswith('cmmode_'):
             game_id = action_data.replace('cmmode_', '')
             game = active_c_mines.get(game_id)
-            if not game or game.get('finished'): return
-            if user_id != game['user_id']: return
+            if not game or game.get('finished'):
+                bot.answer_callback_query(call.id, '❌ Игра уже завершена.', show_alert=True)
+                return
+            if user_id != game['user_id']:
+                bot.answer_callback_query(call.id, '❌ Это не ваша игра!', show_alert=True)
+                return
 
             game['mode'] = 'flag' if game.get('mode', 'dig') == 'dig' else 'dig'
             bot.answer_callback_query(call.id, "🚩 Режим флага" if game['mode'] == 'flag' else "⛏ Режим копания")
@@ -12285,7 +12489,9 @@ def callback_inline(call):
                 return
 
             if game.get('mode') == 'flag':
-                if cell_idx in game['revealed']: return
+                if cell_idx in game['revealed']:
+                    bot.answer_callback_query(call.id, '❌ Открытую клетку нельзя пометить флагом.', show_alert=True)
+                    return
                 if cell_idx in game['flags']: game['flags'].remove(cell_idx)
                 else: game['flags'].add(cell_idx)
                 text_board, markup = render_classic_mines_board(game_id)
@@ -12319,6 +12525,7 @@ def callback_inline(call):
                 try: bot.edit_message_text(loss_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_c_mines[game_id]
+                bot.answer_callback_query(call.id, '💥 Мина! Игра окончена.', show_alert=True)
                 return
 
             reveal_cascade_cells(game, cell_idx)
@@ -12336,6 +12543,7 @@ def callback_inline(call):
                 try: bot.edit_message_text(win_text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
                 del active_c_mines[game_id]
+                bot.answer_callback_query(call.id, '🏆 Поле полностью очищено!', show_alert=True)
                 return
 
             text_board, markup = render_classic_mines_board(game_id)
@@ -12347,7 +12555,9 @@ def callback_inline(call):
         elif action_data == 'pet_feed':
             econ = get_user_econ(user_id, user_name, username=user_username)
             pet = econ.get('pet')
-            if not pet: return
+            if not pet:
+                bot.answer_callback_query(call.id, '❌ Сначала заведите питомца.', show_alert=True)
+                return
             if pet.get('hunger', 100) >= 100:
                 bot.answer_callback_query(call.id, "🍖 Питомец сыт! 😸", show_alert=True)
                 return
@@ -12365,7 +12575,9 @@ def callback_inline(call):
         elif action_data == 'pet_wash':
             econ = get_user_econ(user_id, user_name, username=user_username)
             pet = econ.get('pet')
-            if not pet: return
+            if not pet:
+                bot.answer_callback_query(call.id, '❌ Сначала заведите питомца.', show_alert=True)
+                return
             if pet.get('cleanliness', 100) >= 100:
                 bot.answer_callback_query(call.id, "🧼 Питомец уже чистый! 😸", show_alert=True)
                 return
@@ -12729,6 +12941,7 @@ def callback_inline(call):
                     )
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
             del pending_marriages[prop_id]
+            bot.answer_callback_query(call.id, '💍 Решение принято.')
 
         # БЛЭКДЖЕК
         elif action_data.startswith('bj_hit_') or action_data.startswith('bj_stand_'):
@@ -12753,6 +12966,7 @@ def callback_inline(call):
                         bot.edit_message_text(f"💥 <b>Перебор ({p_score})!</b> Вы проиграли <b>{game['bet']} 🪙</b>. 😿\nВаши карты: {game['p_cards']}", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
                     except Exception as e: print(f"[NONFATAL ERROR] {e}")
                     del active_bj_games[game_id]
+                    bot.answer_callback_query(call.id, '💥 Перебор — вы проиграли.', show_alert=True)
                     return
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🃏 Взять карту", callback_data=f"bj_hit_{game_id}:{user_id}"), InlineKeyboardButton("✋ Хватит", callback_data=f"bj_stand_{game_id}:{user_id}"))
@@ -12903,6 +13117,7 @@ def callback_inline(call):
             if not chat_rests:
                 try: bot.edit_message_text('🌴 В данный момент никто не находится в ресте. 😸', chat_id=chat_id, message_id=call.message.message_id)
                 except Exception as e: print(f"[NONFATAL ERROR] {e}")
+                bot.answer_callback_query(call.id, '🌴 Сейчас активных рестов нет.')
                 return
 
             resp = '📋 <b>СПИСОК АКТИВНЫХ РЕСТОВ:</b> 😺\n──────────────────────\n'
@@ -12916,10 +13131,13 @@ def callback_inline(call):
             markup.add(InlineKeyboardButton("🗑 Снять рест (Выбрать)", callback_data=f"rest_remove_menu:{user_id}"))
             try: bot.edit_message_text(resp, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
+            bot.answer_callback_query(call.id)
 
         # НАСТРОЙКИ
         elif action_data == 'set_max_days':
-            if not is_admin(chat_id, user_id): return
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+                return
             sett = get_chat_settings(chat_id)
             sett['max_days'] = None
             mark_dirty()
@@ -12927,7 +13145,9 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_rp':
-            if not is_admin(chat_id, user_id): return
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+                return
             sett = get_chat_settings(chat_id)
             sett['rp_enabled'] = not sett.get('rp_enabled', True)
             mark_dirty()
@@ -12935,7 +13155,9 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_flood':
-            if not is_admin(chat_id, user_id): return
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+                return
             sett = get_chat_settings(chat_id)
             sett['flood_protection'] = not sett.get('flood_protection', False)
             mark_dirty()
@@ -12953,7 +13175,9 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_reactions':
-            if not is_admin(chat_id, user_id): return
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+                return
             sett = get_chat_settings(chat_id)
             sett['auto_reactions'] = not sett.get('auto_reactions', True)
             mark_dirty()
@@ -12961,7 +13185,9 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_welcome':
-            if not is_admin(chat_id, user_id): return
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+                return
             sett = get_chat_settings(chat_id)
             sett['welcome_enabled'] = not sett.get('welcome_enabled', True)
             mark_dirty()
@@ -12969,7 +13195,9 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'set_remind_time':
-            if not is_admin(chat_id, user_id): return
+            if not is_admin(chat_id, user_id):
+                bot.answer_callback_query(call.id, "❌ Только для администраторов чата!", show_alert=True)
+                return
             sett = get_chat_settings(chat_id)
             opts = [10, 60, 1440]
             next_opt = opts[(opts.index(sett.get('remind_minutes', 60)) + 1) % len(opts)]
@@ -13355,6 +13583,10 @@ def callback_inline(call):
             mark_dirty()
             bot.answer_callback_query(call.id, "❌ Значок снят! 😿", show_alert=True)
             render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
+
+        else:
+            print(f'[CALLBACK] Unhandled callback: {raw_data!r}')
+            bot.answer_callback_query(call.id)
 
     except Exception as e:
         print(f"[CALLBACK ERROR] Исключение в callback: {e}")
@@ -13947,6 +14179,7 @@ def process_stars_successful_payment(message):
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ---------------------------------------------------------
+load_premium_emoji_metadata()
 setup_bot_commands()
 start_background_threads()
 keep_alive()
