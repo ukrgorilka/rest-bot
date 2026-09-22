@@ -150,6 +150,7 @@ def _mines_finish(user, game):
     save_data(send_backup=False)
 
 @app.route('/minigames')
+@app.route('/minigames/')
 def mini_games_page():
     if not os.path.isdir(MINIAPP_DIR):
         return 'Mini App files not found: miniapp/', 404
@@ -3757,7 +3758,8 @@ def cmd_mini_games(message):
         bot.reply_to(message, "❌ MINIAPP_URL не настроен в Render. Добавьте переменную MINIAPP_URL со ссылкой на сервис Render.")
         return
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🎮 Открыть мини-игры", web_app=WebAppInfo(url=f"{MINIAPP_URL}/minigames")))
+    mini_url = f"{MINIAPP_URL}/minigames"
+    markup.add(InlineKeyboardButton("🎮 Открыть мини-игры", web_app=WebAppInfo(url=mini_url)))
     bot.reply_to(message, "🎮 <b>МИНИ-ИГРЫ НЯ</b>\n\n💣 Сапёр уже доступен! Выберите сложность прямо в приложении.", reply_markup=markup, parse_mode='HTML')
 
 # ---------------------------------------------------------
