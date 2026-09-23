@@ -1850,6 +1850,7 @@ def setup_bot_commands():
         BotCommand('tasks', '📋 Задания'),
         BotCommand('achievements', '🏆 Достижения'),
         BotCommand('lottery', '🎟 Лотерея'),
+        BotCommand('games', '🎮 Игры и мини-игры'),
         BotCommand('garage', '🏎 Гараж'),
         BotCommand('stars', '⭐️ Stars магазин'),
         BotCommand('help', '❓ Помощь'),
@@ -5945,12 +5946,8 @@ def _apply_business_payout_modifiers(econ, base_profit, chat_id, user_id, user_n
         profit += bonus_biz
         event_text += f"\n💎 VIP/донат-бонус бизнеса: <b>+{bonus_biz} 🪙</b>"
 
-    rest_state = db.get('rests', {}).get(str(chat_id), {})
-    in_rest, _, _ = check_user_rest(rest_state, user_id=user_id, user_name=user_name)
-    if in_rest:
-        rest_bonus = int(profit * 0.20)
-        profit += rest_bonus
-        event_text += f"\n🌴 Курортный бонус реста (+20%): <b>+{rest_bonus} 🪙</b>"
+    # Рест больше НЕ даёт денежный бонус. Состояние реста влияет только на доступные
+    # игровые/чатовые действия и таймер реста, но не увеличивает выплаты.
 
     return max(0, int(profit)), event_text
 
@@ -6008,7 +6005,7 @@ def render_business_view(chat_id, user_id, user_name, message_id=None):
     markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data=f"collect_biz_profit:{user_id}"))
     markup.add(InlineKeyboardButton("⭐️ Купить донатный бизнес", callback_data=f"stars_cat_businesses:{user_id}"))
     markup.add(InlineKeyboardButton("🏢 Мой публичный бизнес", callback_data=f"pubbiz_view:{user_id}"), InlineKeyboardButton("💼 Вакансии", callback_data=f"pubbiz_jobs:{user_id}"))
-    lines += ["──────────────────────", f"📈 Общий доход: <b>{total_hourly:,} 🪙/ч</b>", "🌴 <i>В ресте действует курортный бонус: +20% к прибыли.</i>"]
+    lines += ["──────────────────────", f"📈 Общий доход: <b>{total_hourly:,} 🪙/ч</b>"]
     text = "\n".join(lines)
     if message_id:
         try:
