@@ -2026,7 +2026,6 @@ def periodic_backup_worker():
             print(f'[BACKUP ERROR] Ошибка планового бекапа: {e}')
 
 db = load_data()
-_start_moderation_worker()
 
 # ---------------------------------------------------------
 # МОНИТОРИНГ ГРУПП, ГДЕ НАХОДИТСЯ БОТ
@@ -3466,6 +3465,9 @@ def _moderation_worker():
 def _start_moderation_worker():
     t = threading.Thread(target=_moderation_worker, daemon=True, name='moderation-expiry')
     t.start()
+
+# Все функции модерации уже объявлены — теперь безопасно запускать воркер.
+_start_moderation_worker()
 
 def resolve_user_from_string(chat_id, query_str):
     if not query_str:
