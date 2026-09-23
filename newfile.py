@@ -59,8 +59,10 @@ def _miniapp_user(init_data):
         if not user.get('id'):
             return None
         auth_date = int(pairs.get('auth_date', '0') or 0)
-        if auth_date and abs(time.time() - auth_date) > 86400:
-            return None
+        if auth_date:
+            age = time.time() - auth_date
+            if age < -300 or age > 86400:
+                return None
         return user
     except Exception:
         return None
@@ -93,154 +95,400 @@ def mini_profile_api():
 
 @app.route('/api/mini/tasks', methods=['POST'])
 def mini_tasks_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    econ=get_user_econ(uid,name,username=user.get('username'))
-    tasks=[]
-    for key, info in (globals().get('DAILY_TASKS', {}) or {}).items():
-        if isinstance(info, dict):
-            tasks.append({'id':key,'description':info.get('name') or info.get('title') or key,'target':int(info.get('target',1) or 1),'reward':int(info.get('reward',0) or 0),'progress':0,'claimed':False})
-    return jsonify({'ok':True,'streak':int(econ.get('bonus_streak',0) or 0),'daily':tasks[:20],'weekly':[]})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    tasks, econ = get_daily_tasks(uid, name, user.get('username'))
+    weekly_tasks, _ = get_weekly_tasks(uid, name, user.get('username'))
+
+    daily_progress = econ.get('daily_progress', {}) or {}
+    daily_claimed = set(econ.get('daily_claimed', []) or [])
+    weekly_progress = econ.get('weekly_progress', {}) or {}
+    weekly_claimed = set(econ.get('weekly_claimed', []) or [])
+
+    daily_rows = []
+    for index, (task_key, description, target, reward) in enumerate(tasks):
+        progress = min(int(daily_progress.get(task_key, 0) or 0), int(target))
+        daily_rows.append({
+            'id': f'daily_{index}_{task_key}',
+            'key': task_key,
+            'description': description,
+            'target': int(target),
+            'reward': int(reward),
+            'progress': progress,
+            'claimed': task_key in daily_claimed,
+            'completed': progress >= int(target),
+        })
+
+    weekly_rows = []
+    for index, (task_key, description, target, reward) in enumerate(weekly_tasks):
+        progress = min(int(weekly_progress.get(task_key, 0) or 0), int(target))
+        weekly_rows.append({
+            'id': f'weekly_{index}_{task_key}',
+            'key': task_key,
+            'description': description,
+            'target': int(target),
+            'reward': int(reward),
+            'progress': progress,
+            'claimed': task_key in weekly_claimed,
+            'completed': progress >= int(target),
+        })
+
+    return jsonify({
+        'ok': True,
+        'date': daily_task_date(),
+        'week': weekly_task_key(),
+        'streak': int(econ.get('mini_daily_streak', 0) or 0),
+        'daily': daily_rows,
+        'weekly': weekly_rows,
+    })
+
 
 @app.route('/api/mini/achievements', methods=['POST'])
 def mini_achievements_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    unlocked=set(econ.get('achievements',[]) or []); rows=[]
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    unlocked = set(econ.get('achievements', []) or [])
+    stats = econ.get('stats', {}) or {}
+    rows = []
+
     for key, info in (ACHIEVEMENTS or {}).items():
-        if not isinstance(info,dict): continue
-        rows.append({'id':key,'title':info.get('name') or info.get('title') or key,'desc':info.get('description') or info.get('desc') or '','reward':int(info.get('reward',0) or 0),'progress':1 if key in unlocked else 0,'target':1,'unlocked':key in unlocked})
-    return jsonify({'ok':True,'unlocked':len(unlocked),'rows':rows[:100]})
+        if not isinstance(info, dict):
+            continue
+        stat = str(info.get('stat', ''))
+        target = max(1, int(info.get('target', 1) or 1))
+        if stat == 'balance_check':
+            progress = int(econ.get('balance', 0) or 0)
+        elif stat == 'bank_deposit':
+            progress = int(econ.get('bank_deposit', 0) or 0)
+        elif stat == 'smeh_check':
+            progress = int(econ.get('smeh', 0) or 0)
+        else:
+            progress = int(stats.get(stat, 0) or 0)
+        progress = max(0, min(progress, target))
+        rows.append({
+            'id': key,
+            'title': info.get('name') or info.get('title') or key,
+            'desc': info.get('description') or info.get('desc') or '',
+            'reward': int(info.get('reward', 0) or 0),
+            'progress': progress,
+            'target': target,
+            'unlocked': key in unlocked,
+        })
+
+    known_unlocked = sum(1 for row in rows if row['unlocked'])
+    return jsonify({'ok': True, 'unlocked': known_unlocked, 'rows': rows[:100]})
+
 
 @app.route('/api/mini/stats', methods=['POST'])
 def mini_stats_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    return jsonify({'ok':True,'games_played':int(econ.get('mini_games_played',0) or 0),'wins':int(econ.get('mini_games_wins',0) or 0),'records':econ.get('mini_records',{}) or {}})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    return jsonify({
+        'ok': True,
+        'games_played': int(econ.get('mini_games_played', 0) or 0),
+        'wins': int(econ.get('mini_games_wins', 0) or 0),
+        'records': econ.get('mini_records', {}) or {},
+    })
+
+
+def _mini_note(econ, text):
+    notes = econ.setdefault('mini_notifications', [])
+    notes.append({'text': str(text), 'time': now_msk().strftime('%d.%m.%Y %H:%M')})
+    del notes[:-50]
+
+
+def _mini_tx(econ, text, amount):
+    tx = econ.setdefault('mini_transactions', [])
+    tx.append({
+        'text': str(text),
+        'amount': int(amount),
+        'time': now_msk().strftime('%d.%m.%Y %H:%M'),
+    })
+    del tx[:-100]
+
 
 @app.route('/api/mini/notifications', methods=['POST'])
 def mini_notifications_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    return jsonify({'ok':True,'rows':list(econ.get('mini_notifications',[]) or [])[-50:]})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    rows = list(econ.get('mini_notifications', []) or [])[-50:]
+    rows.reverse()
+    return jsonify({'ok': True, 'rows': rows})
+
 
 @app.route('/api/mini/transactions', methods=['POST'])
 def mini_transactions_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    return jsonify({'ok':True,'rows':list(econ.get('mini_transactions',[]) or [])[-100:]})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    rows = list(econ.get('mini_transactions', []) or [])[-100:]
+    rows.reverse()
+    return jsonify({'ok': True, 'rows': rows})
+
 
 @app.route('/api/mini/shop', methods=['POST'])
 def mini_shop_api():
-    user=_miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    cats=[]
-    for key,item in (STARS_COSMETICS or {}).items():
-        if not isinstance(item,dict): continue
-        cats.append({'title':item.get('name') or key,'items':[{'name':item.get('name') or key,'desc':item.get('description') or '','stars':int(item.get('stars',item.get('price',0)) or 0)}]})
-    return jsonify({'ok':True,'categories':cats[:50]})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    type_titles = {
+        'bp_premium': 'Pass',
+        'title_cert': 'Сертификаты',
+        'donor_title': 'Титулы',
+        'pet': 'Питомцы',
+        'theme': 'Темы',
+        'badge': 'Значки',
+        'gif': 'GIF профиля',
+        'donor_business': 'Донатные бизнесы',
+        'donor_vehicle': 'Донатный транспорт',
+    }
+    grouped = {}
+    for key, item in (STARS_COSMETICS or {}).items():
+        if not isinstance(item, dict):
+            continue
+        category = type_titles.get(item.get('type'), 'Другое')
+        grouped.setdefault(category, []).append({
+            'id': key,
+            'name': item.get('name') or key,
+            'desc': item.get('desc') or item.get('description') or '',
+            'stars': int(item.get('stars', item.get('price', 0)) or 0),
+        })
+
+    categories = [
+        {'title': title, 'items': items}
+        for title, items in grouped.items()
+    ]
+    return jsonify({'ok': True, 'categories': categories})
+
 
 @app.route('/api/mini/settings', methods=['POST'])
 def mini_settings_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    lang=str(payload.get('language','ru')).lower()
-    if lang not in {'ru','uk','en'}: return jsonify({'ok':False,'error':'invalid_language'}),400
-    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    econ['language']=lang; mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok':True,'language':lang})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    lang = str(payload.get('language', 'ru')).lower()
+    if lang not in {'ru', 'uk', 'en'}:
+        return jsonify({'ok': False, 'error': 'invalid_language'}), 400
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    econ['language'] = lang
+    mark_dirty()
+    save_data(send_backup=False)
+    return jsonify({'ok': True, 'language': lang})
+
 
 @app.route('/api/mini/bonus', methods=['POST'])
 def mini_bonus_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
     if not user:
         return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
-    uid = int(user['id']); name = user.get('first_name') or user.get('username') or 'Игрок'
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
     econ = get_user_econ(uid, name, username=user.get('username'))
-    now = now_msk().date().isoformat()
-    if econ.get('mini_daily_claimed') == now:
+    today = now_msk().date().isoformat()
+    if econ.get('mini_daily_claimed') == today:
         return jsonify({'ok': False, 'error': 'already_claimed'})
+
     last = econ.get('mini_daily_date')
-    streak = int(econ.get('mini_daily_streak',0) or 0)
+    streak = int(econ.get('mini_daily_streak', 0) or 0)
     yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
     streak = streak + 1 if last == yesterday else 1
     reward = min(5000, 500 + streak * 100)
-    econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
-    econ['balance'] = int(econ.get('balance',0) or 0) + reward
+
+    econ['mini_daily_claimed'] = today
+    econ['mini_daily_date'] = today
+    econ['mini_daily_streak'] = streak
+    econ['balance'] = int(econ.get('balance', 0) or 0) + reward
     add_account_exp(uid, name, 25, user.get('username'))
-    mark_dirty(); save_data(send_backup=False)
+    _mini_tx(econ, 'Ежедневный бонус Mini App', reward)
+    _mini_note(econ, f'🎁 Получен ежедневный бонус: +{reward} 🪙')
+    mark_dirty()
+    save_data(send_backup=False)
     return jsonify({'ok': True, 'reward': reward, 'streak': streak})
+
 
 @app.route('/api/mini/leaderboard', methods=['POST'])
 def mini_leaderboard_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    game=str(payload.get('game','') or '').lower()
-    rows=[]
-    for uid,econ in db.get('economy',{}).items():
-        if not isinstance(econ,dict): continue
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    game = str(payload.get('game', '') or '').lower()
+    allowed_games = {'mines', 'snake', 'flappy', '2048', 'reaction', 'shooter'}
+    if game and game not in allowed_games:
+        return jsonify({'ok': False, 'error': 'unknown_game'}), 400
+
+    rows = []
+    for uid, econ in db.get('economy', {}).items():
+        if not isinstance(econ, dict):
+            continue
         try:
-            exp=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
+            exp = int(econ.get('account_exp', 0) or 0)
+            balance = int(econ.get('balance', 0) or 0)
             if game:
-                records=econ.get('mini_records',{}) or {}; score=int(records.get(game,0) or 0)
-                if score <= 0: continue
+                records = econ.get('mini_records', {}) or {}
+                score = int(records.get(game, 0) or 0)
+                if score <= 0:
+                    continue
             else:
-                score=exp
-        except Exception: continue
-        rows.append({'name':clean_tag(econ.get('display_name') or econ.get('name') or econ.get('tag') or str(uid)),'level':get_account_level(exp)[0],'exp':exp,'score':score,'balance':balance})
-    rows.sort(key=lambda x:(x['score'],x['balance']),reverse=True)
-    return jsonify({'ok':True,'rows':rows[:20]})
+                score = exp
+        except Exception:
+            continue
+        rows.append({
+            'name': clean_tag(econ.get('display_name') or econ.get('name') or econ.get('tag') or str(uid)),
+            'level': get_account_level(exp)[0],
+            'exp': exp,
+            'score': score,
+            'balance': balance,
+        })
+
+    rows.sort(key=lambda x: (x['score'], x['balance']), reverse=True)
+    return jsonify({'ok': True, 'rows': rows[:20]})
+
 
 @app.route('/api/mini/game/start', methods=['POST'])
 def mini_game_start_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    game = str((request.get_json(silent=True) or {}).get('game','')).lower()
-    if game not in {'mines','snake','flappy','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
-    gid=secrets.token_urlsafe(12)
-    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'difficulty':str((request.get_json(silent=True) or {}).get('difficulty','easy')),'started':time.time()}
-    return jsonify({'ok':True,'game_id':gid})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    game = str(payload.get('game', '') or '').lower()
+    difficulty = str(payload.get('difficulty', 'easy') or 'easy').lower()
+    allowed_games = {'mines', 'snake', 'flappy', '2048', 'reaction', 'shooter'}
+    allowed_difficulties = {'easy', 'medium', 'hard', 'insane'}
+    if game not in allowed_games:
+        return jsonify({'ok': False, 'error': 'unknown_game'}), 400
+    if difficulty not in allowed_difficulties:
+        difficulty = 'easy'
+
+    now = time.time()
+    uid = int(user['id'])
+    with MINIAPP_LOCK:
+        stale = [gid for gid, item in MINIAPP_GAMES.items() if now - float(item.get('started', now)) > 3600]
+        for gid in stale:
+            MINIAPP_GAMES.pop(gid, None)
+
+        # One active Mini App game per user. Starting another game replaces the abandoned one.
+        for gid, item in list(MINIAPP_GAMES.items()):
+            if int(item.get('user_id', 0)) == uid:
+                MINIAPP_GAMES.pop(gid, None)
+
+        gid = secrets.token_urlsafe(12)
+        MINIAPP_GAMES[gid] = {
+            'user_id': uid,
+            'game': game,
+            'difficulty': difficulty,
+            'started': now,
+        }
+
+    return jsonify({'ok': True, 'game_id': gid})
+
 
 @app.route('/api/mini/game/finish', methods=['POST'])
 def mini_game_finish_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    gid=str(payload.get('game_id',''))
-    try: score=max(0,min(int(payload.get('score',0) or 0),100000))
-    except Exception: return jsonify({'ok':False,'error':'invalid_score'}),400
-    with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
-    if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
-    elapsed=time.time()-game['started']
-    if elapsed < 0.5: return jsonify({'ok':False,'error':'too_fast'}),400
-    game_name=game['game']
-    max_scores={
-        'mines': max(100, 1000),
-        'snake': max(100, int(elapsed*900)+100),
-        'flappy': max(100, int(elapsed*130)+200),
-        '2048': max(500, int(elapsed*5000)+500),
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    gid = str(payload.get('game_id', '') or '')
+    try:
+        score = int(payload.get('score', 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'invalid_score'}), 400
+    score = max(0, min(score, 100000))
+
+    with MINIAPP_LOCK:
+        game = MINIAPP_GAMES.get(gid)
+        if not game or game.get('user_id') != int(user['id']):
+            return jsonify({'ok': False, 'error': 'invalid_game'}), 400
+        # Consume the session only after ownership is established.
+        MINIAPP_GAMES.pop(gid, None)
+
+    elapsed = time.time() - float(game.get('started', time.time()))
+    if elapsed < 0.5 or elapsed > 3600:
+        return jsonify({'ok': False, 'error': 'invalid_duration'}), 400
+
+    game_name = game['game']
+    max_scores = {
+        'mines': 3000,
+        'snake': max(100, int(elapsed * 900) + 100),
+        'flappy': max(100, int(elapsed * 130) + 200),
+        '2048': max(500, int(elapsed * 5000) + 500),
         'reaction': 1200,
         'shooter': 2000,
     }
     if score > max_scores[game_name]:
-        return jsonify({'ok':False,'error':'score_out_of_range'}),400
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
-    econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
-    records=econ.setdefault('mini_records',{}); old=int(records.get(game_name,0) or 0)
-    if score>old: records[game_name]=score
-    won=bool(payload.get('won',False))
+        return jsonify({'ok': False, 'error': 'score_out_of_range'}), 400
+
+    # The browser tells us only the result score; never trust arbitrary string truthiness for won.
+    won_raw = payload.get('won', False)
+    won = won_raw is True or won_raw == 1 or won_raw == '1'
+    if game_name == 'shooter':
+        won = score >= 100
+    elif game_name == 'reaction':
+        won = score > 0
+    elif game_name == '2048':
+        won = bool(won)
+    elif game_name in {'mines', 'snake', 'flappy'}:
+        won = bool(won)
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    econ['mini_games_played'] = int(econ.get('mini_games_played', 0) or 0) + 1
+
+    records = econ.setdefault('mini_records', {})
+    old = int(records.get(game_name, 0) or 0)
+    if score > old:
+        records[game_name] = score
+
     if won and score > 0:
-        econ['mini_games_wins']=int(econ.get('mini_games_wins',0) or 0)+1
-    reward_caps={'mines':2500,'snake':2000,'flappy':2000,'2048':2500,'reaction':1500,'shooter':2500}
-    reward=min(reward_caps[game_name], max(0, score//10))
-    if reward: econ['balance']=int(econ.get('balance',0) or 0)+reward
-    tx=econ.setdefault('mini_transactions',[]); tx.append({'text':f'Mini Game: {game_name}','amount':reward,'time':now_msk().strftime('%d.%m.%Y %H:%M')}); del tx[:-100]
-    mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok':True,'reward':reward,'record':records.get(game_name,score)})
+        econ['mini_games_wins'] = int(econ.get('mini_games_wins', 0) or 0) + 1
+
+    reward_caps = {'mines': 2500, 'snake': 2000, 'flappy': 2000, '2048': 2500, 'reaction': 1500, 'shooter': 2500}
+    reward = min(reward_caps[game_name], max(0, score // 10))
+    if reward:
+        econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+        _mini_tx(econ, f'Mini Game: {game_name}', reward)
+        _mini_note(econ, f'🎮 {game_name}: +{reward} 🪙')
+
+    mark_dirty()
+    save_data(send_backup=False)
+    return jsonify({'ok': True, 'reward': reward, 'record': records.get(game_name, score), 'won': won})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
@@ -2026,6 +2274,7 @@ def periodic_backup_worker():
             print(f'[BACKUP ERROR] Ошибка планового бекапа: {e}')
 
 db = load_data()
+_start_moderation_worker()
 
 # ---------------------------------------------------------
 # МОНИТОРИНГ ГРУПП, ГДЕ НАХОДИТСЯ БОТ
@@ -3465,9 +3714,6 @@ def _moderation_worker():
 def _start_moderation_worker():
     t = threading.Thread(target=_moderation_worker, daemon=True, name='moderation-expiry')
     t.start()
-
-# Все функции модерации уже объявлены — теперь безопасно запускать воркер.
-_start_moderation_worker()
 
 def resolve_user_from_string(chat_id, query_str):
     if not query_str:
