@@ -56,7 +56,12 @@ def _miniapp_user(init_data):
         if not hmac.compare_digest(calc, received_hash):
             return None
         user = json.loads(pairs.get('user', '{}'))
-        return user if user.get('id') else None
+        if not user.get('id'):
+            return None
+        auth_date = int(pairs.get('auth_date', '0') or 0)
+        if auth_date and abs(time.time() - auth_date) > 86400:
+            return None
+        return user
     except Exception:
         return None
 
@@ -83,7 +88,72 @@ def mini_profile_api():
     econ = get_user_econ(uid, name, username=user.get('username'))
     lvl, exp, nxt, bar = get_account_level(econ.get('account_exp', 0))
     st = econ.get('msg_stats', {}) or {}
-    return jsonify({'ok': True, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}})
+    return jsonify({'ok': True, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}, 'language': econ.get('language','ru')})
+
+
+@app.route('/api/mini/tasks', methods=['POST'])
+def mini_tasks_api():
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
+    econ=get_user_econ(uid,name,username=user.get('username'))
+    tasks=[]
+    for key, info in (globals().get('DAILY_TASKS', {}) or {}).items():
+        if isinstance(info, dict):
+            tasks.append({'id':key,'description':info.get('name') or info.get('title') or key,'target':int(info.get('target',1) or 1),'reward':int(info.get('reward',0) or 0),'progress':0,'claimed':False})
+    return jsonify({'ok':True,'streak':int(econ.get('bonus_streak',0) or 0),'daily':tasks[:20],'weekly':[]})
+
+@app.route('/api/mini/achievements', methods=['POST'])
+def mini_achievements_api():
+    user=_miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
+    unlocked=set(econ.get('achievements',[]) or []); rows=[]
+    for key, info in (ACHIEVEMENTS or {}).items():
+        if not isinstance(info,dict): continue
+        rows.append({'id':key,'title':info.get('name') or info.get('title') or key,'desc':info.get('description') or info.get('desc') or '','reward':int(info.get('reward',0) or 0),'progress':1 if key in unlocked else 0,'target':1,'unlocked':key in unlocked})
+    return jsonify({'ok':True,'unlocked':len(unlocked),'rows':rows[:100]})
+
+@app.route('/api/mini/stats', methods=['POST'])
+def mini_stats_api():
+    user=_miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
+    return jsonify({'ok':True,'games_played':int(econ.get('mini_games_played',0) or 0),'wins':int(econ.get('mini_games_wins',0) or 0),'records':econ.get('mini_records',{}) or {}})
+
+@app.route('/api/mini/notifications', methods=['POST'])
+def mini_notifications_api():
+    user=_miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
+    return jsonify({'ok':True,'rows':list(econ.get('mini_notifications',[]) or [])[-50:]})
+
+@app.route('/api/mini/transactions', methods=['POST'])
+def mini_transactions_api():
+    user=_miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
+    return jsonify({'ok':True,'rows':list(econ.get('mini_transactions',[]) or [])[-100:]})
+
+@app.route('/api/mini/shop', methods=['POST'])
+def mini_shop_api():
+    user=_miniapp_auth(request.get_json(silent=True) or {})
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    cats=[]
+    for key,item in (STARS_COSMETICS or {}).items():
+        if not isinstance(item,dict): continue
+        cats.append({'title':item.get('name') or key,'items':[{'name':item.get('name') or key,'desc':item.get('description') or '','stars':int(item.get('stars',item.get('price',0)) or 0)}]})
+    return jsonify({'ok':True,'categories':cats[:50]})
+
+@app.route('/api/mini/settings', methods=['POST'])
+def mini_settings_api():
+    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    lang=str(payload.get('language','ru')).lower()
+    if lang not in {'ru','uk','en'}: return jsonify({'ok':False,'error':'invalid_language'}),400
+    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
+    econ['language']=lang; mark_dirty(); save_data(send_backup=False)
+    return jsonify({'ok':True,'language':lang})
 
 @app.route('/api/mini/bonus', methods=['POST'])
 def mini_bonus_api():
@@ -108,49 +178,69 @@ def mini_bonus_api():
 
 @app.route('/api/mini/leaderboard', methods=['POST'])
 def mini_leaderboard_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user:
-        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
+    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
+    game=str(payload.get('game','') or '').lower()
     rows=[]
-    for uid, econ in db.get('economy', {}).items():
-        if not isinstance(econ, dict): continue
-        try: score=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
-        except: continue
-        rows.append({'name': clean_tag(econ.get('name') or econ.get('tag') or str(uid)), 'level': get_account_level(score)[0], 'exp': score, 'balance': balance})
-    rows.sort(key=lambda x: (x['exp'], x['balance']), reverse=True)
-    return jsonify({'ok': True, 'rows': rows[:20]})
+    for uid,econ in db.get('economy',{}).items():
+        if not isinstance(econ,dict): continue
+        try:
+            exp=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
+            if game:
+                records=econ.get('mini_records',{}) or {}; score=int(records.get(game,0) or 0)
+                if score <= 0: continue
+            else:
+                score=exp
+        except Exception: continue
+        rows.append({'name':clean_tag(econ.get('display_name') or econ.get('name') or econ.get('tag') or str(uid)),'level':get_account_level(exp)[0],'exp':exp,'score':score,'balance':balance})
+    rows.sort(key=lambda x:(x['score'],x['balance']),reverse=True)
+    return jsonify({'ok':True,'rows':rows[:20]})
 
 @app.route('/api/mini/game/start', methods=['POST'])
 def mini_game_start_api():
     user = _miniapp_auth(request.get_json(silent=True) or {})
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
     game = str((request.get_json(silent=True) or {}).get('game','')).lower()
-    if game not in {'mines','snake','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
+    if game not in {'mines','snake','flappy','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
     gid=secrets.token_urlsafe(12)
-    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'started':time.time()}
+    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'difficulty':str((request.get_json(silent=True) or {}).get('difficulty','easy')),'started':time.time()}
     return jsonify({'ok':True,'game_id':gid})
 
 @app.route('/api/mini/game/finish', methods=['POST'])
 def mini_game_finish_api():
     payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    gid=str(payload.get('game_id','')); score=max(0,min(int(payload.get('score',0) or 0),100000))
+    gid=str(payload.get('game_id',''))
+    try: score=max(0,min(int(payload.get('score',0) or 0),100000))
+    except Exception: return jsonify({'ok':False,'error':'invalid_score'}),400
     with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
     if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
     elapsed=time.time()-game['started']
     if elapsed < 0.5: return jsonify({'ok':False,'error':'too_fast'}),400
+    game_name=game['game']
+    max_scores={
+        'mines': max(100, 1000),
+        'snake': max(100, int(elapsed*900)+100),
+        'flappy': max(100, int(elapsed*130)+200),
+        '2048': max(500, int(elapsed*5000)+500),
+        'reaction': 1200,
+        'shooter': 2000,
+    }
+    if score > max_scores[game_name]:
+        return jsonify({'ok':False,'error':'score_out_of_range'}),400
     uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
     econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
-    records=econ.setdefault('mini_records',{}); old=int(records.get(game['game'],0) or 0)
-    if score>old: records[game['game']]=score
-    reward=0
-    # Only modest server-side rewards; client cannot choose the reward.
-    caps={'mines':2500,'snake':2000,'2048':2500,'reaction':1500,'shooter':2500}
-    reward=min(caps[game['game']], max(0, score//10))
-    if reward:
-        econ['balance']=int(econ.get('balance',0) or 0)+reward
+    records=econ.setdefault('mini_records',{}); old=int(records.get(game_name,0) or 0)
+    if score>old: records[game_name]=score
+    won=bool(payload.get('won',False))
+    if won and score > 0:
+        econ['mini_games_wins']=int(econ.get('mini_games_wins',0) or 0)+1
+    reward_caps={'mines':2500,'snake':2000,'flappy':2000,'2048':2500,'reaction':1500,'shooter':2500}
+    reward=min(reward_caps[game_name], max(0, score//10))
+    if reward: econ['balance']=int(econ.get('balance',0) or 0)+reward
+    tx=econ.setdefault('mini_transactions',[]); tx.append({'text':f'Mini Game: {game_name}','amount':reward,'time':now_msk().strftime('%d.%m.%Y %H:%M')}); del tx[:-100]
     mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok':True,'reward':reward,'record':records.get(game['game'],score)})
+    return jsonify({'ok':True,'reward':reward,'record':records.get(game_name,score)})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
@@ -193,6 +283,94 @@ TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 if not TOKEN:
     print("[ВНИМАНИЕ] BOT_TOKEN не задан в переменных окружения (ENV)! Бот ожидает BOT_TOKEN в Render.")
 bot = telebot.TeleBot(TOKEN)
+
+# ---------------------------------------------------------
+# ЕДИНЫЙ ЯЗЫК ОТВЕТОВ БОТА
+# ---------------------------------------------------------
+# Русский остаётся исходным языком. Для украинского/английского глобальный
+# слой переводит наиболее часто используемые фразы и термины во всех
+# исходящих текстовых сообщениях. HTML/code/URL не трогаются.
+_LOCALE_PHRASES = {
+ 'uk': {
+  'Настройки доступны только администраторам чата!':'Налаштування доступні лише адміністраторам чату!',
+  'Настройки группы доступны только администраторам чата!':'Налаштування групи доступні лише адміністраторам чату!',
+  'Команда доступна только администраторам чата.':'Команда доступна лише адміністраторам чату.',
+  'Эти команды работают только в группах.':'Ці команди працюють лише в групах.',
+  'Списки модерации доступны только в группах.':'Списки модерації доступні лише в групах.',
+  'Списки модерации доступны только администраторам.':'Списки модерації доступні лише адміністраторам.',
+  'Не удалось определить пользователя. Ответь на его сообщение или укажи @username/ID.':'Не вдалося визначити користувача. Відповідай на його повідомлення або вкажи @username/ID.',
+  'Нельзя применить модерацию к себе.':'Не можна застосовувати модерацію до себе.',
+  'Нельзя модерировать владельца или администратора с такими правами.':'Не можна модерувати власника або адміністратора з такими правами.',
+  'Список пуст.':'Список порожній.',
+  'навсегда':'назавжди','Причина:':'Причина:','Лимит варнов:':'Ліміт варнів:',
+  'ВАРНЫ':'ВАРНИ','МУТЫ':'МУТИ','БАНЫ':'БАНИ','РП-команды':'РП-команди','Антифлуд':'Антифлуд',
+  'Приветствия':'Привітання','Напоминание':'Нагадування','Язык':'Мова','без ограничений':'без обмежень',
+  'Выбери язык ответов бота в личных сообщениях.':'Обери мову відповідей бота в особистих повідомленнях.',
+  'Язык сохранён!':'Мову збережено!','Язык группы сохранён!':'Мову групи збережено!',
+  'Рест больше не начисляет коины. Старый бонус +150 удалён.':'Рест більше не нараховує коїни. Старий бонус +150 видалено.'
+ },
+ 'en': {
+  'Настройки доступны только администраторам чата!':'Chat settings are available only to administrators!',
+  'Настройки группы доступны только администраторам чата!':'Group settings are available only to chat administrators!',
+  'Команда доступна только администраторам чата.':'This command is available only to chat administrators.',
+  'Эти команды работают только в группах.':'These commands work only in groups.',
+  'Списки модерации доступны только в группах.':'Moderation lists are available only in groups.',
+  'Списки модерации доступны только администраторам.':'Moderation lists are available only to administrators.',
+  'Не удалось определить пользователя. Ответь на его сообщение или укажи @username/ID.':'Could not identify the user. Reply to their message or provide @username/ID.',
+  'Нельзя применить модерацию к себе.':'You cannot moderate yourself.',
+  'Нельзя модерировать владельца или администратора с такими правами.':'You cannot moderate the owner or an administrator with these rights.',
+  'Список пуст.':'The list is empty.',
+  'навсегда':'permanently','Причина:':'Reason:','Лимит варнов:':'Warn limit:',
+  'ВАРНЫ':'WARNS','МУТЫ':'MUTES','БАНЫ':'BANS','РП-команды':'RP commands','Антифлуд':'Anti-flood',
+  'Приветствия':'Welcome messages','Напоминание':'Reminder','Язык':'Language','без ограничений':'unlimited',
+  'Выбери язык ответов бота в личных сообщениях.':'Choose the language for bot replies in private chat.',
+  'Язык сохранён!':'Language saved!','Язык группы сохранён!':'Group language saved!',
+  'Рест больше не начисляет коины. Старый бонус +150 удалён.':'Rest no longer awards coins. The old +150 bonus was removed.'
+ }
+}
+
+def _bot_output_language(chat_id, user_id=None):
+    try:
+        cid=int(chat_id)
+    except Exception:
+        return 'ru'
+    try:
+        if cid > 0:
+            econ=get_user_econ(user_id=user_id or cid)
+            return econ.get('language','ru') if econ else 'ru'
+        return get_chat_settings(cid).get('language','ru')
+    except Exception:
+        return 'ru'
+
+def _localize_bot_text(text, lang):
+    if not isinstance(text,str) or lang == 'ru': return text
+    out=text
+    # Protect HTML/code/URLs from replacement.
+    protected=[]
+    def protect(m):
+        protected.append(m.group(0)); return f'\x00{len(protected)-1}\x00'
+    out=re.sub(r'<[^>]+>|https?://\S+|tg://\S+', protect, out)
+    for src,dst in _LOCALE_PHRASES.get(lang,{}).items(): out=out.replace(src,dst)
+    for i,val in enumerate(protected): out=out.replace(f'\x00{i}\x00',val)
+    return out
+
+_ORIG_SEND_MESSAGE=bot.send_message
+_ORIG_REPLY_TO=bot.reply_to
+_ORIG_EDIT_MESSAGE_TEXT=bot.edit_message_text
+
+def _localized_send_message(chat_id, text, *args, **kwargs):
+    uid=kwargs.get('user_id')
+    return _ORIG_SEND_MESSAGE(chat_id, _localize_bot_text(text,_bot_output_language(chat_id,uid)), *args, **kwargs)
+
+def _localized_reply_to(message, text, *args, **kwargs):
+    return _ORIG_REPLY_TO(message, _localize_bot_text(text,_bot_output_language(message.chat.id,getattr(message.from_user,'id',None))), *args, **kwargs)
+
+def _localized_edit_message_text(text, chat_id, message_id, *args, **kwargs):
+    return _ORIG_EDIT_MESSAGE_TEXT(_localize_bot_text(text,_bot_output_language(chat_id)), chat_id, message_id, *args, **kwargs)
+
+bot.send_message=_localized_send_message
+bot.reply_to=_localized_reply_to
+bot.edit_message_text=_localized_edit_message_text
 
 # ---------------------------------------------------------
 # TELEGRAM PREMIUM / CUSTOM EMOJI
@@ -1497,6 +1675,7 @@ def _default_data():
         'rests': {},
         'history': {},
         'settings': {},
+        'moderation': {},
         'economy': {},
         'promos': {
             'FIX': {'reward': 5000, 'exp': 100, 'claimed': []},
@@ -1546,6 +1725,8 @@ def _normalize_loaded_data(data):
         base['chest_claims'] = {}
     if not isinstance(base.get('bot_chats'), dict):
         base['bot_chats'] = {}
+    if not isinstance(base.get('moderation'), dict):
+        base['moderation'] = {}
     if not isinstance(base.get('guilds'), dict): base['guilds'] = {}
     if not isinstance(base.get('player_market'), dict): base['player_market'] = {}
     if not isinstance(base.get('raid'), dict): base['raid'] = {}
@@ -1724,6 +1905,7 @@ def periodic_backup_worker():
             print(f'[BACKUP ERROR] Ошибка планового бекапа: {e}')
 
 db = load_data()
+_start_moderation_worker()
 
 # ---------------------------------------------------------
 # МОНИТОРИНГ ГРУПП, ГДЕ НАХОДИТСЯ БОТ
@@ -1878,7 +2060,9 @@ def get_chat_settings(chat_id):
             'auto_reactions': True,
             'welcome_enabled': True,
             'timezone_offset': 3,
-            'remind_minutes': 60
+            'remind_minutes': 60,
+            'language': 'ru',
+            'warn_limit': 3
         }
     else:
         # Новые настройки добавляются без сброса старых параметров.
@@ -1888,6 +2072,8 @@ def get_chat_settings(chat_id):
         sett.setdefault('flood_admins', False)
         sett.setdefault('auto_reactions', True)
         sett.setdefault('welcome_enabled', True)
+        sett.setdefault('language', 'ru')
+        sett.setdefault('warn_limit', 3)
         # Раньше стоял жёсткий лимит 30/60 дней — теперь ограничения нет.
         # Не вызываем mark_dirty() при обычном чтении настроек.
         if sett.get('max_days') is not None:
@@ -2212,11 +2398,13 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             'username': clean_u,
             'user_id': user_id,
             'balance': 50,
-            'karma': 0
+            'karma': 0,
+            'language': 'ru'
         }
         mark_dirty()
 
     u_data = db['economy'][key]
+    u_data.setdefault('language', 'ru')
 
     # Миграция старых донатных значков: в прошлой версии они имели
     # ключи vip_badge_*. Не удаляем старые права и не заставляем игрока
@@ -2878,6 +3066,286 @@ def is_chat_owner(chat_id, user_id):
     except Exception:
         return False
 
+
+# ---------------------------------------------------------
+# МОДЕРАЦИЯ ГРУПП: WARN / MUTE / BAN / KICK
+# ---------------------------------------------------------
+MOD_DURATION_RE = re.compile(
+    r'(\d+)\s*(?:секунд(?:а|ы)?|сек|с|минут(?:а|ы)?|мин|час(?:а|ов)?|ч|д(?:ень|ня|ней)?|сут(?:ки|ок)?|недел(?:я|и|ь)|н|месяц(?:а|ев)?|мес|год(?:а|ов)?|г|м)',
+    re.IGNORECASE
+)
+MOD_ACTIONS = ('warn', 'mute', 'ban', 'kick')
+MOD_LANGS = {'ru', 'uk', 'en'}
+
+def _mod_chat(chat_id):
+    key = str(chat_id)
+    if key not in db.setdefault('moderation', {}) or not isinstance(db['moderation'][key], dict):
+        db['moderation'][key] = {'users': {}}
+        mark_dirty()
+    db['moderation'][key].setdefault('users', {})
+    return db['moderation'][key]
+
+def _mod_user(chat_id, user_id):
+    data = _mod_chat(chat_id)['users']
+    key = str(user_id)
+    if key not in data or not isinstance(data[key], dict):
+        data[key] = {'warns': 0, 'warn_history': [], 'mute_until': None, 'ban_until': None, 'mute_active': False, 'ban_active': False}
+        mark_dirty()
+    data[key].setdefault('warns', 0)
+    data[key].setdefault('warn_history', [])
+    data[key].setdefault('mute_until', None)
+    data[key].setdefault('ban_until', None)
+    data[key].setdefault('mute_active', bool(data[key].get('mute_until')))
+    data[key].setdefault('ban_active', bool(data[key].get('ban_until')))
+    return data[key]
+
+def _parse_mod_duration(raw):
+    """Return seconds or None for permanent. Empty duration is permanent for ban/mute."""
+    text = (raw or '').strip().lower()
+    if not text or re.search(r'^(?:навсегда|бессрочно|без\s+срока|перманент(?:но)?|perm)$', text):
+        return None
+    m = MOD_DURATION_RE.search(text)
+    if not m:
+        return None
+    value = int(m.group(1))
+    unit = m.group(0).lower()
+    if re.search(r'сек|с$', unit): mult = 1
+    elif re.search(r'мин|м$', unit): mult = 60
+    elif re.search(r'час|ч$', unit): mult = 3600
+    elif re.search(r'д|сут', unit): mult = 86400
+    elif re.search(r'нед|\bн$', unit): mult = 7 * 86400
+    elif re.search(r'мес', unit): mult = 30 * 86400
+    elif re.search(r'год|г$', unit): mult = 365 * 86400
+    elif re.search(r'м$', unit): mult = 60
+    else: return None
+    return max(1, value * mult)
+
+def _format_mod_until(until):
+    if not until:
+        return 'навсегда'
+    left = max(0, int(float(until) - time.time()))
+    d, rem = divmod(left, 86400); h, rem = divmod(rem, 3600); m, _ = divmod(rem, 60)
+    if d: return f'{d} д.'
+    if h: return f'{h} ч.'
+    return f'{max(1,m)} мин.'
+
+def _mod_target(message, raw_target=''):
+    if getattr(message, 'reply_to_message', None):
+        u = message.reply_to_message.from_user
+        return int(u.id), (f'{u.first_name or ""} {u.last_name or ""}').strip() or u.username or f'ID:{u.id}'
+    raw = (raw_target or '').strip()
+    if not raw:
+        return None, None
+    m = re.search(r'(?:tg://(?:openmessage\?user_id=|user\?id=)|@)?(\d+)$', raw)
+    if m and raw.replace('@','').isdigit():
+        uid = int(m.group(1)); econ = get_user_econ(user_id=uid)
+        return uid, econ.get('display_name', f'ID:{uid}')
+    m = re.search(r'@([A-Za-z0-9_]{3,32})', raw)
+    q = m.group(1) if m else raw.split()[0]
+    uid, name = resolve_user_from_string(message.chat.id, q)
+    if uid: return int(uid), name or q
+    # If no DB match, Telegram cannot reliably resolve an arbitrary username to ID.
+    return None, q
+
+def _mod_parse(message, command):
+    text = (message.text or '').strip()
+    body = re.sub(r'^/?' + re.escape(command) + r'\s*', '', text, flags=re.IGNORECASE).strip()
+    if message.reply_to_message:
+        target_id, target_name = _mod_target(message)
+        return target_id, target_name, body
+    parts = body.split(None, 1)
+    if not parts: return None, None, ''
+    target_raw = parts[0]
+    rest = parts[1] if len(parts) > 1 else ''
+    target_id, target_name = _mod_target(message, target_raw)
+    return target_id, target_name, rest
+
+def _mod_is_group(message):
+    return getattr(message.chat, 'type', '') in ('group', 'supergroup')
+
+def _mod_can_act(message, target_id):
+    if not _mod_is_group(message):
+        return False, 'Эти команды работают только в группах.'
+    if not is_admin(message.chat.id, message.from_user.id):
+        return False, 'Команда доступна только администраторам чата.'
+    if not target_id:
+        return False, 'Не удалось определить пользователя. Ответь на его сообщение или укажи @username/ID.'
+    if int(target_id) == int(message.from_user.id):
+        return False, 'Нельзя применить модерацию к себе.'
+    try:
+        target_member = bot.get_chat_member(message.chat.id, int(target_id))
+        if target_member.status in ('creator', 'administrator'):
+            return False, 'Нельзя модерировать владельца или администратора с такими правами.'
+    except Exception:
+        pass
+    return True, ''
+
+def _bot_can_restrict(chat_id):
+    try:
+        me = bot.get_me()
+        member = bot.get_chat_member(chat_id, me.id)
+        return member.status in ('administrator', 'creator') and bool(getattr(member, 'can_restrict_members', False) or member.status == 'creator')
+    except Exception:
+        return False
+
+def _mod_restrict(chat_id, user_id, until=None):
+    # Permanent mute: no until_date. Temporary mute: Telegram receives an absolute timestamp.
+    from telebot.types import ChatPermissions
+    perms = ChatPermissions(can_send_messages=False, can_send_audios=False, can_send_documents=False,
+                            can_send_photos=False, can_send_videos=False, can_send_video_notes=False,
+                            can_send_voice_notes=False, can_send_polls=False, can_send_other_messages=False,
+                            can_add_web_page_previews=False)
+    kwargs = {'chat_id': chat_id, 'user_id': user_id, 'permissions': perms, 'use_independent_chat_permissions': True}
+    if until: kwargs['until_date'] = int(until)
+    bot.restrict_chat_member(**kwargs)
+
+def _mod_unmute(chat_id, user_id):
+    from telebot.types import ChatPermissions
+    perms = ChatPermissions(can_send_messages=True, can_send_audios=True, can_send_documents=True,
+                            can_send_photos=True, can_send_videos=True, can_send_video_notes=True,
+                            can_send_voice_notes=True, can_send_polls=True, can_send_other_messages=True,
+                            can_add_web_page_previews=True)
+    bot.restrict_chat_member(chat_id, user_id, permissions=perms, use_independent_chat_permissions=True)
+
+def _mod_ban(chat_id, user_id, until=None):
+    kwargs = {'chat_id': chat_id, 'user_id': user_id, 'revoke_messages': False}
+    if until: kwargs['until_date'] = int(until)
+    bot.ban_chat_member(**kwargs)
+
+def _mod_unban(chat_id, user_id):
+    bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
+
+def _clear_moderation(message, action):
+    if not _mod_is_group(message):
+        bot.reply_to(message,'❌ Эта команда работает только в группе.'); return
+    if not is_admin(message.chat.id,message.from_user.id):
+        bot.reply_to(message,'❌ Команда доступна только администраторам чата.'); return
+    target_id,target_name,args=_mod_parse(message,action)
+    if not target_id:
+        bot.reply_to(message,'❌ Укажи пользователя или ответь на его сообщение.'); return
+    rec=_mod_user(message.chat.id,target_id); rec['name']=target_name
+    try:
+        if action=='unmute':
+            _mod_unmute(message.chat.id,target_id); rec['mute_until']=None; rec['mute_active']=False
+            bot.reply_to(message,f'🔊 {make_link(message.chat.id,target_name,target_id,ping=True)} снова может писать.',parse_mode='HTML')
+        else:
+            _mod_unban(message.chat.id,target_id); rec['ban_until']=None; rec['ban_active']=False
+            bot.reply_to(message,f'🔓 {make_link(message.chat.id,target_name,target_id,ping=True)} разблокирован.',parse_mode='HTML')
+        mark_dirty()
+    except Exception as exc:
+        bot.reply_to(message,f'❌ Не удалось снять ограничение: <code>{html.escape(str(exc))}</code>',parse_mode='HTML')
+
+def _mod_list(message, kind):
+    if not _mod_is_group(message):
+        bot.reply_to(message, 'Списки модерации доступны только в группах.')
+        return
+    if not is_admin(message.chat.id, message.from_user.id):
+        bot.reply_to(message, 'Списки модерации доступны только администраторам.')
+        return
+    users = _mod_chat(message.chat.id)['users']
+    now = time.time(); lines=[]
+    for uid, info in users.items():
+        if kind == 'warn' and int(info.get('warns',0)) > 0:
+            lines.append(f'• {make_link(message.chat.id, info.get("name", f"ID:{uid}"), int(uid), ping=False)} — {info["warns"]} варн(ов)')
+        elif kind == 'mute' and info.get('mute_active'):
+            lines.append(f'• {make_link(message.chat.id, info.get("name", f"ID:{uid}"), int(uid), ping=False)} — {_format_mod_until(info["mute_until"])}')
+        elif kind == 'ban' and info.get('ban_active'):
+            lines.append(f'• {make_link(message.chat.id, info.get("name", f"ID:{uid}"), int(uid), ping=False)} — {_format_mod_until(info["ban_until"])}')
+    title = {'warn':'⚠️ ВАРНЫ','mute':'🔇 МУТЫ','ban':'🔨 БАНЫ'}[kind]
+    bot.reply_to(message, f'{title}\n──────────────────────\n' + ('\n'.join(lines) if lines else 'Список пуст.') + f'\n\nЛимит варнов: {get_chat_settings(message.chat.id).get("warn_limit",3)}', parse_mode='HTML')
+
+def _execute_moderation(message, action):
+    if not _mod_is_group(message):
+        bot.reply_to(message, '❌ Эта команда работает только в группе.')
+        return
+    target_id, target_name, args = _mod_parse(message, action)
+    ok, err = _mod_can_act(message, target_id)
+    if not ok:
+        bot.reply_to(message, '❌ ' + err)
+        return
+    args = args.strip()
+    duration = None; reason = 'Не указана'
+    if action == 'warn':
+        reason = args or reason
+    elif action == 'kick':
+        reason = args or reason
+    else:
+        dm = re.match(r'^(?P<dur>\d+\s*(?:сек|с|мин|м|час|ч|д|дн(?:я|ей)?|н|нед(?:еля|ели)?|мес(?:яц|яца|яцев)?|г|год(?:а|ов)?)|навсегда|бессрочно|без\s+срока)\b(?:\s+|$)(?P<reason>.*)$', args, re.IGNORECASE)
+        if dm:
+            duration = _parse_mod_duration(dm.group('dur'))
+            reason = dm.group('reason').strip() or reason
+        elif args:
+            # No duration => permanent for ban/mute.
+            duration = None; reason = args
+    now = time.time()
+    until = now + duration if duration else None
+    rec = _mod_user(message.chat.id, target_id)
+    rec['name'] = target_name
+    try:
+        if action == 'warn':
+            rec['warns'] = int(rec.get('warns',0)) + 1
+            rec['warn_history'].append({'time': now, 'reason': reason, 'by': message.from_user.id})
+            limit = max(1, int(get_chat_settings(message.chat.id).get('warn_limit',3) or 3))
+            mark_dirty()
+            if rec['warns'] >= limit:
+                _mod_ban(message.chat.id, target_id, None)
+                rec['ban_until'] = None
+                rec['ban_active'] = True
+                rec['warns'] = 0
+                rec['warn_history'].append({'time': now, 'reason': f'Лимит варнов {limit}', 'by': message.from_user.id, 'auto_ban': True})
+                mark_dirty()
+                bot.reply_to(message, f'🔨 {make_link(message.chat.id,target_name,target_id,ping=True)} получил последний варн и автоматически заблокирован: лимит {limit}/{limit}.', parse_mode='HTML')
+            else:
+                bot.reply_to(message, f'⚠️ {make_link(message.chat.id,target_name,target_id,ping=True)} получил варн {rec["warns"]}/{limit}.\nПричина: {html.escape(reason)}', parse_mode='HTML')
+        elif action == 'mute':
+            _mod_restrict(message.chat.id, target_id, until)
+            rec['mute_until'] = until
+            rec['mute_active'] = True
+            mark_dirty()
+            bot.reply_to(message, f'🔇 {make_link(message.chat.id,target_name,target_id,ping=True)} получил мут: {_format_mod_until(until)}.\nПричина: {html.escape(reason)}', parse_mode='HTML')
+        elif action == 'ban':
+            _mod_ban(message.chat.id, target_id, until)
+            rec['ban_until'] = until
+            rec['ban_active'] = True
+            mark_dirty()
+            bot.reply_to(message, f'🔨 {make_link(message.chat.id,target_name,target_id,ping=True)} заблокирован: {_format_mod_until(until)}.\nПричина: {html.escape(reason)}', parse_mode='HTML')
+        elif action == 'kick':
+            _mod_ban(message.chat.id, target_id, None)
+            _mod_unban(message.chat.id, target_id)
+            bot.reply_to(message, f'👢 {make_link(message.chat.id,target_name,target_id,ping=True)} исключён из группы.\nПричина: {html.escape(reason)}', parse_mode='HTML')
+    except Exception as exc:
+        bot.reply_to(message, f'❌ Не удалось выполнить действие: <code>{html.escape(str(exc))}</code>', parse_mode='HTML')
+
+def _moderation_worker():
+    while True:
+        time.sleep(10)
+        now = time.time()
+        try:
+            for chat_id, data in list(db.get('moderation', {}).items()):
+                try: cid = int(chat_id)
+                except Exception: continue
+                users = data.get('users', {}) if isinstance(data, dict) else {}
+                for uid, rec in list(users.items()):
+                    try: user_id = int(uid)
+                    except Exception: continue
+                    changed = False
+                    if rec.get('mute_until') and rec['mute_until'] <= now:
+                        try: _mod_unmute(cid, user_id)
+                        except Exception: pass
+                        rec['mute_until'] = None; rec['mute_active'] = False; changed = True
+                    if rec.get('ban_until') and rec['ban_until'] <= now:
+                        try: _mod_unban(cid, user_id)
+                        except Exception: pass
+                        rec['ban_until'] = None; rec['ban_active'] = False; changed = True
+                    if changed: mark_dirty()
+        except Exception as exc:
+            print(f'[MOD WORKER ERROR] {exc}')
+
+
+def _start_moderation_worker():
+    t = threading.Thread(target=_moderation_worker, daemon=True, name='moderation-expiry')
+    t.start()
+
 def resolve_user_from_string(chat_id, query_str):
     if not query_str:
         return None, None
@@ -3298,7 +3766,7 @@ def apply_rest(chat_id, user_name, duration_text, reason='Не указана', 
     econ = get_user_econ(target_user_id, clean_user)
     reward_given = False
     if econ['rest_rewards_count'] < 5:
-        econ['balance'] += 150
+        # Рест больше не начисляет коины. Старый бонус +150 удалён.
         econ['rest_rewards_count'] += 1
         reward_given = True
 
@@ -6288,53 +6756,60 @@ def cmd_history(message):
     lines.append("──────────────────────")
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
 
-def render_settings_view(chat_id, user_id=None, message_id=None):
-    sett = get_chat_settings(chat_id)
-    rp_status = "✅ Включено" if sett.get('rp_enabled', True) else "❌ Выключено"
-    flood_status = "✅ Включён" if sett.get('flood_protection', False) else "❌ Выключен"
-    flood_admin_status = "✅ Да" if sett.get('flood_admins', False) else "❌ Нет"
-    react_status = "✅ Включены" if sett.get('auto_reactions', True) else "❌ Выключены"
-    welcome_status = "✅ Включено" if sett.get('welcome_enabled', True) else "❌ Выключено"
+def _lang_keyboard(chat_id, user_id, group=False):
+    prefix = 'set_chat_lang' if group else 'set_user_lang'
+    uid = int(user_id or 0)
+    kb = InlineKeyboardMarkup(row_width=3)
+    kb.add(InlineKeyboardButton('🇷🇺 Русский', callback_data=f'{prefix}_ru:{uid}'),
+           InlineKeyboardButton('🇺🇦 Українська', callback_data=f'{prefix}_uk:{uid}'),
+           InlineKeyboardButton('🇬🇧 English', callback_data=f'{prefix}_en:{uid}'))
+    return kb
 
-    uid_tag = f":{user_id}" if user_id else ""
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton(f"🎭 РП-команды: {rp_status}", callback_data=f"toggle_rp{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"🛡 Антифлуд: {flood_status}", callback_data=f"toggle_flood{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"👮 Антифлуд для админов: {flood_admin_status}", callback_data=f"toggle_flood_admins{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"✨ Авто-реакции: {react_status}", callback_data=f"toggle_reactions{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"👋 Приветствия: {welcome_status}", callback_data=f"toggle_welcome{uid_tag}"))
-    markup.add(InlineKeyboardButton(f"🔔 Напоминание: {sett.get('remind_minutes', 60)} мин.", callback_data=f"set_remind_time{uid_tag}"))
-
-    text = (
-        f"⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺\n"
-        f"──────────────────────\n"
-        f"🌴 Максимальный срок реста: <b>без ограничений</b>\n"
-        f"🎭 РП-команды: <b>{rp_status}</b>\n"
-        f"🛡 Антифлуд: <b>{flood_status}</b> — 5 команд/час\n"
-        f"👮 Антифлуд для админов: <b>{flood_admin_status}</b> (владелец чата всегда исключён)\n"
-        f"✨ Авто-реакции: <b>{react_status}</b>\n"
-        f"👋 Приветствия: <b>{welcome_status}</b>\n"
-        f"🔔 Напоминание: за <b>{sett.get('remind_minutes', 60)} мин.</b>\n"
-        f"──────────────────────\n"
-        f"<i>Все переключатели доступны администраторам чата.</i> 😸"
-    )
-
+def render_private_settings(chat_id, user_id, message_id=None):
+    econ=get_user_econ(user_id=user_id)
+    lang=econ.get('language','ru') if econ else 'ru'
+    text={'ru':'⚙️ <b>ЛИЧНЫЕ НАСТРОЙКИ</b>\nВыбери язык ответов бота в личных сообщениях.','uk':'⚙️ <b>ОСОБИСТІ НАЛАШТУВАННЯ</b>\nОбери мову відповідей бота в особистих повідомленнях.','en':'⚙️ <b>PERSONAL SETTINGS</b>\nChoose the language for bot replies in private chat.'}.get(lang,'')
+    text += f'\n\n🌐 {lang.upper()}'
     if message_id:
-        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-        return
-    try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-    except Exception as e: print(f"[NONFATAL ERROR] {e}")
+        bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=_lang_keyboard(chat_id,user_id,False),parse_mode='HTML')
+    else:
+        bot.send_message(chat_id,text,reply_markup=_lang_keyboard(chat_id,user_id,False),parse_mode='HTML')
 
-@bot.message_handler(commands=['settings', 'настройки'])
+def render_settings_view(chat_id, user_id=None, message_id=None):
+    sett=get_chat_settings(chat_id); lang=sett.get('language','ru')
+    labels={
+      'ru':('⚙️ <b>НАСТРОЙКИ НЯ-БОТА ДЛЯ ЧАТА</b> 😺','РП-команды','Антифлуд','Антифлуд для админов','Авто-реакции','Приветствия','Напоминание','Лимит варнов','Язык'),
+      'uk':('⚙️ <b>НАЛАШТУВАННЯ Nya-БОТА ДЛЯ ЧАТУ</b> 😺','РП-команди','Антифлуд','Антифлуд для адмінів','Авто-реакції','Привітання','Нагадування','Ліміт варнів','Мова'),
+      'en':('⚙️ <b>NYA BOT CHAT SETTINGS</b> 😺','RP commands','Anti-flood','Anti-flood for admins','Auto reactions','Welcome messages','Reminder','Warn limit','Language')
+    }[lang]
+    rp='✅' if sett.get('rp_enabled',True) else '❌'; flood='✅' if sett.get('flood_protection',False) else '❌'; fa='✅' if sett.get('flood_admins',False) else '❌'; react='✅' if sett.get('auto_reactions',True) else '❌'; welcome='✅' if sett.get('welcome_enabled',True) else '❌'
+    uid_tag=f':{user_id}' if user_id else ''
+    kb=InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton(f'🎭 {labels[1]}: {rp}',callback_data=f'toggle_rp{uid_tag}'))
+    kb.add(InlineKeyboardButton(f'🛡 {labels[2]}: {flood}',callback_data=f'toggle_flood{uid_tag}'))
+    kb.add(InlineKeyboardButton(f'👮 {labels[3]}: {fa}',callback_data=f'toggle_flood_admins{uid_tag}'))
+    kb.add(InlineKeyboardButton(f'✨ {labels[4]}: {react}',callback_data=f'toggle_reactions{uid_tag}'))
+    kb.add(InlineKeyboardButton(f'👋 {labels[5]}: {welcome}',callback_data=f'toggle_welcome{uid_tag}'))
+    kb.add(InlineKeyboardButton(f'🔔 {labels[6]}: {sett.get("remind_minutes",60)} min',callback_data=f'set_remind_time{uid_tag}'))
+    kb.add(InlineKeyboardButton(f'⚠️ {labels[7]}: {sett.get("warn_limit",3)}',callback_data=f'set_warn_limit{uid_tag}'))
+    kb.add(*_lang_keyboard(chat_id,user_id,True).keyboard[0])
+    text=(f'{labels[0]}\n──────────────────────\n🌐 {labels[8]}: <b>{lang.upper()}</b>\n⚠️ {labels[7]}: <b>{sett.get("warn_limit",3)}</b>\n\n<i>Настройки группы доступны администраторам.</i>')
+    if message_id:
+        bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=kb,parse_mode='HTML')
+    else:
+        bot.send_message(chat_id,text,reply_markup=kb,parse_mode='HTML')
+
+@bot.message_handler(commands=['settings','настройки'])
 @serialize_user_action
 def cmd_settings(message):
-    if not can_process_user_message(message):
+    if not can_process_user_message(message): return
+    if getattr(message.chat,'type','') == 'private':
+        render_private_settings(message.chat.id,message.from_user.id)
         return
-    if not is_admin(message.chat.id, message.from_user.id):
-        bot.reply_to(message, "❌ Настройки доступны только администраторам чата! 😾")
+    if not is_admin(message.chat.id,message.from_user.id):
+        bot.reply_to(message,'❌ Настройки группы доступны только администраторам чата! 😾')
         return
-    render_settings_view(message.chat.id, message.from_user.id)
+    render_settings_view(message.chat.id,message.from_user.id)
 
 # ---------------------------------------------------------
 # НАСТРОЙКИ ПРОФИЛЯ
@@ -9267,6 +9742,42 @@ def dragon_audio_file_id(message):
         print(f'[DRAGON AUDIO FILE_ID ERROR] {e}')
 
 
+@bot.message_handler(commands=['ban','бан'])
+@serialize_user_action
+def cmd_ban(message): _execute_moderation(message,'ban')
+
+@bot.message_handler(commands=['mute','мут'])
+@serialize_user_action
+def cmd_mute(message): _execute_moderation(message,'mute')
+
+@bot.message_handler(commands=['kick','кик'])
+@serialize_user_action
+def cmd_kick(message): _execute_moderation(message,'kick')
+
+@bot.message_handler(commands=['warn','варн'])
+@serialize_user_action
+def cmd_warn(message): _execute_moderation(message,'warn')
+
+@bot.message_handler(commands=['unban','разбан'])
+@serialize_user_action
+def cmd_unban(message): _clear_moderation(message,'unban')
+
+@bot.message_handler(commands=['unmute','анмут','снятьмут'])
+@serialize_user_action
+def cmd_unmute(message): _clear_moderation(message,'unmute')
+
+@bot.message_handler(commands=['bans','баны'])
+@serialize_user_action
+def cmd_bans(message): _mod_list(message,'ban')
+
+@bot.message_handler(commands=['mutes','муты'])
+@serialize_user_action
+def cmd_mutes(message): _mod_list(message,'mute')
+
+@bot.message_handler(commands=['warns','варны'])
+@serialize_user_action
+def cmd_warns(message): _mod_list(message,'warn')
+
 @bot.message_handler(func=lambda message: True)
 @serialize_user_action
 def handle_messages(message):
@@ -9874,7 +10385,7 @@ def handle_messages(message):
         if in_rest and rest_info:
             display_name = rest_info.get('user_name', target_found_name or 'Пользователь')
             user_link = make_link(chat_id, display_name, target_found_id or rest_info.get('user_id'), ping=False)
-            bot.reply_to(message, f"🌴 <b>Пользователь {user_link} находится в ресте!</b> 😺\n📝 <b>Причина:</b> {html.escape(rest_info.get('reason', 'Не указана'))}\n⏱ <b>Срок:</b> {html.escape(rest_info.get('duration', 'Не указан'))}", parse_mode='HTML')
+            bot.reply_to(message, f"🌴 <b>Пользователь {user_link} находится в ресте!</b> 😺\n📝 <b>Причина:</b> {html.escape(rest_html.escape(str(info.get('reason', 'Не указана'))))}\n⏱ <b>Срок:</b> {html.escape(rest_info.get('duration', 'Не указан'))}", parse_mode='HTML')
         else:
             display_name = target_found_name or 'Пользователь'
             user_link = make_link(chat_id, display_name, target_found_id, ping=False)
@@ -10307,6 +10818,17 @@ def handle_messages(message):
         )
         return
 
+    # МОДЕРАЦИЯ: русские текстовые команды без /.
+    if text_lower.startswith(('бан ', 'бан\n')) or text_lower == 'бан': _execute_moderation(message,'ban'); return
+    if text_lower.startswith(('мут ', 'мут\n')) or text_lower == 'мут': _execute_moderation(message,'mute'); return
+    if text_lower.startswith(('кик ', 'кик\n')) or text_lower == 'кик': _execute_moderation(message,'kick'); return
+    if text_lower.startswith(('варн ', 'варн\n')) or text_lower == 'варн': _execute_moderation(message,'warn'); return
+    if text_lower.startswith(('разбан ', 'анбан ')) or text_lower == 'разбан': _clear_moderation(message,'unban'); return
+    if text_lower.startswith(('анмут ', 'снятьмут ')) or text_lower in ('анмут','снятьмут'): _clear_moderation(message,'unmute'); return
+    if text_lower in ('баны','банлист','список банов'): _mod_list(message,'ban'); return
+    if text_lower in ('муты','мутлист','список мутов'): _mod_list(message,'mute'); return
+    if text_lower in ('варны','варнлист','список варнов'): _mod_list(message,'warn'); return
+
     # РЕСТЫ
     if text_lower.startswith('+рест'):
         if not is_admin(chat_id, user_id): return
@@ -10352,7 +10874,7 @@ def handle_messages(message):
             for r_key, info in db['rests'][str_chat].items():
                 u_name = info.get('user_name', r_key)
                 u_id = info.get('user_id')
-                resp += f"• {make_link(chat_id, u_name, u_id, ping=False)} — {info['duration']} (Причина: {info.get('reason', 'Не указана')})\n"
+                resp += f"• {make_link(chat_id, u_name, u_id, ping=False)} — {info['duration']} (Причина: {html.escape(str(info.get('reason', 'Не указана')))})\n"
             resp += '──────────────────────'
 
             markup = None
@@ -13173,7 +13695,7 @@ def callback_inline(call):
             for r_key, info in chat_rests.items():
                 u_name = info.get('user_name', r_key)
                 u_id = info.get('user_id')
-                resp += f"• {make_link(chat_id, u_name, u_id, ping=False)} — {info['duration']} (Причина: {info.get('reason', 'Не указана')})\n"
+                resp += f"• {make_link(chat_id, u_name, u_id, ping=False)} — {info['duration']} (Причина: {html.escape(str(info.get('reason', 'Не указана')))})\n"
             resp += '──────────────────────'
 
             markup = InlineKeyboardMarkup()
@@ -13241,6 +13763,31 @@ def callback_inline(call):
             mark_dirty()
             bot.answer_callback_query(call.id, f'✅ Напоминание установлено за {next_opt} мин! 😸')
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
+
+        elif action_data.startswith('set_user_lang_'):
+            if chat_id <= 0 or owner_id != user_id: return
+            lang=action_data.rsplit('_',1)[-1]
+            if lang not in MOD_LANGS: return
+            econ=get_user_econ(user_id=user_id); econ['language']=lang; mark_dirty(); save_data(send_backup=False)
+            bot.answer_callback_query(call.id,'✅ Язык сохранён!')
+            render_private_settings(chat_id,user_id,call.message.message_id)
+
+        elif action_data.startswith('set_chat_lang_'):
+            if not is_admin(chat_id,user_id): return
+            lang=action_data.rsplit('_',1)[-1]
+            if lang not in MOD_LANGS: return
+            get_chat_settings(chat_id)['language']=lang; mark_dirty(); save_data(send_backup=False)
+            bot.answer_callback_query(call.id,'✅ Язык группы сохранён!')
+            render_settings_view(chat_id,user_id,call.message.message_id)
+
+        elif action_data == 'set_warn_limit':
+            if not is_admin(chat_id,user_id): return
+            sett=get_chat_settings(chat_id)
+            vals=[1,2,3,4,5,7,10]
+            cur=int(sett.get('warn_limit',3) or 3); nxt=vals[(vals.index(cur)+1)%len(vals)] if cur in vals else 3
+            sett['warn_limit']=nxt; mark_dirty()
+            bot.answer_callback_query(call.id,f'⚠️ Лимит варнов: {nxt}')
+            render_settings_view(chat_id,user_id,call.message.message_id)
 
         # GIF ДЛЯ ПРОФИЛЯ — ТОЛЬКО TELEGRAM STARS
         elif action_data == 'shop_cat_gifs':
