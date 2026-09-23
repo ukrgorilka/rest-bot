@@ -329,6 +329,78 @@ _LOCALE_PHRASES = {
  }
 }
 
+
+# Расширенный офлайн-словарь. Он нужен именно как fallback для старых f-string
+# сообщений: новые сообщения переводятся фразами выше, а динамические числа,
+# имена и значения остаются на месте. HTML/code/URL защищаются до перевода.
+_LOCALE_WORDS = {
+ 'uk': {
+  'вы':'ви','вас':'вас','ваш':'ваш','ваша':'ваша','ваши':'ваші','вашему':'вашому','вам':'вам','себе':'собі',
+  'пользователь':'користувач','пользователя':'користувача','пользователи':'користувачі','игрок':'гравець','игрока':'гравця','игроков':'гравців',
+  'чат':'чат','чата':'чату','группа':'група','группы':'групи','групп':'груп','сообщение':'повідомлення','сообщений':'повідомлень',
+  'команда':'команда','команды':'команди','настройки':'налаштування','настройка':'налаштування','язык':'мова','языка':'мови',
+  'баланс':'баланс','банк':'банк','бизнес':'бізнес','бизнесы':'бізнеси','бизнесов':'бізнесів','магазин':'магазин','профиль':'профіль','профиля':'профілю',
+  'игра':'гра','игры':'ігри','игру':'гру','игре':'грі','уровень':'рівень','опыт':'досвід','награда':'нагорода','награды':'нагороди',
+  'ставка':'ставка','выигрыш':'виграш','прибыль':'прибуток','зарплата':'зарплата','работа':'робота','работе':'роботі','работы':'роботи',
+  'купить':'купити','купите':'купіть','куплен':'куплено','куплен?':'куплено','продать':'продати','собрать':'зібрати','забрать':'забрати',
+  'получить':'отримати','получатель':'отримувач','выдать':'видати','передать':'передати','открыть':'відкрити','используйте':'використовуйте','нажмите':'натисніть',
+  'укажите':'вкажіть','укажи':'вкажи','выберите':'оберіть','выбери':'обери','выбран':'обрано','найден':'знайдено','найдена':'знайдено','найти':'знайти',
+  'нельзя':'не можна','недостаточно':'недостатньо','нужно':'потрібно','можно':'можна','доступен':'доступний','доступна':'доступна','доступны':'доступні',
+  'ошибка':'помилка','ошибки':'помилки','причина':'причина','лимит':'ліміт','список':'список','списки':'списки','статус':'статус','формат':'формат',
+  'всего':'всього','уже':'вже','сейчас':'зараз','пока':'поки','только':'лише','обычный':'звичайний','навсегда':'назавжди','без':'без','через':'через',
+  'день':'день','дня':'дні','дней':'днів','час':'годину','часа':'години','часов':'годин','минут':'хвилин','минута':'хвилина','минуты':'хвилини',
+  'раз':'раз','назад':'тому','текущий':'поточний','первый':'перший','новый':'новий','новая':'нова','новое':'нове','старый':'старий','старый':'старий',
+  'история':'історія','карты':'карти','карта':'карта','питомец':'улюбленець','питомца':'улюбленця','рыба':'риба','дом':'дім','тема':'тема','темы':'теми',
+  'семейный':'сімейний','брак':'шлюб','браке':'шлюбі','владелец':'власник','администратор':'адміністратор','администраторам':'адміністраторам',
+  'варн':'варн','мут':'мут','бан':'бан','рест':'рест','антифлуд':'антифлуд','приветствия':'привітання','напоминание':'нагадування',
+  'бонус':'бонус','бонусы':'бонуси','подарок':'подарунок','подарки':'подарунки','звезды':'зірки','кредит':'кредит','депозит':'депозит','средств':'коштів',
+  'промокод':'промокод','код':'код','сумма':'сума','срок':'термін','причина':'причина','режим':'режим','защита':'захист','сигнализация':'сигналізація',
+  'успешно':'успішно','успешно!':'успішно!','обновить':'оновити','обновлён':'оновлено','обновлена':'оновлена','завершена':'завершена','завершено':'завершено',
+  'началась':'почалася','началась!':'почалася!','началась.':'почалася.','началась':'почалася','начать':'почати','завершить':'завершити',
+  'отменить':'скасувати','отменена':'скасовано','снят':'знято','снята':'знята','снять':'зняти','надеть':'одягнути','надет':'одягнено','надета':'одягнена',
+  'выдан':'видано','выдана':'видана','получен':'отримано','получена':'отримана','активирован':'активовано','активирована':'активована',
+  'продолжить':'продовжити','создать':'створити','создан':'створено','создана':'створена','присоединиться':'приєднатися','подключились':'підключилися',
+  'участников':'учасників','участник':'учасник','участники':'учасники','доступ':'доступ','проверить':'перевірити','проверка':'перевірка',
+  'введите':'введіть','введите':'введіть','укажите':'вкажіть','ответом':'відповіддю','ответьте':'відповідайте','напишите':'напишіть',
+  'свой':'свій','своя':'своя','свои':'свої','этот':'цей','эта':'ця','это':'це','эти':'ці','такой':'такий','такая':'така','такое':'таке',
+  'всё':'усе','все':'всі','нет':'немає','есть':'є','больше':'більше','меньше':'менше','максимальный':'максимальний','минимальный':'мінімальний',
+  'должен':'має','должна':'має','должно':'має','может':'може','будет':'буде','нужен':'потрібен','нужна':'потрібна','нужно':'потрібно',
+  'публичный':'публічний','публичного':'публічного','редкий':'рідкісний','автоматически':'автоматично','автоматический':'автоматичний',
+  'ресурс':'ресурс','ресурса':'ресурсу','предмет':'предмет','предмета':'предмета','каталог':'каталог','машина':'машина','машину':'машину',
+  'колесо':'колесо','сапёр':'сапер','змейка':'змійка','тир':'тир','реакция':'реакція','энергетик':'енергетик','клевер':'конюшина',
+  'рыбалка':'рибалка','охота':'полювання','сад':'сад','растение':'рослина','растение':'рослина','грядка':'грядка','грядки':'грядки',
+  'питомца':'улюбленця','игровой':'ігровий','стол':'стіл','игровому':'ігровому','карты':'карти','ход':'хід','раунд':'раунд','раунда':'раунду',
+  'счет':'рахунок','счёт':'рахунок','деньги':'гроші','денег':'грошей','монет':'монет','коинов':'коїнів','коины':'коїни','коин':'коїн','ня':'ня',
+  'титул':'титул','титула':'титулу','премиум':'преміум','донатный':'донатний','донатные':'донатні','настройках':'налаштуваннях',
+ },
+ 'en': {
+  'вы':'you','вас':'you','ваш':'your','ваша':'your','ваши':'your','вам':'you','себе':'yourself','пользователь':'user','пользователя':'user','пользователи':'users',
+  'игрок':'player','игрока':'player','игроков':'players','чат':'chat','чата':'chat','группа':'group','группы':'groups','групп':'groups','сообщение':'message','сообщений':'messages',
+  'команда':'command','команды':'commands','настройки':'settings','настройка':'setting','язык':'language','языка':'language','баланс':'balance','банк':'bank',
+  'бизнес':'business','бизнесы':'businesses','бизнесов':'businesses','магазин':'shop','профиль':'profile','профиля':'profile','игра':'game','игры':'games','игру':'game','игре':'game',
+  'уровень':'level','опыт':'experience','награда':'reward','награды':'rewards','ставка':'bet','выигрыш':'winnings','прибыль':'profit','зарплата':'salary','работа':'job','работе':'job','работы':'jobs',
+  'купить':'buy','купите':'buy','куплен':'purchased','продать':'sell','собрать':'collect','забрать':'claim','получить':'get','получатель':'recipient','выдать':'give','передать':'transfer',
+  'открыть':'open','используйте':'use','нажмите':'press','укажите':'specify','укажи':'specify','выберите':'choose','выбери':'choose','найден':'found','найдена':'found','найти':'find',
+  'нельзя':'cannot','недостаточно':'not enough','нужно':'need','можно':'can','доступен':'available','доступна':'available','доступны':'available','ошибка':'error','ошибки':'errors',
+  'причина':'reason','лимит':'limit','список':'list','списки':'lists','статус':'status','формат':'format','всего':'total','уже':'already','сейчас':'now','пока':'currently','только':'only',
+  'обычный':'normal','навсегда':'permanently','без':'without','через':'in','день':'day','дня':'days','дней':'days','час':'hour','часа':'hours','часов':'hours','минут':'minutes','минута':'minute','минуты':'minutes',
+  'раз':'time','назад':'ago','текущий':'current','первый':'first','новый':'new','новая':'new','новое':'new','старый':'old','история':'history','карты':'cards','карта':'card',
+  'питомец':'pet','питомца':'pet','рыба':'fish','дом':'home','тема':'theme','темы':'themes','семейный':'family','брак':'marriage','браке':'marriage','владелец':'owner',
+  'администратор':'administrator','администраторам':'administrators','варн':'warn','мут':'mute','бан':'ban','рест':'rest','антифлуд':'anti-flood','приветствия':'welcome','напоминание':'reminder',
+  'бонус':'bonus','бонусы':'bonuses','подарок':'gift','подарки':'gifts','звезды':'Stars','кредит':'loan','депозит':'deposit','средств':'funds','промокод':'promo code','код':'code','сумма':'amount','срок':'duration',
+  'режим':'mode','защита':'protection','сигнализация':'alarm','успешно':'successfully','обновить':'refresh','обновлён':'updated','обновлена':'updated','завершена':'finished','завершено':'finished',
+  'началась':'started','начать':'start','завершить':'finish','отменить':'cancel','отменена':'cancelled','снят':'removed','снята':'removed','снять':'remove','надеть':'wear','надет':'equipped','надета':'equipped',
+  'выдан':'granted','выдана':'granted','получен':'received','получена':'received','активирован':'activated','активирована':'activated','продолжить':'continue','создать':'create','создан':'created','создана':'created',
+  'присоединиться':'join','подключились':'joined','участников':'members','участник':'member','участники':'members','доступ':'access','проверить':'check','проверка':'check',
+  'введите':'enter','ответом':'by reply','ответьте':'reply','напишите':'write','свой':'your','своя':'your','свои':'your','этот':'this','эта':'this','это':'this','эти':'these','такой':'such','такая':'such','такое':'such',
+  'всё':'everything','все':'all','нет':'no','есть':'there is','больше':'more','меньше':'less','максимальный':'maximum','минимальный':'minimum','должен':'must','должна':'must','должно':'must','может':'can','будет':'will','нужен':'need','нужна':'need','нужно':'need',
+  'публичный':'public','публичного':'public','редкий':'rare','автоматически':'automatically','автоматический':'automatic','ресурс':'resource','ресурса':'resource','предмет':'item','предмета':'item','каталог':'catalog',
+  'машина':'vehicle','машину':'vehicle','колесо':'wheel','сапёр':'minesweeper','змейка':'snake','тир':'shooting range','реакция':'reaction','энергетик':'energy drink','клевер':'clover',
+  'рыбалка':'fishing','охота':'hunting','сад':'garden','растение':'plant','грядка':'plot','грядки':'plots','игровой':'game','стол':'table','ход':'turn','раунд':'round','счёт':'score','счет':'score','деньги':'money','денег':'money','монет':'coins','коинов':'coins','коины':'coins','коин':'coin','ня':'Nya',
+  'титул':'title','титула':'title','премиум':'premium','донатный':'donation','донатные':'donation','настройках':'settings'
+ }
+}
+
 def _bot_output_language(chat_id, user_id=None):
     try:
         cid=int(chat_id)
@@ -350,27 +422,76 @@ def _localize_bot_text(text, lang):
     def protect(m):
         protected.append(m.group(0)); return f'\x00{len(protected)-1}\x00'
     out=re.sub(r'<[^>]+>|https?://\S+|tg://\S+', protect, out)
-    for src,dst in _LOCALE_PHRASES.get(lang,{}).items(): out=out.replace(src,dst)
+    for src,dst in sorted(_LOCALE_PHRASES.get(lang,{}).items(), key=lambda kv: len(kv[0]), reverse=True): out=out.replace(src,dst)
+    # Fallback for legacy dynamic f-strings. Translate complete Cyrillic words
+    # while preserving punctuation, numbers and variable values.
+    words=_LOCALE_WORDS.get(lang,{})
+    if words:
+        def repl(m):
+            w=m.group(0); low=w.lower(); tr=words.get(low)
+            if not tr: return w
+            if w[:1].isupper(): tr=tr[:1].upper()+tr[1:]
+            return tr
+        out=re.sub(r'[А-Яа-яЁё]+', repl, out)
     for i,val in enumerate(protected): out=out.replace(f'\x00{i}\x00',val)
     return out
 
 _ORIG_SEND_MESSAGE=bot.send_message
 _ORIG_REPLY_TO=bot.reply_to
 _ORIG_EDIT_MESSAGE_TEXT=bot.edit_message_text
+_ORIG_ANSWER_CALLBACK=bot.answer_callback_query
+_ORIG_EDIT_CAPTION=getattr(bot,'edit_message_caption',None)
+
+def _localize_markup(markup, lang):
+    if markup is None or lang == 'ru': return markup
+    try:
+        m=copy.deepcopy(markup)
+        for rows_name in ('inline_keyboard','keyboard'):
+            rows=getattr(m, rows_name, None)
+            if rows:
+                for row in rows:
+                    for btn in row:
+                        if hasattr(btn,'text') and isinstance(btn.text,str):
+                            btn.text=_localize_bot_text(btn.text,lang)
+        return m
+    except Exception:
+        return markup
 
 def _localized_send_message(chat_id, text, *args, **kwargs):
     uid=kwargs.get('user_id')
-    return _ORIG_SEND_MESSAGE(chat_id, _localize_bot_text(text,_bot_output_language(chat_id,uid)), *args, **kwargs)
+    lang=_bot_output_language(chat_id,uid)
+    if 'reply_markup' in kwargs: kwargs['reply_markup']=_localize_markup(kwargs['reply_markup'],lang)
+    return _ORIG_SEND_MESSAGE(chat_id, _localize_bot_text(text,lang), *args, **kwargs)
 
 def _localized_reply_to(message, text, *args, **kwargs):
-    return _ORIG_REPLY_TO(message, _localize_bot_text(text,_bot_output_language(message.chat.id,getattr(message.from_user,'id',None))), *args, **kwargs)
+    lang=_bot_output_language(message.chat.id,getattr(message.from_user,'id',None))
+    if 'reply_markup' in kwargs: kwargs['reply_markup']=_localize_markup(kwargs['reply_markup'],lang)
+    return _ORIG_REPLY_TO(message, _localize_bot_text(text,lang), *args, **kwargs)
 
 def _localized_edit_message_text(text, chat_id, message_id, *args, **kwargs):
-    return _ORIG_EDIT_MESSAGE_TEXT(_localize_bot_text(text,_bot_output_language(chat_id)), chat_id, message_id, *args, **kwargs)
+    lang=_bot_output_language(chat_id)
+    if 'reply_markup' in kwargs: kwargs['reply_markup']=_localize_markup(kwargs['reply_markup'],lang)
+    return _ORIG_EDIT_MESSAGE_TEXT(_localize_bot_text(text,lang), chat_id, message_id, *args, **kwargs)
+
+def _localized_answer_callback_query(callback_query_id, text=None, *args, **kwargs):
+    # CallbackQuery does not always expose chat_id here; use callback id only when
+    # possible, otherwise leave text unchanged rather than translating with a wrong locale.
+    if text is not None:
+        try:
+            text=_localize_bot_text(text, 'ru')
+        except Exception: pass
+    return _ORIG_ANSWER_CALLBACK(callback_query_id, text, *args, **kwargs)
 
 bot.send_message=_localized_send_message
 bot.reply_to=_localized_reply_to
 bot.edit_message_text=_localized_edit_message_text
+# Keep callback/edit-caption wrappers available without changing Bot API signatures.
+if _ORIG_EDIT_CAPTION:
+    def _localized_edit_message_caption(caption, chat_id, message_id, *args, **kwargs):
+        lang=_bot_output_language(chat_id)
+        if 'reply_markup' in kwargs: kwargs['reply_markup']=_localize_markup(kwargs['reply_markup'],lang)
+        return _ORIG_EDIT_CAPTION(_localize_bot_text(caption,lang), chat_id, message_id, *args, **kwargs)
+    bot.edit_message_caption=_localized_edit_message_caption
 
 # ---------------------------------------------------------
 # TELEGRAM PREMIUM / CUSTOM EMOJI
