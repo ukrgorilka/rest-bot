@@ -41,6 +41,9 @@ MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp'
 MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
 MINIAPP_GAMES = {}
 MINIAPP_LOCK = threading.RLock()
+MINIAPP_GAME_TTL = 2 * 60 * 60
+MINIAPP_DAILY_REWARD_CAP = 5000
+
 
 def _miniapp_user(init_data):
     if not init_data or not TOKEN:
@@ -59,7 +62,10 @@ def _miniapp_user(init_data):
         if not user.get('id'):
             return None
         auth_date = int(pairs.get('auth_date', '0') or 0)
-        if auth_date and abs(time.time() - auth_date) > 86400:
+        if auth_date <= 0:
+            return None
+        age = time.time() - auth_date
+        if age < -60 or age > 86400:
             return None
         return user
     except Exception:
@@ -93,15 +99,43 @@ def mini_profile_api():
 
 @app.route('/api/mini/tasks', methods=['POST'])
 def mini_tasks_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'
-    econ=get_user_econ(uid,name,username=user.get('username'))
-    tasks=[]
-    for key, info in (globals().get('DAILY_TASKS', {}) or {}).items():
-        if isinstance(info, dict):
-            tasks.append({'id':key,'description':info.get('name') or info.get('title') or key,'target':int(info.get('target',1) or 1),'reward':int(info.get('reward',0) or 0),'progress':0,'claimed':False})
-    return jsonify({'ok':True,'streak':int(econ.get('bonus_streak',0) or 0),'daily':tasks[:20],'weekly':[]})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    username = user.get('username')
+    daily_defs, econ = get_daily_tasks(uid, name, username=username)
+    weekly_defs, _ = get_weekly_tasks(uid, name, username=username)
+
+    daily_progress = econ.get('daily_progress', {}) or {}
+    daily_claimed = set(econ.get('daily_claimed', []) or [])
+    weekly_progress = econ.get('weekly_progress', {}) or {}
+    weekly_claimed = set(econ.get('weekly_claimed', []) or [])
+
+    def serialize(defs, progress_map, claimed):
+        rows = []
+        for key, description, target, reward in defs:
+            progress = max(0, int(progress_map.get(key, 0) or 0))
+            rows.append({
+                'id': key,
+                'description': description,
+                'target': int(target),
+                'reward': int(reward),
+                'progress': min(progress, int(target)),
+                'completed': progress >= int(target),
+                'claimed': key in claimed,
+            })
+        return rows
+
+    return jsonify({
+        'ok': True,
+        'streak': int(econ.get('bonus_streak', 0) or 0),
+        'daily': serialize(daily_defs, daily_progress, daily_claimed),
+        'weekly': serialize(weekly_defs, weekly_progress, weekly_claimed),
+    })
 
 @app.route('/api/mini/achievements', methods=['POST'])
 def mini_achievements_api():
@@ -157,24 +191,34 @@ def mini_settings_api():
 
 @app.route('/api/mini/bonus', methods=['POST'])
 def mini_bonus_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
     if not user:
         return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
-    uid = int(user['id']); name = user.get('first_name') or user.get('username') or 'Игрок'
-    econ = get_user_econ(uid, name, username=user.get('username'))
-    now = now_msk().date().isoformat()
-    if econ.get('mini_daily_claimed') == now:
-        return jsonify({'ok': False, 'error': 'already_claimed'})
-    last = econ.get('mini_daily_date')
-    streak = int(econ.get('mini_daily_streak',0) or 0)
-    yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
-    streak = streak + 1 if last == yesterday else 1
-    reward = min(5000, 500 + streak * 100)
-    econ['mini_daily_claimed'] = now; econ['mini_daily_date'] = now; econ['mini_daily_streak'] = streak
-    econ['balance'] = int(econ.get('balance',0) or 0) + reward
-    add_account_exp(uid, name, 25, user.get('username'))
-    mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok': True, 'reward': reward, 'streak': streak})
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    username = user.get('username')
+    with MINIAPP_LOCK:
+        econ = get_user_econ(uid, name, username=username)
+        now = now_msk().date().isoformat()
+        if econ.get('mini_daily_claimed') == now:
+            return jsonify({'ok': False, 'error': 'already_claimed'})
+
+        last = econ.get('mini_daily_date')
+        streak = int(econ.get('mini_daily_streak', 0) or 0)
+        yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
+        streak = streak + 1 if last == yesterday else 1
+        reward = min(5000, 500 + streak * 100)
+
+        econ['mini_daily_claimed'] = now
+        econ['mini_daily_date'] = now
+        econ['mini_daily_streak'] = streak
+        econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+        add_account_exp(uid, name, 25, username)
+        mark_dirty()
+        save_data(send_backup=False)
+        return jsonify({'ok': True, 'reward': reward, 'streak': streak})
 
 @app.route('/api/mini/leaderboard', methods=['POST'])
 def mini_leaderboard_api():
@@ -198,49 +242,107 @@ def mini_leaderboard_api():
 
 @app.route('/api/mini/game/start', methods=['POST'])
 def mini_game_start_api():
-    user = _miniapp_auth(request.get_json(silent=True) or {})
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    game = str((request.get_json(silent=True) or {}).get('game','')).lower()
-    if game not in {'mines','snake','flappy','2048','reaction','shooter'}: return jsonify({'ok':False,'error':'unknown_game'}),400
-    gid=secrets.token_urlsafe(12)
-    with MINIAPP_LOCK: MINIAPP_GAMES[gid]={'user_id':int(user['id']),'game':game,'difficulty':str((request.get_json(silent=True) or {}).get('difficulty','easy')),'started':time.time()}
-    return jsonify({'ok':True,'game_id':gid})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    game = str(payload.get('game', '') or '').lower()
+    if game not in {'mines', 'snake', 'flappy', '2048', 'reaction', 'shooter'}:
+        return jsonify({'ok': False, 'error': 'unknown_game'}), 400
+
+    uid = int(user['id'])
+    now = time.time()
+    with MINIAPP_LOCK:
+        # Remove abandoned sessions and make the newest session the only active one.
+        stale = [gid for gid, item in MINIAPP_GAMES.items() if now - float(item.get('started', now)) > MINIAPP_GAME_TTL]
+        for stale_gid in stale:
+            MINIAPP_GAMES.pop(stale_gid, None)
+        for old_gid, item in list(MINIAPP_GAMES.items()):
+            if item.get('user_id') == uid:
+                MINIAPP_GAMES.pop(old_gid, None)
+
+        gid = secrets.token_urlsafe(16)
+        MINIAPP_GAMES[gid] = {
+            'user_id': uid,
+            'game': game,
+            'difficulty': str(payload.get('difficulty', 'easy'))[:32],
+            'started': now,
+        }
+
+    return jsonify({'ok': True, 'game_id': gid})
+
 
 @app.route('/api/mini/game/finish', methods=['POST'])
 def mini_game_finish_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    gid=str(payload.get('game_id',''))
-    try: score=max(0,min(int(payload.get('score',0) or 0),100000))
-    except Exception: return jsonify({'ok':False,'error':'invalid_score'}),400
-    with MINIAPP_LOCK: game=MINIAPP_GAMES.pop(gid,None)
-    if not game or game['user_id']!=int(user['id']): return jsonify({'ok':False,'error':'invalid_game'}),400
-    elapsed=time.time()-game['started']
-    if elapsed < 0.5: return jsonify({'ok':False,'error':'too_fast'}),400
-    game_name=game['game']
-    max_scores={
-        'mines': max(100, 1000),
-        'snake': max(100, int(elapsed*900)+100),
-        'flappy': max(100, int(elapsed*130)+200),
-        '2048': max(500, int(elapsed*5000)+500),
-        'reaction': 1200,
-        'shooter': 2000,
-    }
-    if score > max_scores[game_name]:
-        return jsonify({'ok':False,'error':'score_out_of_range'}),400
-    uid=int(user['id']); name=user.get('first_name') or user.get('username') or 'Игрок'; econ=get_user_econ(uid,name,username=user.get('username'))
-    econ['mini_games_played']=int(econ.get('mini_games_played',0) or 0)+1
-    records=econ.setdefault('mini_records',{}); old=int(records.get(game_name,0) or 0)
-    if score>old: records[game_name]=score
-    won=bool(payload.get('won',False))
-    if won and score > 0:
-        econ['mini_games_wins']=int(econ.get('mini_games_wins',0) or 0)+1
-    reward_caps={'mines':2500,'snake':2000,'flappy':2000,'2048':2500,'reaction':1500,'shooter':2500}
-    reward=min(reward_caps[game_name], max(0, score//10))
-    if reward: econ['balance']=int(econ.get('balance',0) or 0)+reward
-    tx=econ.setdefault('mini_transactions',[]); tx.append({'text':f'Mini Game: {game_name}','amount':reward,'time':now_msk().strftime('%d.%m.%Y %H:%M')}); del tx[:-100]
-    mark_dirty(); save_data(send_backup=False)
-    return jsonify({'ok':True,'reward':reward,'record':records.get(game_name,score)})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    gid = str(payload.get('game_id', '') or '')
+    # Client-provided scores are untrusted and cannot grant progression or currency.
+    try:
+        client_score = max(0, min(int(payload.get('score', 0) or 0), 100000))
+    except (TypeError, ValueError, OverflowError):
+        client_score = 0
+
+    uid = int(user['id'])
+    now = time.time()
+    with MINIAPP_LOCK:
+        game = MINIAPP_GAMES.pop(gid, None)
+        if not game or game.get('user_id') != uid:
+            return jsonify({'ok': False, 'error': 'invalid_game'}), 400
+
+        elapsed = now - float(game.get('started', now))
+        if elapsed < 0.5:
+            return jsonify({'ok': False, 'error': 'too_fast'}), 400
+        if elapsed > MINIAPP_GAME_TTL:
+            return jsonify({'ok': False, 'error': 'game_expired'}), 400
+
+        game_name = game['game']
+        # There is no server-side replay/state validator yet. Do not trust the
+        # browser for competitive results or rewards. Keep the finish endpoint
+        # idempotent and record only that a session was completed.
+        score = 0
+
+        name = user.get('first_name') or user.get('username') or 'Игрок'
+        username = user.get('username')
+        econ = get_user_econ(uid, name, username=username)
+
+        econ['mini_games_played'] = int(econ.get('mini_games_played', 0) or 0) + 1
+        records = econ.setdefault('mini_records', {})
+        old = int(records.get(game_name, 0) or 0)
+        if score > old:
+            records[game_name] = score
+
+        # Never trust client `won`; wins must be derived from validated server state.
+
+        reward_caps = {'mines': 2500, 'snake': 2000, 'flappy': 2000, '2048': 2500, 'reaction': 1500, 'shooter': 2500}
+        raw_reward = 0  # disabled until server-authoritative validation is implemented
+
+        reward_day = now_msk().date().isoformat()
+        if econ.get('mini_game_reward_date') != reward_day:
+            econ['mini_game_reward_date'] = reward_day
+            econ['mini_game_reward_today'] = 0
+        already_paid = int(econ.get('mini_game_reward_today', 0) or 0)
+        remaining = max(0, MINIAPP_DAILY_REWARD_CAP - already_paid)
+        reward = min(raw_reward, remaining)
+        if reward:
+            econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+            econ['mini_game_reward_today'] = already_paid + reward
+
+        tx = econ.setdefault('mini_transactions', [])
+        tx.append({
+            'text': f'Mini Game: {game_name}',
+            'amount': reward,
+            'time': now_msk().strftime('%d.%m.%Y %H:%M'),
+        })
+        del tx[:-100]
+
+        mark_dirty()
+        save_data(send_backup=False)
+        return jsonify({'ok': True, 'reward': reward, 'record': records.get(game_name, 0), 'validated': False})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
@@ -939,7 +1041,7 @@ def _patch_telegram_text_methods():
 
 _patch_telegram_text_methods()
 
-db_lock = threading.Lock()
+db_lock = threading.RLock()
 db_dirty = False
 db_version = 0
 
@@ -1817,7 +1919,8 @@ def _default_data():
         'player_market': {},
         'raid': {},
         'season': {'number': 1, 'started_at': time.time(), 'archive': []},
-        'economic_event': {'id': None, 'started_at': 0}
+        'economic_event': {'id': None, 'started_at': 0},
+        '_meta': {'saved_at': 0.0}
     }
 
 def _normalize_loaded_data(data):
@@ -1853,6 +1956,8 @@ def _normalize_loaded_data(data):
     if not isinstance(base.get('raid'), dict): base['raid'] = {}
     if not isinstance(base.get('season'), dict): base['season'] = {'number': 1, 'started_at': time.time(), 'archive': []}
     if not isinstance(base.get('economic_event'), dict): base['economic_event'] = {'id': None, 'started_at': 0}
+    if not isinstance(base.get('_meta'), dict): base['_meta'] = {'saved_at': 0.0}
+    base['_meta']['saved_at'] = float(base['_meta'].get('saved_at', 0) or 0)
     return base
 
 def _pg_connect():
@@ -1927,11 +2032,17 @@ def load_data():
     if DATABASE_URL:
         try:
             pg_data = _pg_load()
+            local_data = _load_local_json()
             if pg_data is not None:
+                pg_ts = float((pg_data.get('_meta') or {}).get('saved_at', 0) or 0) if isinstance(pg_data, dict) else 0.0
+                local_ts = float((local_data.get('_meta') or {}).get('saved_at', 0) or 0) if isinstance(local_data, dict) else 0.0
+                if local_data is not None and local_ts > pg_ts + 1.0:
+                    print('[DB] Локальный snapshot новее Neon; используется локальный fallback.')
+                    return _normalize_loaded_data(local_data)
                 print('[DB] Загружена база из Neon PostgreSQL.')
                 return _normalize_loaded_data(pg_data)
 
-            local_data = _load_local_json()
+            
             if local_data is not None:
                 migrated = _normalize_loaded_data(local_data)
                 if _pg_save(migrated):
@@ -1967,6 +2078,7 @@ def _save_data_locked(send_backup=False):
     # safety fallback, but Telegram channel backups are optional and disabled by default.
     with db_lock:
         snapshot = copy.deepcopy(db)
+        snapshot['_meta'] = {'saved_at': time.time()}
         snapshot_version = db_version
     try:
         saved_to_pg = False
@@ -2671,29 +2783,41 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
 
     return u_data
 
+# get_user_econ mutates shared economy records during lazy migrations/defaulting.
+# Protect the whole operation so Flask requests and background workers cannot
+# interleave a read-modify-write sequence for the same process. RLock is used
+# because helper functions invoked by get_user_econ may also touch the DB lock.
+_get_user_econ_unlocked = get_user_econ
+def get_user_econ(user_id=None, user_tag=None, username=None):
+    with db_lock:
+        return _get_user_econ_unlocked(user_id, user_tag, username)
+
+
 def change_karma(user_id, user_tag, amount, username=None):
-    econ = get_user_econ(user_id, user_tag, username=username)
-    econ['karma'] = max(-100, min(100, econ.get('karma', 0) + amount))
-    mark_dirty()
-    return econ['karma']
+    with db_lock:
+        econ = _get_user_econ_unlocked(user_id, user_tag, username=username)
+        econ['karma'] = max(-100, min(100, econ.get('karma', 0) + amount))
+        value = econ['karma']
+        mark_dirty()
+    return value
 
 def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
-    econ = get_user_econ(user_id, user_tag, username)
-    active_t = econ.get('active_title')
-    bonus = 1.0
-    if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'exp_bonus':
-        bonus += (TITLES[active_t]['val'] / 100.0)
-    # Улучшенный VIP: +25% к получаемому опыту профиля.
-    if is_vip_active(econ):
-        bonus += 0.25
+    with db_lock:
+        econ = _get_user_econ_unlocked(user_id, user_tag, username)
+        active_t = econ.get('active_title')
+        bonus = 1.0
+        if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'exp_bonus':
+            bonus += (TITLES[active_t]['val'] / 100.0)
+        # Улучшенный VIP: +25% к получаемому опыту профиля.
+        if is_vip_active(econ):
+            bonus += 0.25
 
-    gained_exp = int(exp_amount * bonus)
-    econ['account_exp'] = econ.get('account_exp', 0) + gained_exp
-    # Сезонный рейтинг растёт вместе с обычной активностью, но не превращается в огромный счёт.
-    season_rollover() if 'season_rollover' in globals() else None
-    econ['season_points'] = int(econ.get('season_points', 0) or 0) + max(1, gained_exp // 5)
-    mark_dirty()
-
+        gained_exp = int(exp_amount * bonus)
+        econ['account_exp'] = econ.get('account_exp', 0) + gained_exp
+        # Сезонный рейтинг растёт вместе с обычной активностью, но не превращается в огромный счёт.
+        season_rollover() if 'season_rollover' in globals() else None
+        econ['season_points'] = int(econ.get('season_points', 0) or 0) + max(1, gained_exp // 5)
+        mark_dirty()
 def add_message_stat(user_id, user_tag, username=None):
     econ = get_user_econ(user_id, user_tag, username)
     m_stats = econ.setdefault('msg_stats', {})
@@ -3061,6 +3185,7 @@ def get_daily_tasks(user_id=None, user_tag=None, username=None):
         econ['daily_tasks_date'] = today
         econ['daily_progress'] = {}
         econ['daily_claimed'] = []
+        mark_dirty()
     return DAILY_TASKS[now_msk().weekday()], econ
 
 def get_weekly_tasks(user_id=None, user_tag=None, username=None):
@@ -3070,6 +3195,7 @@ def get_weekly_tasks(user_id=None, user_tag=None, username=None):
         econ['weekly_tasks_yearweek'] = w_key
         econ['weekly_progress'] = {}
         econ['weekly_claimed'] = []
+        mark_dirty()
     return WEEKLY_TASKS, econ
 
 def track_daily_task(user_id, user_tag, task_key, amount=1, chat_id=None, username=None):
@@ -6346,6 +6472,7 @@ def cmd_gear(message):
     if not can_process_user_message(message):
         return
     user_id = message.from_user.id
+    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Игрок'
     lines = [
         "🎣 <b>МАГАЗИН ПРОФЕССИОНАЛЬНЫХ СНАСТЕЙ</b> 😺",
         "──────────────────────",
@@ -10507,7 +10634,7 @@ def handle_messages(message):
         if in_rest and rest_info:
             display_name = rest_info.get('user_name', target_found_name or 'Пользователь')
             user_link = make_link(chat_id, display_name, target_found_id or rest_info.get('user_id'), ping=False)
-            bot.reply_to(message, f"🌴 <b>Пользователь {user_link} находится в ресте!</b> 😺\n📝 <b>Причина:</b> {html.escape(rest_html.escape(str(info.get('reason', 'Не указана'))))}\n⏱ <b>Срок:</b> {html.escape(rest_info.get('duration', 'Не указан'))}", parse_mode='HTML')
+            bot.reply_to(message, f"🌴 <b>Пользователь {user_link} находится в ресте!</b> 😺\n📝 <b>Причина:</b> {html.escape(str(rest_info.get('reason', 'Не указана')))}\n⏱ <b>Срок:</b> {html.escape(rest_info.get('duration', 'Не указан'))}", parse_mode='HTML')
         else:
             display_name = target_found_name or 'Пользователь'
             user_link = make_link(chat_id, display_name, target_found_id, ping=False)
