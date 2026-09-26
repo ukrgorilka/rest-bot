@@ -15513,7 +15513,8 @@ def process_stars_successful_payment(message):
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
 # ---------------------------------------------------------
 # СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
-# ---------------------------------------------------------
+# --
+#---------------------------------------------------------
 setup_bot_commands()
 start_background_threads()
 keep_alive()
