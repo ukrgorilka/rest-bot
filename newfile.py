@@ -84,6 +84,15 @@ def miniapp_index():
 def miniapp_static(filename):
     return send_from_directory(MINIAPP_DIR, filename)
 
+def _mini_add_notification(econ, text):
+    rows = econ.setdefault('mini_notifications', [])
+    if not isinstance(rows, list):
+        rows = []
+        econ['mini_notifications'] = rows
+    rows.append({'text': str(text)[:300], 'time': now_msk().strftime('%d.%m.%Y %H:%M')})
+    del rows[:-50]
+
+
 @app.route('/api/mini/profile', methods=['POST'])
 def mini_profile_api():
     user = _miniapp_auth(request.get_json(silent=True) or {})
@@ -137,6 +146,47 @@ def mini_tasks_api():
         'weekly': serialize(weekly_defs, weekly_progress, weekly_claimed),
     })
 
+@app.route('/api/mini/tasks/claim', methods=['POST'])
+def mini_task_claim_api():
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    username = user.get('username')
+    task_id = str(payload.get('task_id', '') or '')[:80]
+    kind = str(payload.get('kind', 'daily') or 'daily').lower()
+    if kind not in {'daily', 'weekly'} or not task_id:
+        return jsonify({'ok': False, 'error': 'invalid_task'}), 400
+    with MINIAPP_LOCK:
+        econ = get_user_econ(uid, name, username=username)
+        defs, _ = get_daily_tasks(uid, name, username=username) if kind == 'daily' else (get_weekly_tasks(uid, name, username=username)[0], econ)
+        task = next((x for x in defs if x[0] == task_id), None)
+        if not task:
+            return jsonify({'ok': False, 'error': 'unknown_task'}), 404
+        _, description, target, reward = task
+        progress_key = 'daily_progress' if kind == 'daily' else 'weekly_progress'
+        claimed_key = 'daily_claimed' if kind == 'daily' else 'weekly_claimed'
+        progress = econ.get(progress_key, {}) or {}
+        claimed = econ.setdefault(claimed_key, [])
+        if task_id in claimed:
+            return jsonify({'ok': False, 'error': 'already_claimed'}), 400
+        if int(progress.get(task_id, 0) or 0) < int(target):
+            return jsonify({'ok': False, 'error': 'not_completed'}), 400
+        reward = max(0, int(reward))
+        econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+        claimed.append(task_id)
+        tx = econ.setdefault('mini_transactions', [])
+        tx.append({'text': f'Mini App: задание — {description}', 'amount': reward, 'time': now_msk().strftime('%d.%m.%Y %H:%M')})
+        del tx[:-100]
+        _mini_add_notification(econ, f'📋 Задание выполнено: +{reward:,} 🪙')
+        add_account_exp(uid, name, 15, username)
+        mark_dirty()
+        save_data(send_backup=False)
+        return jsonify({'ok': True, 'reward': reward, 'task_id': task_id, 'kind': kind})
+
+
 @app.route('/api/mini/achievements', methods=['POST'])
 def mini_achievements_api():
     user=_miniapp_auth(request.get_json(silent=True) or {})
@@ -173,11 +223,14 @@ def mini_transactions_api():
 def mini_shop_api():
     user=_miniapp_auth(request.get_json(silent=True) or {})
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    cats=[]
-    for key,item in (STARS_COSMETICS or {}).items():
+    grouped = {}
+    type_names = {'theme': '🎨 Темы', 'title_cert': '🏷 Титулы', 'donor_title': '👑 Донатные титулы', 'badge': '✨ Значки', 'pet': '🐾 Питомцы', 'gif': '🎞 GIF профиля', 'donor_vehicle': '🏎 Машины', 'donor_business': '🏢 Донатные бизнесы', 'limited_effect': '🔥 Лимитированные'}
+    for key,item in {**(STARS_COSMETICS or {}), **(STARS_LIMITED_ITEMS or {})}.items():
         if not isinstance(item,dict): continue
-        cats.append({'title':item.get('name') or key,'items':[{'name':item.get('name') or key,'desc':item.get('description') or '','stars':int(item.get('stars',item.get('price',0)) or 0)}]})
-    return jsonify({'ok':True,'categories':cats[:50]})
+        category = type_names.get(item.get('type'), '⭐ Stars')
+        grouped.setdefault(category, []).append({'id': key, 'name': item.get('name') or key, 'desc': item.get('description') or item.get('desc') or '', 'stars': int(item.get('stars',item.get('price',0)) or 0)})
+    cats=[{'title': title, 'items': items} for title,items in grouped.items()]
+    return jsonify({'ok':True,'categories':cats[:20]})
 
 @app.route('/api/mini/settings', methods=['POST'])
 def mini_settings_api():
@@ -205,17 +258,27 @@ def mini_bonus_api():
         if econ.get('mini_daily_claimed') == now:
             return jsonify({'ok': False, 'error': 'already_claimed'})
 
-        last = econ.get('mini_daily_date')
-        streak = int(econ.get('mini_daily_streak', 0) or 0)
-        yesterday = (now_msk().date() - timedelta(days=1)).isoformat()
-        streak = streak + 1 if last == yesterday else 1
+        last_streak = float(econ.get('last_streak_time', 0) or 0)
+        elapsed = time.time() - last_streak if last_streak > 0 else 10**9
+        streak = int(econ.get('bonus_streak', 0) or 0)
+        if 20 * 3600 <= elapsed < 48 * 3600:
+            streak += 1
+        elif elapsed >= 48 * 3600:
+            streak = 1
+        # Keep legacy Mini App fields synchronized for older clients, but the
+        # canonical streak is now the same bonus_streak used by the bot.
         reward = min(5000, 500 + streak * 100)
 
         econ['mini_daily_claimed'] = now
         econ['mini_daily_date'] = now
         econ['mini_daily_streak'] = streak
+        econ['bonus_streak'] = streak
+        econ['last_streak_time'] = time.time()
         econ['balance'] = int(econ.get('balance', 0) or 0) + reward
-        add_account_exp(uid, name, 25, username)
+        tx = econ.setdefault('mini_transactions', [])
+        tx.append({'text': 'Mini App: ежедневный бонус', 'amount': reward, 'time': now_msk().strftime('%d.%m.%Y %H:%M')})
+        del tx[:-100]
+        _mini_add_notification(econ, f'🎁 Ежедневный бонус: +{reward:,} 🪙 (серия {streak})')
         mark_dirty()
         save_data(send_backup=False)
         return jsonify({'ok': True, 'reward': reward, 'streak': streak})
@@ -226,7 +289,9 @@ def mini_leaderboard_api():
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
     game=str(payload.get('game','') or '').lower()
     rows=[]
-    for uid,econ in db.get('economy',{}).items():
+    with db_lock:
+        economy_snapshot = list(db.get('economy', {}).items())
+    for uid,econ in economy_snapshot:
         if not isinstance(econ,dict): continue
         try:
             exp=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
@@ -301,10 +366,24 @@ def mini_game_finish_api():
             return jsonify({'ok': False, 'error': 'game_expired'}), 400
 
         game_name = game['game']
-        # There is no server-side replay/state validator yet. Do not trust the
-        # browser for competitive results or rewards. Keep the finish endpoint
-        # idempotent and record only that a session was completed.
-        score = 0
+        difficulty = str(game.get('difficulty', 'easy')).lower()
+        # Scores are still client-reported, so this endpoint is not a cryptographic
+        # anti-cheat system. We nevertheless enforce per-game plausibility caps and
+        # derive rewards/wins on the server instead of blindly trusting the browser.
+        score_limits = {
+            'mines': {'easy': 71, 'medium': 216, 'hard': 304, 'insane': 450},
+            'snake': max(1, int(elapsed / 0.145) + 2),
+            'flappy': max(1, int(elapsed / 0.95) + 1),
+            '2048': 100000,
+            'reaction': 1200,
+            'shooter': 20,
+        }
+        limit = score_limits.get(game_name, 0)
+        if isinstance(limit, dict):
+            limit = limit.get(difficulty, limit.get('easy', 71))
+        score = min(client_score, max(0, int(limit)))
+        if client_score > int(limit):
+            return jsonify({'ok': False, 'error': 'score_out_of_range'}), 400
 
         name = user.get('first_name') or user.get('username') or 'Игрок'
         username = user.get('username')
@@ -316,10 +395,32 @@ def mini_game_finish_api():
         if score > old:
             records[game_name] = score
 
-        # Never trust client `won`; wins must be derived from validated server state.
+        win_thresholds = {
+            'mines': {'easy': 71, 'medium': 216, 'hard': 304, 'insane': 450},
+            'snake': 10, 'flappy': 5, '2048': 2048, 'reaction': 900, 'shooter': 15,
+        }
+        threshold = win_thresholds.get(game_name)
+        if isinstance(threshold, dict):
+            threshold = threshold.get(difficulty, threshold.get('easy'))
+        if threshold is not None and score >= int(threshold):
+            econ['mini_games_wins'] = int(econ.get('mini_games_wins', 0) or 0) + 1
 
         reward_caps = {'mines': 2500, 'snake': 2000, 'flappy': 2000, '2048': 2500, 'reaction': 1500, 'shooter': 2500}
-        raw_reward = 0  # disabled until server-authoritative validation is implemented
+        # Reward is based on the bounded score. It is additionally constrained by
+        # the per-day Mini App cap, so a client cannot drain the whole economy.
+        if game_name == 'mines':
+            safe_cells = {'easy': 71, 'medium': 216, 'hard': 304, 'insane': 450}.get(difficulty, 71)
+            raw_reward = reward_caps['mines'] if score >= safe_cells else min(250, score * 3)
+        elif game_name == 'snake':
+            raw_reward = min(reward_caps['snake'], score * 8)
+        elif game_name == 'flappy':
+            raw_reward = min(reward_caps['flappy'], score * 12)
+        elif game_name == '2048':
+            raw_reward = min(reward_caps['2048'], score // 2)
+        elif game_name == 'reaction':
+            raw_reward = min(reward_caps['reaction'], score)
+        else:
+            raw_reward = min(reward_caps['shooter'], score * 20)
 
         reward_day = now_msk().date().isoformat()
         if econ.get('mini_game_reward_date') != reward_day:
@@ -437,6 +538,11 @@ _LOCALE_PHRASES = {
 # имена и значения остаются на месте. HTML/code/URL защищаются до перевода.
 _LOCALE_WORDS = {
  'uk': {
+  'ресте':'ресті','грядку':'грядку','окончена':'завершена','её':'її','лс':'ЛС','дурак':'дурень','столу':'столу','каталога':'каталогу','рейтинг':'рейтинг','обс':'OBS','запуск':'запуск','потока':'потоку','классический':'класичний','ставок':'ставок','бесплатная':'безкоштовна','проверяет':'перевіряє','вашу':'вашу','логику':'логіку','ум':'розум','сложности':'складності','вступить':'вступити','ответь':'відповідай','группах':'групах','настроен':'налаштований','переменной':'змінній','окружения':'оточення','пробел':'пробіл','активировали':'активували','ранее':'раніше','кредитная':'кредитна','испорчена':'зіпсована','черном':'чорному','списке':'списку','банка':'банку','активных':'активних','кредитов':'кредитів','задайте':'поставте','шару':'кулі','судьбы':'долі','шар':'куля','пойду':'піду','ли':'чи','спать':'спати','замера':'вимірювання','джекпот':'джекпот','полиграфе':'поліграфі','детектор':'детектор','самый':'найбільш','красивый':'гарний','пойманной':'впійманої','мяса':'м’яса','дичи':'дичини','приготовления':'приготування','кастомного':'кастомного','тем':'тим','играть':'грати','шериф':'шериф','кпз':'КПЗ','ни':'ні','одной':'однієї','зарплаты':'зарплати','числом':'числом','переведён':'переведено','спящий':'сплячий','жертву':'жертву','ограбить':'пограбувати','пойти':'піти','дело':'справу','иметь':'мати','кармане':'кишені','хотя':'хоча','бы':'б','случай':'випадок','штрафа':'штрафу','защищены':'захищені','командой':'командою','нуля':'нуля','короткое':'коротке','номер':'номер','цену':'ціну','необходим':'необхідний','проверьте':'перевірте','получили':'отримали','срока':'терміну','временно':'тимчасово','выбрана':'обрана','действует':'діє','истёк':'закінчився','истек':'закінчився','пополнить':'поповнити','снимите':'зніміть','сняли':'зняли','отправитель':'відправник','отправителя':'відправника','ошиблись':'помилилися','предложено':'запропоновано','принят':'прийнято','принято':'прийнято','участником':'учасником','участники':'учасники','поле':'поле','уровня':'рівня','достигнут':'досягнуто','максимальный':'максимальний','свободных':'ві
+льних','грядок':'грядок','растение':'рослина','урожай':'урожай','созрел':'дозрів','полива':'поливу','высохла':'висохла','купить':'купити','гараже':'гаражі','надеть':'одягнути','внесено':'внесено','снято':'знято','подарок':'подарунок','принадлежит':'належить','чужому':'чужому','действие':'дію','принять':'прийняти','ожидаем':'очікуємо','устарело':'застаріло','исправлен':'виправлено','сброшен':'скинуто','активирован':'активовано','исцелила':'зцілила','иммунитет':'імунітет','выпили':'випили','лекарство':'ліки','диагноз':'діагноз','куплен':'куплено','забрали':'забрали','уровень':'рівень','уровню':'рівню','награды':'нагороди','доступны':'доступні','повторно':'повторно','разрешено':'дозволено','подтвердите':'підтвердьте','сохранить':'зберегти','сохранения':'збереження','язык':'мова','группы':'групи','личных':'особистих','сообщениях':'повідомленнях',
+  'не':'не','в':'у','на':'на','или':'або','у':'у','для':'для','его':'його','и':'і','из':'з','с':'з','от':'від','до':'до','за':'за','к':'до','й':'й','я':'я','мы':'ми','ты':'ти','он':'він','она':'вона','они':'вони','это':'це','этот':'цей','эта':'ця','эти':'ці','этого':'цього','этой':'цієї','эту':'цю','ещё':'ще','слишком':'занадто','сначала':'спочатку','пример':'приклад','удалось':'вдалося','быть':'бути','состоите':'перебуваєте','гильдии':'гільдії','гильдия':'гільдія','гильдию':'гільдію','магазине':'магазині','магазин':'магазин','минимальная':'мінімальна','выбор':'вибір','работает':'працює','работаете':'працюєте','чате':'чаті','откройте':'відкрийте','соперника':'суперника','соперник':'суперник','самим':'самим','собой':'собою','самому':'самому','самого':'самого','предложение':'пропозиція','требуется':'потрібно','товар':'товар','платёж':'платіж','руках':'руках','банке':'банку','находится':'знаходиться','ставки':'ставки','земля':'земля','удобрения':'добрива','конкретную':'конкретну','карт':'карт','устарела':'застаріла','объявление':'оголошення','рейд':'рейд','внутри':'всередині','полностью':'повністю','название':'назва','группе':'групі','модерации':'модерації','публичном':'публічному','бизнесе':'бізнесі','вакансии':'вакансії','существует':'існує','сегодня':'сьогодні','рыбы':'риби','купленных':'придбаних','нужного':'потрібного','накопилось':'накопичилося','подождите':'зачекайте','немного':'трохи','кастомный':'кастомний','можете':'можете','чтобы':'щоб','определить':'визначити','кто':'хто','подарка':'подарунка','полиции':'поліції','минимум':'мінімум','как':'як','подарить':'подарувати','ответ':'відповідь','поиск':'пошук','использовать':'використовувати','доступные':'доступні','бот':'бот','работу':'роботу','неизвестный':'невідомий','бота':'бота','жертвы':'жертви','человека':'людини','реального':'реального','переводить':'переказувати','здесь':'тут','возвращена':'повернено','положительной':'позитивною','маленькая':'маленька','перевода':'переказу','создание':'створення','стоит':'коштує','расторгнут':'розірвано','данный':'даний
+','момент':'момент','никто':'ніхто','менять':'змінювати','выкорчевано':'викорчувано','партия':'партія','дурака':'дурня','возвращены':'повернено','полито':'полито','хватило':'вистачило','некорректный':'некоректний','некорректная':'некоректна','одежда':'одяг','куплена':'куплена','достигнут':'досягнуто','значок':'значок','приобретите':'придбайте','обычном':'звичайному','клетка':'клітинка','дуэли':'дуелі','сделали':'зробили','ожидаем':'очікуємо','администраторов':'адміністраторів','реста':'ресту','сохранён':'збережено','удалено':'видалено','ждёт':'чекає','после':'після','подкинуть':'підкинути','защитника':'захисника','неподходящий':'невідповідний','ранг':'ранг','столе':'столі','отбиты':'відбиті','приобретите':'придбайте','выбор':'вибір','сделайте':'зробіть','попробуйте':'спробуйте','вовремя':'вчасно','вопрос':'питання','шанс':'шанс','выиграть':'виграти','событие':'подія','вероятности':'ймовірності','утверждение':'твердження','проверки':'перевірки','мемов':'мемів','опубликуйте':'опублікуйте','услугу':'послугу','звёзды':'зірки','другу':'другу','друга':'друга','покупки':'покупки','обнаружено':'виявлено','использование':'використання','команду':'команду','включен':'увімкнено','возобновил':'відновив','преобразован':'перетворено','владельцу':'власнику','владельца':'власника','выплаты':'виплати','нет':'немає','есть':'є','был':'був','была':'була','было':'було','может':'може','могут':'можуть','теперь':'тепер','самого':'самого','себя':'себе','состоять':'перебувати','состоит':'перебуває','супруга':'чоловіка/дружину','супругу':'чоловікові/дружині','развестись':'розлучитися','развод':'розлучення','заключить':'укласти','охотничьих':'мисливських','трофеев':'трофеїв','продажи':'продажу','сейфа':'сейфа','ровно':'рівно','цифр':'цифр','сдали':'здали','жетон':'жетон','уволились':'звільнилися','гражданин':'громадянин','службы':'служби','ловить':'ловити','преступников':'злочинців','шерифы':'шерифи','устройтесь':'влаштуйтеся','службу':'службу','вор':'злодій','вора':'злодія','поймать':'спіймати','арестовать':'заарештувати','находитесь':'зна
+ходитеся','побег':'втеча','заключённого':'ув’язненого','драться':'битися','питомцем':'улюбленцем','сходите':'зайдіть','напротив':'навпроти','предприятия':'підприємства','сертификата':'сертифіката','разделе':'розділі','снова':'знову','содержать':'містити','символов':'символів','проверить':'перевірити','ответьте':'відповідайте','напишите':'напишіть','введите':'введіть','укажите':'вкажіть','используй':'використовуй','откройте':'відкрийте','сначала':'спочатку',
   'вы':'ви','вас':'вас','ваш':'ваш','ваша':'ваша','ваши':'ваші','вашему':'вашому','вам':'вам','себе':'собі',
   'пользователь':'користувач','пользователя':'користувача','пользователи':'користувачі','игрок':'гравець','игрока':'гравця','игроков':'гравців',
   'чат':'чат','чата':'чату','группа':'група','группы':'групи','групп':'груп','сообщение':'повідомлення','сообщений':'повідомлень',
@@ -476,6 +582,11 @@ _LOCALE_WORDS = {
   'титул':'титул','титула':'титулу','премиум':'преміум','донатный':'донатний','донатные':'донатні','настройках':'налаштуваннях',
  },
  'en': {
+  'ресте':'rest','грядку':'plot','окончена':'finished','её':'her','лс':'DM','дурак':'Durak','столу':'table','каталога':'catalog','рейтинг':'rating','обс':'OBS','запуск':'launch','потока':'stream','классический':'classic','ставок':'bets','бесплатная':'free','проверяет':'tests','вашу':'your','логику':'logic','ум':'mind','сложности':'difficulty','вступить':'join','ответь':'reply','группах':'groups','настроен':'configured','переменной':'variable','окружения':'environment','пробел':'space','активировали':'activated','ранее':'previously','кредитная':'credit','испорчена':'damaged','черном':'black','списке':'list','банка':'bank','активных':'active','кредитов':'loans','задайте':'ask','шару':'ball','судьбы':'fortune','шар':'ball','пойду':'will go','ли':'whether','спать':'sleep','замера':'measurement','джекпот':'jackpot','полиграфе':'polygraph','детектор':'detector','самый':'most','красивый':'beautiful','пойманной':'caught','мяса':'meat','дичи':'game','приготовления':'cooking','кастомного':'custom','тем':'those','играть':'play','шериф':'sheriff','кпз':'jail','ни':'nor','одной':'one','зарплаты':'salary','числом':'number','переведён':'transferred','спящий':'sleeping','жертву':'victim','ограбить':'rob','пойти':'go','дело':'business','иметь':'have','кармане':'pocket','хотя':'at least','бы':'would','случай':'case','штрафа':'fine','защищены':'protected','командой':'team','нуля':'zero','короткое':'short','номер':'number','цену':'price','необходим':'required','проверьте':'check','получили':'received','срока':'term','временно':'temporarily','выбрана':'selected','действует':'active','истёк':'expired','истек':'expired','пополнить':'top up','снимите':'remove','сняли':'removed','отправитель':'sender','отправителя':'sender','ошиблись':'made a mistake','предложено':'offered','принят':'accepted','принято':'accepted','участником':'participant','участники':'participants','поле':'field','уровня':'level','свободных':'free','грядок':'plots','урожай':'harvest','созрел':'ripe','полива':'watering','высохла':'dried','гараже':'garage','внесено':'dep
+osited','снято':'withdrawn','принадлежит':'belongs','чужому':'someone else','действие':'action','принять':'accept','ожидаем':'waiting','устарело':'expired','исправлен':'fixed','сброшен':'reset','исцелила':'healed','иммунитет':'immunity','выпили':'drank','лекарство':'medicine','диагноз':'diagnosis','куплен':'purchased','забрали':'claimed','уровню':'level','доступны':'available','повторно':'again','разрешено':'allowed','подтвердите':'confirm','сохранить':'save','сохранения':'saving','язык':'language','группы':'group','личных':'private','сообщениях':'messages',
+  'не':'not','в':'in','на':'on','или':'or','у':'at','для':'for','его':'his','и':'and','из':'from','с':'with','от':'from','до':'to','за':'for','к':'to','й':'and','я':'I','мы':'we','ты':'you','он':'he','она':'she','они':'they','это':'this','этот':'this','эта':'this','эти':'these','этого':'this','этой':'this','эту':'this','ещё':'still','слишком':'too','сначала':'first','пример':'example','удалось':'managed','быть':'be','состоите':'are in','гильдии':'guild','гильдия':'guild','гильдию':'guild','магазине':'shop','минимальная':'minimum','выбор':'choice','работает':'works','работаете':'are working','чате':'chat','откройте':'open','соперника':'opponent','соперник':'opponent','самим':'by yourself','собой':'yourself','самому':'yourself','предложение':'offer','требуется':'required','товар':'item','платёж':'payment','руках':'hand','банке':'bank','находится':'is located','ставки':'bets','земля':'soil','удобрения':'fertilizer','конкретную':'specific','карт':'cards','устарела':'expired','объявление':'listing','рейд':'raid','внутри':'inside','полностью':'fully','название':'name','группе':'group','модерации':'moderation','публичном':'public','бизнесе':'business','вакансии':'jobs','существует':'exists','сегодня':'today','рыбы':'fish','купленных':'purchased','нужного':'needed','накопилось':'accumulated','подождите':'wait','немного':'a little','кастомный':'custom','можете':'can','чтобы':'so that','определить':'identify','кто':'who','подарка':'gift','полиции':'police','минимум':'minimum','как':'how','подарить':'gift','ответ':'answer','поиск':'search','использовать':'use','доступные':'available','бот':'bot','работу':'work','неизвестный':'unknown','бота':'bot','жертвы':'victim','человека':'person','реального':'real','переводить':'transfer','здесь':'here','возвращена':'returned','положительной':'positive','маленькая':'small','перевода':'transfer','создание':'creation','стоит':'costs','расторгнут':'terminated','данный':'this','момент':'moment','никто':'nobody','менять':'change','выкорчевано':'uprooted','партия':'game','дурака':'Durak','во
+звращены':'returned','полито':'watered','хватило':'enough','некорректный':'invalid','некорректная':'invalid','одежда':'clothing','куплена':'purchased','достигнут':'reached','значок':'badge','приобретите':'purchase','обычном':'regular','клетка':'cell','дуэли':'duel','сделали':'made','ожидаем':'waiting','администраторов':'administrators','реста':'rest','сохранён':'saved','удалено':'deleted','ждёт':'waits','после':'after','подкинуть':'add','защитника':'defender','неподходящий':'invalid','ранг':'rank','столе':'table','отбиты':'beaten','сделайте':'make','попробуйте':'try','вовремя':'on time','вопрос':'question','шанс':'chance','выиграть':'win','событие':'event','вероятности':'probability','утверждение':'statement','проверки':'check','мемов':'memes','опубликуйте':'publish','услугу':'service','звёзды':'Stars','другу':'friend','друга':'friend','покупки':'purchases','обнаружено':'found','использование':'use','команду':'command','включен':'enabled','возобновил':'resumed','преобразован':'converted','владельцу':'owner','владельца':'owner','выплаты':'payments','нет':'no','есть':'there is','был':'was','была':'was','было':'was','может':'can','могут':'can','теперь':'now','себя':'yourself','состоять':'be in','состоит':'is in','супруга':'spouse','супругу':'spouse','развестись':'divorce','развод':'divorce','заключить':'marry','охотничьих':'hunting','трофеев':'trophies','продажи':'sale','сейфа':'safe','ровно':'exactly','цифр':'digits','сдали':'turned in','жетон':'token','уволились':'quit','гражданин':'citizen','службы':'service','ловить':'catch','преступников':'criminals','шерифы':'sheriffs','устройтесь':'join','службу':'service','вор':'thief','вора':'thief','поймать':'catch','арестовать':'arrest','находитесь':'are','побег':'escape','заключённого':'prisoner','драться':'fight','питомцем':'pet','сходите':'go to','напротив':'next to','предприятия':'business','сертификата':'certificate','разделе':'section','снова':'again','содержать':'contain','символов':'characters','проверить':'check','ответьте':'reply','напишите':'write','введите':'e
+nter','укажите':'specify','используй':'use',
   'вы':'you','вас':'you','ваш':'your','ваша':'your','ваши':'your','вам':'you','себе':'yourself','пользователь':'user','пользователя':'user','пользователи':'users',
   'игрок':'player','игрока':'player','игроков':'players','чат':'chat','чата':'chat','группа':'group','группы':'groups','групп':'groups','сообщение':'message','сообщений':'messages',
   'команда':'command','команды':'commands','настройки':'settings','настройка':'setting','язык':'language','языка':'language','баланс':'balance','банк':'bank',
@@ -519,11 +630,15 @@ def _bot_output_language(chat_id, user_id=None):
 def _localize_bot_text(text, lang):
     if not isinstance(text,str) or lang == 'ru': return text
     out=text
-    # Protect HTML/code/URLs from replacement.
+    # Protect complete code blocks and user-controlled tokens from replacement.
     protected=[]
     def protect(m):
-        protected.append(m.group(0)); return f'\x00{len(protected)-1}\x00'
-    out=re.sub(r'<[^>]+>|https?://\S+|tg://\S+', protect, out)
+        protected.append(m.group(0)); return f'\x00PROT{len(protected)-1}\x00'
+    out=re.sub(
+        r'<code>.*?</code>|<pre>.*?</pre>|https?://\S+|tg://\S+|@[A-Za-z0-9_]{3,}|(?<![A-Za-z0-9_])/[A-Za-z0-9_]+',
+        protect, out, flags=re.DOTALL
+    )
+    out=re.sub(r'<[^>]+>', protect, out)
     for src,dst in sorted(_LOCALE_PHRASES.get(lang,{}).items(), key=lambda kv: len(kv[0]), reverse=True): out=out.replace(src,dst)
     # Fallback for legacy dynamic f-strings. Translate complete Cyrillic words
     # while preserving punctuation, numbers and variable values.
@@ -535,8 +650,12 @@ def _localize_bot_text(text, lang):
             if w[:1].isupper(): tr=tr[:1].upper()+tr[1:]
             return tr
         out=re.sub(r'[А-Яа-яЁё]+', repl, out)
-    for i,val in enumerate(protected): out=out.replace(f'\x00{i}\x00',val)
+    for i,val in enumerate(protected): out=out.replace(f'\x00PROT{i}\x00',val)
     return out
+
+_CALLBACK_LANG_BY_ID = {}  # callback_id -> (lang, created_at)
+_CALLBACK_LANG_LOCK = threading.Lock()
+_LOCALE_CONTEXT = threading.local()
 
 _ORIG_SEND_MESSAGE=bot.send_message
 _ORIG_REPLY_TO=bot.reply_to
@@ -576,12 +695,17 @@ def _localized_edit_message_text(text, chat_id, message_id, *args, **kwargs):
     return _ORIG_EDIT_MESSAGE_TEXT(_localize_bot_text(text,lang), chat_id, message_id, *args, **kwargs)
 
 def _localized_answer_callback_query(callback_query_id, text=None, *args, **kwargs):
-    # CallbackQuery does not always expose chat_id here; use callback id only when
-    # possible, otherwise leave text unchanged rather than translating with a wrong locale.
+    # Legacy wrapper kept for compatibility. A final wrapper below supersedes it,
+    # but this implementation is now safe on its own too.
+    with _CALLBACK_LANG_LOCK:
+        now = time.time()
+        stale = [k for k, v in _CALLBACK_LANG_BY_ID.items() if now - float(v[1]) > 300]
+        for k in stale:
+            _CALLBACK_LANG_BY_ID.pop(k, None)
+        item = _CALLBACK_LANG_BY_ID.pop(str(callback_query_id), None)
+        lang = item[0] if item else 'ru'
     if text is not None:
-        try:
-            text=_localize_bot_text(text, 'ru')
-        except Exception: pass
+        text = _localize_bot_text(text, lang)
     return _ORIG_ANSWER_CALLBACK(callback_query_id, text, *args, **kwargs)
 
 bot.send_message=_localized_send_message
@@ -1010,7 +1134,10 @@ def _patch_telegram_text_methods():
     def _media_sender(original, chat_id, media, *args, **kwargs):
         if kwargs.get('parse_mode') == 'HTML' and 'caption' in kwargs:
             original_caption = kwargs['caption']
-            kwargs['caption'] = _transform(original_caption)
+            # GIF/photo/video captions use the same locale as normal messages.
+            lang = _bot_output_language(chat_id)
+            kwargs['caption'] = _localize_bot_text(original_caption, lang)
+            kwargs['caption'] = _transform(kwargs['caption'])
             try:
                 return original(chat_id, media, *args, **kwargs)
             except Exception as premium_error:
@@ -1041,7 +1168,142 @@ def _patch_telegram_text_methods():
 
 _patch_telegram_text_methods()
 
+# ------------------------------------------------------------------
+# FINAL LOCALIZATION LAYER
+# ------------------------------------------------------------------
+# The premium-emoji wrapper above replaces Bot methods, so localization must
+# wrap those final methods afterwards. This keeps captions, edited media,
+# invoices and callback alerts on the same language path.
+_LOCALIZED_BASE_SEND_MESSAGE = bot.send_message
+_LOCALIZED_BASE_REPLY_TO = bot.reply_to
+_LOCALIZED_BASE_EDIT_TEXT = bot.edit_message_text
+_LOCALIZED_BASE_SEND_PHOTO = bot.send_photo
+_LOCALIZED_BASE_SEND_ANIMATION = bot.send_animation
+_LOCALIZED_BASE_SEND_VIDEO = bot.send_video
+_LOCALIZED_BASE_EDIT_CAPTION = getattr(bot, 'edit_message_caption', None)
+_LOCALIZED_BASE_EDIT_MEDIA = getattr(bot, 'edit_message_media', None)
+_LOCALIZED_BASE_SEND_INVOICE = getattr(bot, 'send_invoice', None)
+
+def _current_locale_user_id(default=None):
+    return getattr(_LOCALE_CONTEXT, 'user_id', None) or default
+
+def _finalize_localized_markup(kwargs, lang):
+    if 'reply_markup' in kwargs:
+        kwargs['reply_markup'] = _localize_markup(kwargs['reply_markup'], lang)
+
+def _localized_final_send_message(chat_id, text, *args, **kwargs):
+    uid_override = kwargs.pop('user_id', None)
+    lang = _bot_output_language(chat_id, _current_locale_user_id(uid_override))
+    _finalize_localized_markup(kwargs, lang)
+    return _LOCALIZED_BASE_SEND_MESSAGE(chat_id, _localize_bot_text(text, lang), *args, **kwargs)
+
+def _localized_final_reply_to(message, text, *args, **kwargs):
+    lang = _bot_output_language(message.chat.id, getattr(message.from_user, 'id', None))
+    _finalize_localized_markup(kwargs, lang)
+    return _LOCALIZED_BASE_REPLY_TO(message, _localize_bot_text(text, lang), *args, **kwargs)
+
+def _localized_final_edit_text(text, chat_id, message_id, *args, **kwargs):
+    lang = _bot_output_language(chat_id, _current_locale_user_id())
+    _finalize_localized_markup(kwargs, lang)
+    return _LOCALIZED_BASE_EDIT_TEXT(_localize_bot_text(text, lang), chat_id, message_id, *args, **kwargs)
+
+def _localized_final_edit_caption(caption, chat_id=None, message_id=None, *args, **kwargs):
+    if not _LOCALIZED_BASE_EDIT_CAPTION:
+        raise AttributeError('edit_message_caption is unavailable')
+    lang = _bot_output_language(chat_id, _current_locale_user_id())
+    _finalize_localized_markup(kwargs, lang)
+    return _LOCALIZED_BASE_EDIT_CAPTION(_localize_bot_text(caption, lang), chat_id, message_id, *args, **kwargs)
+
+def _localized_media_object(media, lang):
+    if media is None:
+        return media
+    media = copy.deepcopy(media)
+    if hasattr(media, 'caption') and media.caption:
+        media.caption = _localize_bot_text(media.caption, lang)
+    return media
+
+def _localized_final_edit_media(media, chat_id=None, message_id=None, *args, **kwargs):
+    if not _LOCALIZED_BASE_EDIT_MEDIA:
+        raise AttributeError('edit_message_media is unavailable')
+    lang = _bot_output_language(chat_id, _current_locale_user_id())
+    _finalize_localized_markup(kwargs, lang)
+    localized_media = _localized_media_object(media, lang)
+    if getattr(localized_media, 'caption', None):
+        parse_mode = getattr(localized_media, 'parse_mode', None)
+        if parse_mode == 'HTML':
+            localized_media.caption = apply_global_premium_emojis(localized_media.caption)
+    try:
+        return _LOCALIZED_BASE_EDIT_MEDIA(localized_media, chat_id=chat_id, message_id=message_id, *args, **kwargs)
+    except Exception as exc:
+        # Do not hide network errors or duplicate the request. Only retry when
+        # Telegram rejects custom emoji markup; use the localized plain caption.
+        if _is_premium_markup_error(exc) and getattr(localized_media, 'caption', None):
+            plain_media = copy.deepcopy(localized_media)
+            plain_media.caption = re.sub(r'<tg-emoji\b[^>]*>.*?</tg-emoji>', '', plain_media.caption, flags=re.DOTALL)
+            return _LOCALIZED_BASE_EDIT_MEDIA(plain_media, chat_id=chat_id, message_id=message_id, *args, **kwargs)
+        raise
+
+def _localized_final_media_sender(base, chat_id, media, *args, **kwargs):
+    lang = _bot_output_language(chat_id, _current_locale_user_id())
+    _finalize_localized_markup(kwargs, lang)
+    if 'caption' in kwargs and kwargs['caption'] is not None:
+        kwargs['caption'] = _localize_bot_text(kwargs['caption'], lang)
+    return base(chat_id, media, *args, **kwargs)
+
+def _localized_final_send_photo(chat_id, photo, *args, **kwargs):
+    return _localized_final_media_sender(_LOCALIZED_BASE_SEND_PHOTO, chat_id, photo, *args, **kwargs)
+
+def _localized_final_send_animation(chat_id, animation, *args, **kwargs):
+    return _localized_final_media_sender(_LOCALIZED_BASE_SEND_ANIMATION, chat_id, animation, *args, **kwargs)
+
+def _localized_final_send_video(chat_id, video, *args, **kwargs):
+    return _localized_final_media_sender(_LOCALIZED_BASE_SEND_VIDEO, chat_id, video, *args, **kwargs)
+
+def _localized_final_answer_callback(callback_query_id, text=None, *args, **kwargs):
+    with _CALLBACK_LANG_LOCK:
+        now = time.time()
+        stale = [k for k, v in _CALLBACK_LANG_BY_ID.items() if now - float(v[1]) > 300]
+        for k in stale:
+            _CALLBACK_LANG_BY_ID.pop(k, None)
+        item = _CALLBACK_LANG_BY_ID.pop(str(callback_query_id), None)
+        lang = item[0] if item else 'ru'
+    if text is not None:
+        text = _localize_bot_text(text, lang)
+    return _ORIG_ANSWER_CALLBACK(callback_query_id, text, *args, **kwargs)
+
+def _localized_final_send_invoice(chat_id, title, description, invoice_payload, provider_token, currency, prices, *args, **kwargs):
+    if not _LOCALIZED_BASE_SEND_INVOICE:
+        raise AttributeError('send_invoice is unavailable')
+    lang = _bot_output_language(chat_id, _current_locale_user_id())
+    title = _localize_bot_text(title, lang)
+    description = _localize_bot_text(description, lang)
+    localized_prices = []
+    for price in prices or []:
+        try:
+            item = copy.deepcopy(price)
+            if hasattr(item, 'label'):
+                item.label = _localize_bot_text(item.label, lang)
+            localized_prices.append(item)
+        except Exception:
+            localized_prices.append(price)
+    return _LOCALIZED_BASE_SEND_INVOICE(chat_id, title, description, invoice_payload, provider_token, currency, localized_prices, *args, **kwargs)
+
+bot.send_message = _localized_final_send_message
+bot.reply_to = _localized_final_reply_to
+bot.edit_message_text = _localized_final_edit_text
+bot.answer_callback_query = _localized_final_answer_callback
+bot.send_photo = _localized_final_send_photo
+bot.send_animation = _localized_final_send_animation
+bot.send_video = _localized_final_send_video
+if _LOCALIZED_BASE_EDIT_CAPTION:
+    bot.edit_message_caption = _localized_final_edit_caption
+if _LOCALIZED_BASE_EDIT_MEDIA:
+    bot.edit_message_media = _localized_final_edit_media
+if _LOCALIZED_BASE_SEND_INVOICE:
+    bot.send_invoice = _localized_final_send_invoice
+
 db_lock = threading.RLock()
+last_db_change_at = 0.0
 db_dirty = False
 db_version = 0
 
@@ -1249,6 +1511,9 @@ TITLES = {
     'donor_emperor': {'name': 'Император Доната', 'text': '👑 Император Доната', 'price': 0, 'donor_only': True,
                       'donor_buffs': {'work_bonus': 0.20, 'bonus_mult': 0.20, 'business_bonus': 0.15},
                       'desc': '+20% к зарплате, +20% к /bonus, +15% к прибыли бизнесов'},
+    'donor_void_lord': {'name': 'Властелин Пустоты', 'text': '🕳️ Властелин Пустоты', 'price': 0, 'donor_only': True,
+                      'donor_buffs': {'work_bonus': 0.35, 'bonus_mult': 0.40, 'business_bonus': 0.30},
+                      'desc': '+35% к зарплате, +40% к /bonus, +30% к прибыли бизнесов — усиленный лимитный титул'},
     'clown': {'name': 'Главный Клоун', 'text': '🤡 Главный Клоун', 'price': 2000, 'buff': 'smeh_boost', 'val': 100, 'desc': '+1 очко Смехуятинки за смс'},
     'beer_baron': {'name': 'Пивной Барон', 'text': '🍺 Пивной Барон', 'price': 3200, 'buff': 'bonus_coins', 'val': 25, 'desc': '+25 коинов к /bonus'},
     'tapok_master': {'name': 'Повелитель Тапка', 'text': '🩴 Повелитель Тапка', 'price': 4000, 'buff': 'luck', 'val': 15, 'desc': '+15% к удаче охоты/рыбалки'},
@@ -1277,7 +1542,8 @@ THEMES = {
     'halloween': {'name': '🎃 Тёмный Хеллоуин: Тыквенная Ночь 🦇', 'price': 0, 'border': '🎃══════ 🦇 🕸 🕯 ══════🎃', 'header': '🎃 <b>ТЁМНЫЙ ГРИМУАР ТЫКВЕННОЙ НОЧИ</b> 🦇', 'icon': '🦇'},
     'stars_gold': {'name': '🌟 Императорское Золото VIP', 'price': 0, 'border': '⭐️══════ ⚜️ ══════⭐️', 'header': '🌟 <b>ИМПЕРАТОРСКИЙ STARS ПРОФИЛЬ</b> 👑', 'icon': '⭐️'},
     'stars_anime': {'name': '🎀 Аниме Люкс VIP', 'price': 0, 'border': '✨══════ 🎀 ══════✨', 'header': '🎀 <b>ANIME LUXURY SUPREME ID</b> 💖', 'icon': '💫'},
-    'stars_galaxy': {'name': '🌌 Бездна Сингулярности VIP', 'price': 0, 'border': '🪐══════ 🌀 ══════🌌', 'header': '🌌 <b>БЕЗДНА КОСМИЧЕСКОЙ СИНГУЛЯРНОСТИ</b> 🛸', 'icon': '🪐'}
+    'stars_galaxy': {'name': '🌌 Бездна Сингулярности VIP', 'price': 0, 'border': '🪐══════ 🌀 ══════🌌', 'header': '🌌 <b>БЕЗДНА КОСМИЧЕСКОЙ СИНГУЛЯРНОСТИ</b> 🛸', 'icon': '🪐'},
+    'stars_moonlit': {'name': '🌙 Лунная Ночь VIP', 'price': 0, 'border': '🌙══════ ✦ ══════🌙', 'header': '🌙 <b>ЛУННАЯ НОЧЬ — VIP ID</b> ✦', 'icon': '🌙'}
 }
 
 # ---------------------------------------------------------
@@ -1354,10 +1620,13 @@ STARS_COSMETICS = {
     'title_donor_sponsor': {'name': '💎 Титул: Золотой Спонсор', 'stars': 4, 'type': 'donor_title', 'title_id': 'donor_sponsor', 'desc': '+10% к работе, +10% к /bonus, +5% к прибыли бизнесов'},
     'title_donor_diamond': {'name': '💠 Титул: Алмазный Спонсор', 'stars': 6, 'type': 'donor_title', 'title_id': 'donor_diamond', 'desc': '+15% к работе, +15% к /bonus, +10% к прибыли бизнесов'},
     'title_donor_emperor': {'name': '👑 Титул: Император Доната', 'stars': 8, 'type': 'donor_title', 'title_id': 'donor_emperor', 'desc': '+20% к работе, +20% к /bonus, +15% к прибыли бизнесов'},
+    'title_donor_void_lord': {'name': '🕳️ Титул: Властелин Пустоты', 'stars': 7, 'type': 'donor_title', 'title_id': 'donor_void_lord', 'desc': 'Лимит: 5 экземпляров. +35% к работе, +40% к /bonus, +30% к прибыли бизнесов.'},
     'pet_griffin': {'name': '👑 Питомец: Королевский Грифон', 'stars': 5, 'type': 'pet', 'pet_id': 'vip_griffin', 'desc': 'Эксклюзивный питомец (+150% к удаче)'},
+    'pet_moon_fox': {'name': '🌙 Питомец: Лунный Фокс', 'stars': 6, 'type': 'pet', 'pet_id': 'moon_fox', 'desc': 'Лимит: 5 экземпляров. Усиленный Stars-питомец с максимальной удачей.'},
     'theme_gold': {'name': '🌟 Тема: Императорское Золото VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_gold', 'desc': 'Роскошная золотая рамка профиля'},
     'theme_anime': {'name': '🎀 Тема: Аниме Люкс VIP', 'stars': 3, 'type': 'theme', 'theme_id': 'stars_anime', 'desc': 'Премиальный аниме стиль профиля'},
     'theme_galaxy': {'name': '🌌 Тема: Бездна Сингулярности VIP', 'stars': 4, 'type': 'theme', 'theme_id': 'stars_galaxy', 'desc': 'Космическая стилистика сингулярности'},
+    'theme_moonlit': {'name': '🌙 Тема: Лунная Ночь VIP', 'stars': 5, 'type': 'theme', 'theme_id': 'stars_moonlit', 'desc': 'Лимит: 5 экземпляров. Эксклюзивная постоянная VIP-тема без экономического баффа.'},
     # Донатные значки. Старые vip_badge_* ID оставлены как алиасы ниже,
     # чтобы уже купленные предметы не исчезали после обновления бота.
     'badge_crown': {'name': '👑 Значок: Корона VIP', 'stars': 3, 'type': 'badge', 'emoji': '👑', 'desc': 'VIP значок рядом с ником'},
@@ -1379,6 +1648,56 @@ STARS_COSMETICS = {
     'vehicle_donor_ufo': {'name': '🛸 Донатный транспорт: НЛО Императора', 'stars': 18, 'type': 'donor_vehicle', 'vehicle_id': 'donor_ufo', 'desc': '-50% ко всем таймерам'}
 }
 
+# Stars-визуалы без общего лимита. STARS_HARD_LIMITED_ITEMS ниже — единственные товары с глобальным лимитом 5.
+STARS_LIMITED_MAX = 5
+# Глобальный лимит 5 действует только на три новые позиции.
+STARS_HARD_LIMITED_MAX = 5
+STARS_HARD_LIMITED_LOCK = threading.Lock()
+STARS_HARD_LIMITED_ITEMS = {
+    'pet_moon_fox': {'name': '🌙 Питомец: Лунный Фокс'},
+    'theme_moonlit': {'name': '🌙 Тема: Лунная Ночь VIP'},
+    'title_donor_void_lord': {'name': '🕳️ Титул: Властелин Пустоты'},
+}
+
+def stars_hard_limited_available(item_key):
+    if item_key not in STARS_HARD_LIMITED_ITEMS:
+        return None
+    with STARS_HARD_LIMITED_LOCK:
+        sold = db.setdefault('stars_hard_limited_stock', {})
+        try:
+            used = int(sold.get(item_key, 0) or 0)
+        except (TypeError, ValueError):
+            used = 0
+            sold[item_key] = 0
+        return max(0, STARS_HARD_LIMITED_MAX - used)
+
+def reserve_stars_hard_limited(item_key):
+    if item_key not in STARS_HARD_LIMITED_ITEMS:
+        return False
+    with STARS_HARD_LIMITED_LOCK:
+        sold = db.setdefault('stars_hard_limited_stock', {})
+        try:
+            used = int(sold.get(item_key, 0) or 0)
+        except (TypeError, ValueError):
+            used = 0
+        if used >= STARS_HARD_LIMITED_MAX:
+            return False
+        sold[item_key] = used + 1
+        mark_dirty()
+        return True
+
+STARS_LIMITED_ITEMS = {
+    'limited_moon_aura': {'name': '🌙 Аура Луны', 'stars': 6, 'type': 'limited_effect', 'emoji': '🌙', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_inferno_frame': {'name': '🔥 Рамка Инферно', 'stars': 7, 'type': 'limited_effect', 'emoji': '🔥', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_frost_crown': {'name': '❄️ Ледяная Корона', 'stars': 8, 'type': 'limited_effect', 'emoji': '❄️', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_galaxy_frame': {'name': '🌌 Рамка Галактики', 'stars': 9, 'type': 'limited_effect', 'emoji': '🌌', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_celestial_wings': {'name': '🪽 Небесные Крылья', 'stars': 10, 'type': 'limited_effect', 'emoji': '🪽', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_shadow_title': {'name': '🌑 Титул Тени', 'stars': 6, 'type': 'limited_effect', 'emoji': '🌑', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_diamond_name': {'name': '💎 Алмазное Имя', 'stars': 8, 'type': 'limited_effect', 'emoji': '💎', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_void_eye': {'name': '👁️ Око Пустоты', 'stars': 9, 'type': 'limited_effect', 'emoji': '👁️', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_dragon_aura': {'name': '🐉 Аура Дракона', 'stars': 12, 'type': 'limited_effect', 'emoji': '🐉', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+    'limited_comet': {'name': '☄️ Комета', 'stars': 7, 'type': 'limited_effect', 'emoji': '☄️', 'desc': 'Постоянно доступен в каталоге. Без общего лимита.'},
+}
 
 # ---------------------------------------------------------
 # ШРИФТЫ ДЛЯ ПРОФИЛЯ
@@ -1572,7 +1891,8 @@ PETS_DATA = {
     'dragon': {'name': '🐉 Маленький Дракон', 'short': '🐉 Дракончик', 'price': 12000, 'luck_bonus': 85, 'desc': '+85% к удаче во всем'},
     'capybara': {'name': '🦦 Капибара Чила', 'short': '🦦 Капибара', 'price': 15000, 'luck_bonus': 90, 'desc': '+90% к удаче, максимальный чилл'},
     'unicorn': {'name': '🦄 Радужный Единорог', 'short': '🦄 Единорог', 'price': 25000, 'luck_bonus': 110, 'desc': '+110% ко всем доходам'},
-    'vip_griffin': {'name': '👑 Королевский Грифон', 'short': '👑 Грифон', 'price': 0, 'luck_bonus': 150, 'desc': '+150% ко всей удаче, благословение небес (VIP Питомец за 5 ⭐️)'}
+    'vip_griffin': {'name': '👑 Королевский Грифон', 'short': '👑 Грифон', 'price': 0, 'luck_bonus': 150, 'desc': '+150% ко всей удаче, благословение небес (VIP Питомец за 5 ⭐️)'},
+    'moon_fox': {'name': '🌙 Лунный Фокс', 'short': '🌙 Лунный Фокс', 'price': 0, 'luck_bonus': 200, 'desc': '+200% к удаче во всем, усиленное ночное благословение (лимит 5 Stars-питомцев)'}
 }
 
 ACHIEVEMENTS = {
@@ -1965,11 +2285,17 @@ def _pg_connect():
         return None
     return psycopg2.connect(DATABASE_URL, connect_timeout=10)
 
-def _pg_init():
-    conn = _pg_connect()
-    if conn is None:
-        return False
-    try:
+_PG_SCHEMA_LOCK = threading.Lock()
+_PG_SCHEMA_READY = False
+
+def _pg_prepare_connection(conn):
+    """Create the state table on the connection that will be used for the operation."""
+    global _PG_SCHEMA_READY
+    if _PG_SCHEMA_READY:
+        return True
+    with _PG_SCHEMA_LOCK:
+        if _PG_SCHEMA_READY:
+            return True
         with conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -1979,7 +2305,16 @@ def _pg_init():
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """)
+        _PG_SCHEMA_READY = True
         return True
+
+def _pg_init():
+    """Compatibility helper for startup/health checks."""
+    conn = _pg_connect()
+    if conn is None:
+        return False
+    try:
+        return _pg_prepare_connection(conn)
     finally:
         conn.close()
 
@@ -1988,7 +2323,7 @@ def _pg_load():
     if conn is None:
         return None
     try:
-        _pg_init()
+        _pg_prepare_connection(conn)
         with conn.cursor() as cur:
             cur.execute('SELECT data FROM bot_state WHERE id = 1')
             row = cur.fetchone()
@@ -2001,7 +2336,7 @@ def _pg_save(snapshot):
     if conn is None:
         return False
     try:
-        _pg_init()
+        _pg_prepare_connection(conn)
         with conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -2037,8 +2372,14 @@ def load_data():
                 pg_ts = float((pg_data.get('_meta') or {}).get('saved_at', 0) or 0) if isinstance(pg_data, dict) else 0.0
                 local_ts = float((local_data.get('_meta') or {}).get('saved_at', 0) or 0) if isinstance(local_data, dict) else 0.0
                 if local_data is not None and local_ts > pg_ts + 1.0:
-                    print('[DB] Локальный snapshot новее Neon; используется локальный fallback.')
-                    return _normalize_loaded_data(local_data)
+                    print('[DB] Локальный snapshot новее Neon; восстанавливается в Neon.')
+                    local_normalized = _normalize_loaded_data(local_data)
+                    try:
+                        if _pg_save(local_normalized):
+                            print('[DB] Локальный snapshot успешно синхронизирован с Neon.')
+                    except Exception as sync_error:
+                        print(f'[DB] Не удалось синхронизировать локальный snapshot с Neon: {sync_error}')
+                    return local_normalized
                 print('[DB] Загружена база из Neon PostgreSQL.')
                 return _normalize_loaded_data(pg_data)
 
@@ -2064,9 +2405,11 @@ def load_data():
     return _normalize_loaded_data(base)
 
 def mark_dirty():
-    global db_dirty, db_version
-    db_dirty = True
-    db_version += 1
+    global db_dirty, db_version, last_db_change_at
+    with db_lock:
+        db_dirty = True
+        db_version += 1
+        last_db_change_at = time.time()
 
 def save_data(send_backup=False):
     with DB_SAVE_LOCK:
@@ -2112,14 +2455,19 @@ def _save_data_locked(send_backup=False):
         print(f'Ошибка при сохранении базы данных: {e}')
 
 def auto_save_worker():
-    global db_dirty
+    global db_dirty, last_db_change_at
+    # Не пишем всю базу каждые 10 секунд. После изменения ждём короткое
+    # окно тишины, чтобы серия операций одного действия ушла одним snapshot.
+    AUTOSAVE_DEBOUNCE = 25.0
     while True:
-        time.sleep(10)
+        time.sleep(5)
         try:
             finalize_meme_contests()
-        except Exception:
-            pass
-        if db_dirty:
+        except Exception as e:
+            print(f'[AUTOSAVE] finalize_meme_contests failed: {e}')
+        with db_lock:
+            should_save = bool(db_dirty and (time.time() - last_db_change_at >= AUTOSAVE_DEBOUNCE))
+        if should_save:
             save_data(send_backup=False)
 
 def periodic_backup_worker():
@@ -2737,7 +3085,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_case_time', 0), ('last_rob_time', 0), ('last_trash_time', 0),
         ('profile_theme', 'default'), ('purchased_themes', ['default']),
         ('profile_font', 'default'), ('purchased_fonts', ['default']),
-        ('profile_gifs', []), ('profile_gif', None),
+        ('profile_gifs', []), ('profile_gif', None), ('active_limited_effect', None),
         ('premium_emoji_theme', 'nya'), ('premium_emoji_enabled', True),
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
@@ -2746,6 +3094,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""), ('last_activity_reward_time', 0),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
+        ('mini_daily_claimed', ''), ('mini_daily_date', ''), ('mini_daily_streak', 0),
         ('last_energy_drink_time', 0), ('vip_until', 0), ('vip_forever', False), ('stars_donated', 0), ('is_sheriff', False), ('jail_until', 0), ('disease', None), ('disease_immunity_until', 0), ('bp_exp', 0), ('bp_claimed_free', []), ('bp_claimed_prem', []), ('bp_premium', False), ('last_safe_try', 0), ('guild_id', None), ('season_points', 0), ('season_claimed', False), ('crafted_items', {})
     ]:
         if field not in u_data:
@@ -3265,6 +3614,8 @@ def make_link(chat_id, user_name, user_id=None, ping=True):
 
     if user_econ.get('badge'):
         badge_str = f" [{user_econ['badge']}]"
+    if user_econ.get('active_limited_effect'):
+        badge_str += f" [{user_econ['active_limited_effect']}]"
 
     if user_econ.get('custom_title'):
         title_str = f" [{html.escape(str(user_econ['custom_title']))}]"
@@ -5704,7 +6055,8 @@ def cmd_mines(message):
     markup.add(
         InlineKeyboardButton("3x3 (9 кл.)", callback_data=f"msz_{game_id}_3:{user_id}"),
         InlineKeyboardButton("4x4 (16 кл.)", callback_data=f"msz_{game_id}_4:{user_id}"),
-        InlineKeyboardButton("5x5 (25 кл.)", callback_data=f"msz_{game_id}_5:{user_id}")
+        InlineKeyboardButton("5x5 (25 кл.)", callback_data=f"msz_{game_id}_5:{user_id}"),
+        InlineKeyboardButton("6x6 (36 кл.) 🔥", callback_data=f"msz_{game_id}_6:{user_id}")
     )
     markup.add(InlineKeyboardButton("❌ Отмена (вернуть ставку)", callback_data=f"mcancel_{game_id}:{user_id}"))
 
@@ -7146,7 +7498,7 @@ def cmd_custom_title(message):
     bot.reply_to(message, f"🌟 Кастомный титул установлен: <b>{html.escape(title)}</b>", parse_mode='HTML')
 
 
-@bot.message_handler(commands=['profile_settings', 'set_profile', 'настройки_профиля'])
+@bot.message_handler(commands=['profile_settings', 'set_profile', 'настройки_профиля', 'налаштування_профілю'])
 @serialize_user_action
 def cmd_profile_settings(message):
     if not can_process_user_message(message):
@@ -7156,194 +7508,132 @@ def cmd_profile_settings(message):
     render_profile_settings_view(message.chat.id, user_id, user_name)
 
 def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, message_id_to_edit=None, username=None):
+    """Render a compact profile. If a profile GIF is equipped, Telegram receives
+    exactly one animation message with the profile in its caption.
+
+    Telegram captions are limited to 1024 characters, so the profile intentionally
+    contains only the compact fields requested for the main card.
+    """
     econ = get_user_econ(user_id, user_tag, username=username)
     theme_key = econ.get('profile_theme', 'default')
     theme_info = THEMES.get(theme_key, THEMES['default'])
+    border = theme_info.get('border', '──────────────────────')
+    header = theme_info.get('header', '')
+    t_icon = theme_info.get('icon', '🐱')
 
-    border = theme_info['border']
-    header = theme_info['header']
-    t_icon = theme_info['icon']
+    # Настройки профиля доступны только командами (/profile_settings,
+    # /set_profile, /настройки_профиля). В самой карточке кнопки настроек нет.
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton('📊 Статистика', callback_data=f'profile_stats:{user_id}'),
+        InlineKeyboardButton('🏆 Рейтинг', callback_data=f'profile_rating:{user_id}')
+    )
+    markup.add(
+        InlineKeyboardButton('🎁 Бонусы', callback_data=f'profile_bonus:{user_id}'),
+        InlineKeyboardButton('🔨 Крафт', callback_data=f'resources_craft:{user_id}')
+    )
 
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton('⚙️ Настройки профиля', callback_data=f'open_profile_settings:{user_id}'))
-
-    # Профиль намеренно компактный: подробные разделы открываются кнопками.
-    purchased_titles = econ.get('titles', [])
     active_title = econ.get('active_title')
     custom_title = econ.get('custom_title')
-
-    current_badge = econ.get('badge') or "Отсутствует"
-
-    if custom_title: current_title = f"🌟 {html.escape(custom_title)} (Кастом)"
+    if custom_title:
+        current_title = f"🌟 {html.escape(str(custom_title))}"
     elif active_title in TITLES:
-        t_obj = TITLES[active_title]
-        current_title = f"{t_obj['text']} ({t_obj['desc']})"
-    else: current_title = 'Отсутствует'
+        current_title = html.escape(str(TITLES[active_title].get('text', active_title)))
+    else:
+        current_title = '—'
 
-    inv = econ.get('inventory', [])
-    inv_str = " ".join(inv) if inv else "Пусто"
-
-    fish_inv = str(sum(int(v or 0) for v in econ.get('fish_inventory', {}).values()))
-    hunt_inv = str(sum(int(v or 0) for v in econ.get('hunt_inventory', {}).values()))
-
-    portfolio = econ.get('crypto_portfolio', {})
-    portfolio_str = ', '.join(f'<b>{tick}</b>: {amt:.2f}' for tick, amt in portfolio.items() if amt > 0.0001) or 'Пусто'
-
-    user_biz = econ.get('businesses', {})
-    biz_levels = econ.get('biz_levels', {})
-    biz_count = sum(1 for b_id in user_biz.keys() if b_id in BUSINESSES)
-    biz_str = str(biz_count)
-
-    veh_str = VEHICLES[econ['vehicle']]['name'] if econ.get('vehicle') in VEHICLES else 'Пешеход 🚶‍♂️'
-
-    marriage_info = "Холост(а)"
-    if econ.get('marriage'):
-        m_data = econ['marriage']
-        ring_emoji = RINGS.get(m_data.get('ring'), {}).get('emoji', '💍')
-        days_together = max(1, int((time.time() - m_data.get('married_at', time.time())) / 86400))
-        marriage_info = f"{ring_emoji} В браке с <b>{html.escape(m_data.get('partner_name', 'Партнер'))}</b> ({days_together} дн.)"
-
-    pet_info = "Отсутствует"
-    if econ.get('pet'):
-        p = econ['pet']
-        update_pet_stats(p)
-        pet_info = f"{p['name']} (🍖 {p['hunger']}%, 🧼 {p['cleanliness']}%, ⭐ {p.get('pet_exp', 0)} EXP)"
-
-    unlocked_ach = len(econ.get('achievements', []))
-    total_ach = len(ACHIEVEMENTS)
-
-    m_st = econ.get('msg_stats', {})
-    msg_stats_str = (
-        f"• День: <b>{m_st.get('day_count', 0)}</b> | Неделя: <b>{m_st.get('week_count', 0)}</b>\n"
-        f"• Месяц: <b>{m_st.get('month_count', 0)}</b> | Всего: <b>{m_st.get('total_count', 0)}</b>"
+    badge = html.escape(str(econ.get('badge') or '—'))
+    lvl, cur_exp, next_exp, bar = get_account_level(econ.get('account_exp', 0))
+    st = econ.get('msg_stats', {}) or {}
+    activity = (
+        f"📊 День <b>{st.get('day_count', 0)}</b> · "
+        f"неделя <b>{st.get('week_count', 0)}</b> · "
+        f"месяц <b>{st.get('month_count', 0)}</b> · "
+        f"всё время <b>{st.get('total_count', 0)}</b>"
     )
 
-    lvl, cur_exp, next_exp, bar = get_account_level(econ.get('account_exp', 0))
-    durak_wins = int(econ.get('durak_wins', 0))
-    durak_losses = int(econ.get('durak_losses', 0))
-    durak_rank = get_durak_rank(durak_wins)
+    fish_count = sum(max(0, int(v or 0)) for v in (econ.get('fish_inventory', {}) or {}).values())
+    hunt_count = sum(max(0, int(v or 0)) for v in (econ.get('hunt_inventory', {}) or {}).values())
+    biz_count = sum(1 for b_id in (econ.get('businesses', {}) or {}).keys() if b_id in BUSINESSES)
+    donor_biz_count = len(econ.get('donor_businesses', {}) or {})
+    total_biz = biz_count + donor_biz_count
 
-    karma = econ.get('karma', 0)
-    if karma >= 80: karma_title = "😇 Святой Ангел"
-    elif karma >= 30: karma_title = "🕊 Добряк"
-    elif karma > -30: karma_title = "⚖️ Нейтрал"
-    elif karma > -80: karma_title = "😈 Злодей"
-    else: karma_title = "👹 Абсолютный Демон"
-
-    vip_line = ""
+    vip_line = ''
     if econ.get('vip_forever'):
-        vip_line = f"{t_icon} ⭐️ <b>VIP NYA PASS:</b> 👑 НАВСЕГДА\n"
+        vip_line = '👑 VIP: <b>НАВСЕГДА</b>\n'
     elif econ.get('vip_until', 0) > time.time():
         vip_date = datetime.fromtimestamp(econ['vip_until'], tz=MSK_TZ).strftime('%d.%m.%Y %H:%M')
-        vip_line = f"{t_icon} ⭐️ <b>VIP NYA PASS:</b> до {vip_date}\n"
+        vip_line = f'👑 VIP: <b>до {vip_date}</b>\n'
 
-    stars_donated = econ.get('stars_donated', 0)
-    stars_line = f"{t_icon} 🌟 Поддержка бота: <b>{stars_donated} ⭐️</b>\n" if stars_donated > 0 else ""
+    marriage_line = '—'
+    if econ.get('marriage'):
+        marriage_line = f"💍 {html.escape(str(econ['marriage'].get('partner_name', 'Партнёр')))}"
 
-    loan_str = ""
-    loan = econ.get('loan')
-    if loan and loan.get('amount', 0) > 0:
-        loan_str = f"\n{t_icon} 💳 Кредит: <b>-{loan['amount']} 🪙</b>"
+    pet_line = '—'
+    if isinstance(econ.get('pet'), dict):
+        pet_line = html.escape(str(econ['pet'].get('name', 'Питомец')))
 
-    streak_days = econ.get('bonus_streak', 0)
-    streak_str = f"🔥 Стрик бонусов: <b>{streak_days} дн.</b> (Множитель: x{min(2.0, 1.0 + (streak_days * 0.15)):.1f})\n"
+    stars_donated = int(econ.get('stars_donated', 0) or 0)
+    stars_line = f'⭐ Stars поддержки: <b>{stars_donated}</b>\n' if stars_donated else ''
 
     raw_text = (
-        f"{header}\n"
+        f"{header}\n" if header else ''
         f"{border}\n"
-        f"{premium_emoji('profile', '🐱')} {t_icon} 👤 Игрок: {make_link(chat_id, user_tag, user_id, ping=False)}\n"
-        f"{premium_emoji('star', '⭐')} {t_icon} Уровень: <b>{lvl} LVL</b> [{bar}]\n"
-        f"{t_icon} 📈 EXP: <b>{cur_exp:,}/{next_exp:,}</b>\n"
-        f"{premium_emoji('money', '💰')} {t_icon} Баланс: <b>{econ['balance']} 🪙</b>\n"
-        f"{t_icon} 🏦 Банк: <b>{econ.get('bank_deposit', 0)} 🪙</b>\n"
+        f"{premium_emoji('profile', '🐱')} {t_icon} <b>{html.escape(str(user_tag or 'Пользователь'))}</b>\n"
+        f"⭐ Уровень: <b>{lvl}</b> · XP <b>{cur_exp:,}/{next_exp:,}</b> [{bar}]\n"
+        f"💰 Баланс: <b>{int(econ.get('balance', 0) or 0):,} 🪙</b> · 🏦 <b>{int(econ.get('bank_deposit', 0) or 0):,}</b>\n"
         f"{vip_line}"
         f"{stars_line}"
-        f"{t_icon} 🔥 Бонусная серия: <b>{streak_days} дн.</b>\n"
-        f"{t_icon} 💍 Семья: <b>{marriage_info}</b>\n"
-        f"{t_icon} 🏢 Бизнесы: <b>{biz_str}</b> | 💵 Доход: <b>{sum(_business_hourly_income(b, _business_level(econ, b)) for b in list(user_biz.keys()) + list(econ.get('donor_businesses', {}).keys()) if _business_info(b)):,.0f} 🪙/ч</b>\n"
-        f"{t_icon} 🐾 Питомец: <b>{pet_info}</b>\n"
-        f"{t_icon} 🏆 Достижения: <b>{unlocked_ach}/{total_ach}</b>\n"
-        f"{border}\n"
-        f"📊 <b>Активность:</b> день <b>{m_st.get('day_count', 0)}</b> | неделя <b>{m_st.get('week_count', 0)}</b> | месяц <b>{m_st.get('month_count', 0)}</b> | всё время <b>{m_st.get('total_count', 0)}</b>\n"
-        f"{t_icon} 🏷 Значок: <b>{current_badge}</b> | Титул: <b>{current_title}</b>\n"
+        f"🔥 Бонусная серия: <b>{int(econ.get('bonus_streak', 0) or 0)} дн.</b>\n"
+        f"🏢 Бизнесы: <b>{total_biz}</b> · 🎣 Рыба: <b>{fish_count}</b> · 🏹 Добыча: <b>{hunt_count}</b>\n"
+        f"🐾 Питомец: <b>{pet_line}</b> · {marriage_line}\n"
+        f"🏷 Значок: <b>{badge}</b> · Титул: <b>{current_title}</b>\n"
+        f"{activity}\n"
         f"{border}"
     )
+    text = raw_text.strip()
+    if len(text) > 1024:
+        # Hard safety net for Telegram animation captions. Cut only at the end;
+        # all critical identity/economy fields are placed before this point.
+        text = text[:1000].rstrip() + '…'
 
-    text = raw_text
-
-    # GIF отправляется отдельным сообщением, поэтому полный профиль всегда
-    # отправляется обычным текстом без обрезания и без caption-лимита.
-    # ВАЖНО: Telegram ограничивает caption animation 1024 символами. Поэтому
-    # мы НЕ обрезаем готовый профиль. Для GIF строится компактная версия,
-    # в которой сохраняются все поля профиля, но убираются повторяющиеся
-    # декоративные разделители и лишние подписи.
     gif_key = econ.get('profile_gif')
     gif_info = PROFILE_GIFS.get(gif_key) if gif_key else None
-    gif_text = text
 
-    def _send_profile_gif(reply_to=None):
-        # GIF отправляется отдельным сообщением, а карточка профиля — отдельно.
-        # Поэтому Telegram caption limit для animation больше не влияет на профиль.
-        # Сначала GIF, затем полноценная карточка профиля.
+    def _send_new():
+        if gif_info:
+            if message_to_reply is not None:
+                return bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML', reply_to_message_id=message_to_reply.message_id)
+            return bot.send_animation(chat_id, gif_info['url'], caption=text, reply_markup=markup, parse_mode='HTML')
         if message_to_reply is not None:
-            bot.send_animation(chat_id, gif_info['url'], reply_to_message_id=message_to_reply.message_id)
-            card_msg = bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.send_animation(chat_id, gif_info['url'])
-            card_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        return card_msg
+            return bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
+        return bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
     if message_id_to_edit:
-        # Если GIF активен, сама карточка должна быть animation-сообщением.
-        # Сначала пытаемся изменить media (если старое сообщение уже GIF),
-        # а если старое сообщение текстовое — заменяем его одним animation-сообщением.
-        if gif_info:
-            # Раньше GIF пытался стать самой карточкой через caption. Теперь
-            # карточка и GIF — два отдельных сообщения, поэтому при обновлении
-            # просто заменяем старую карточку новой и отправляем GIF отдельно.
-            try:
-                bot.delete_message(chat_id, message_id_to_edit)
-            except Exception as delete_error:
-                print(f"[PROFILE GIF CARD DELETE] {delete_error}")
-            try:
-                _send_profile_gif()
-                return
-            except Exception as gif_error:
-                print(f"[PROFILE GIF EDIT ERROR] {gif_error}")
-
-        # GIF выключен: обычная текстовая карточка. Если старое сообщение было
-        # animation, edit_message_text не сработает — тогда заменяем его текстом.
         try:
+            if gif_info:
+                media = InputMediaAnimation(media=gif_info['url'], caption=text, parse_mode='HTML')
+                bot.edit_message_media(media, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup)
+                return
             bot.edit_message_text(text, chat_id=chat_id, message_id=message_id_to_edit, reply_markup=markup, parse_mode='HTML')
             return
-        except Exception as profile_edit_error:
-            print(f"[PROFILE EDIT ERROR] {profile_edit_error}")
+        except Exception as edit_error:
+            print(f'[PROFILE EDIT] replacing old profile message: {edit_error}')
             try:
                 bot.delete_message(chat_id, message_id_to_edit)
             except Exception:
                 pass
             try:
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _send_new()
                 return
-            except Exception as text_error:
-                print(f"[PROFILE TEXT REPLACE ERROR] {text_error}")
+            except Exception as send_error:
+                print(f'[PROFILE REPLACE ERROR] {send_error}')
+                return
 
-    if gif_info:
-        try:
-            if message_to_reply:
-                _send_profile_gif(message_to_reply)
-            else:
-                _send_profile_gif()
-            return
-        except Exception as gif_error:
-            print(f"[PROFILE GIF ERROR] {gif_error}")
-
-    if message_to_reply:
-        try: bot.reply_to(message_to_reply, text, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-    else:
-        try: bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
+    try:
+        _send_new()
+    except Exception as e:
+        print(f'[PROFILE SEND ERROR] {e}')
 
 
 @bot.message_handler(commands=['biometry', 'биометрия', 'замеры'])
@@ -7414,18 +7704,32 @@ def send_user_profile(chat_id, user_tag, user_id, message_to_reply=None, message
 # ---------------------------------------------------------
 # ЗАЩИТА ПОКУПОК TELEGRAM STARS
 # ---------------------------------------------------------
+def stars_limited_stock(item_key):
+    sold = db.setdefault('stars_limited_stock', {})
+    try: return max(0, int(sold.get(item_key, 0) or 0))
+    except (TypeError, ValueError):
+        sold[item_key] = 0; return 0
+
+def stars_limited_available(item_key):
+    # Все 10 визуальных эффектов Stars доступны без общего лимита.
+    return None if item_key in STARS_LIMITED_ITEMS else 0
+
+def reserve_stars_limited(item_key):
+    # Legacy compatibility; global limit is handled only by STARS_HARD_LIMITED_ITEMS.
+    return item_key in STARS_LIMITED_ITEMS
+
 def stars_item_is_one_time(item):
     """Косметика, питомцы и pass навсегда покупаются только один раз."""
     if not item:
         return False
     item_type = item.get('type')
-    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium', 'gif', 'donor_business', 'donor_vehicle'}
+    return item_type in {'theme', 'badge', 'pet', 'title_cert', 'donor_title', 'bp_premium', 'gif', 'donor_business', 'donor_vehicle', 'limited_effect'}
 
 def stars_item_owned(econ, kind, item_key):
     if kind == 'vippass':
         return item_key == 'pass_forever' and bool(econ.get('vip_forever'))
     if kind == 'cosm':
-        item = STARS_COSMETICS.get(item_key)
+        item = STARS_COSMETICS.get(item_key) or STARS_LIMITED_ITEMS.get(item_key)
         if not item:
             return False
         t = item.get('type')
@@ -7450,14 +7754,67 @@ def stars_item_owned(econ, kind, item_key):
         if t == 'donor_business':
             bid = item.get('business_id')
             return bool(bid) and bid in econ.get('donor_businesses', {})
+        if t == 'limited_effect':
+            return item_key in econ.get('paid_stars_items', [])
     return False
 
 def stars_purchase_error(econ, kind, item_key):
+    if kind == 'cosm' and item_key in STARS_HARD_LIMITED_ITEMS and stars_hard_limited_available(item_key) <= 0:
+        return '❌ Лимит этого предмета уже исчерпан: 5/5 экземпляров.'
     if not stars_item_owned(econ, kind, item_key):
         return None
     if kind == 'vippass':
         return '❌ Вечный VIP уже куплен. Его нельзя купить повторно. 😸'
     return '❌ Этот вечный Stars-предмет уже есть у вас. Повторная покупка запрещена. 😸'
+
+def grant_hard_limited_stars_item(econ, item_key):
+    """Выдаёт один из трёх глобально лимитированных Stars-предметов.
+    Вызывается только после успешного reserve_stars_hard_limited().
+    """
+    item = STARS_COSMETICS.get(item_key)
+    if item_key not in STARS_HARD_LIMITED_ITEMS or not item:
+        raise ValueError(f'Unknown hard-limited Stars item: {item_key}')
+
+    econ.setdefault('paid_stars_items', [])
+    if item_key not in econ['paid_stars_items']:
+        econ['paid_stars_items'].append(item_key)
+
+    c_type = item.get('type')
+    if c_type == 'donor_title':
+        title_id = item.get('title_id')
+        if title_id not in TITLES or not TITLES[title_id].get('donor_only'):
+            raise ValueError(f'Invalid limited donor title: {item_key}')
+        econ.setdefault('titles', [])
+        if title_id not in econ['titles']:
+            econ['titles'].append(title_id)
+        econ['active_title'] = title_id
+        econ['custom_title'] = None
+    elif c_type == 'theme':
+        theme_id = item.get('theme_id')
+        purchased = econ.setdefault('purchased_themes', ['default'])
+        if theme_id and theme_id not in purchased:
+            purchased.append(theme_id)
+        if theme_id:
+            econ['profile_theme'] = theme_id
+    elif c_type == 'pet':
+        pet_id = item.get('pet_id')
+        if pet_id not in PETS_DATA:
+            raise ValueError(f'Invalid limited pet: {item_key}')
+        p_info = PETS_DATA[pet_id]
+        econ['pet'] = {
+            'id': pet_id,
+            'name': p_info['name'],
+            'luck_bonus': p_info['luck_bonus'],
+            'hunger': 100,
+            'cleanliness': 100,
+            'pet_exp': 0,
+            'last_update': time.time()
+        }
+    else:
+        raise ValueError(f'Unsupported hard-limited item type: {c_type}')
+
+    mark_dirty()
+    return item['name']
 
 # ---------------------------------------------------------
 # ФУНКЦИИ МАГАЗИНА TELEGRAM STARS
@@ -7491,6 +7848,7 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
             InlineKeyboardButton("💰 Коин-паки", callback_data=f"stars_cat_coins:{user_id}"),
             InlineKeyboardButton("👑 VIP Pass", callback_data=f"stars_cat_pass:{user_id}"),
             InlineKeyboardButton("🎨 Темы", callback_data=f"stars_cat_themes:{user_id}"),
+            InlineKeyboardButton("🔥 Лимитированные", callback_data=f"stars_cat_limited:{user_id}"),
             InlineKeyboardButton("👑 Титулы", callback_data=f"stars_cat_titles:{user_id}"),
             InlineKeyboardButton("✨ Значки", callback_data=f"stars_cat_badges:{user_id}"),
             InlineKeyboardButton("🎞 GIF профиля", callback_data=f"stars_cat_gifs:{user_id}"),
@@ -7521,6 +7879,7 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
     else:
         type_map = {
             'themes': ('🎨 <b>ДОНАТНЫЕ ТЕМЫ</b>', {'theme'}),
+            'limited': ('✨ <b>STARS-ЭФФЕКТЫ БЕЗ ОБЩЕГО ЛИМИТА</b>', {'limited_effect'}),
             'titles': ('👑 <b>ДОНАТНЫЕ ТИТУЛЫ</b>', {'donor_title', 'title_cert'}),
             'badges': ('✨ <b>ДОНАТНЫЕ ЗНАЧКИ</b>', {'badge'}),
             'gifs': ('🎞 <b>GIF ДЛЯ ПРОФИЛЯ</b>', {'gif'}),
@@ -7533,13 +7892,16 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
         title, wanted = type_map[category]
         lines = [title, "──────────────────────"]
         items = [(k, v) for k, v in STARS_COSMETICS.items() if v.get('type') in wanted]
+        if category == 'limited': items += list(STARS_LIMITED_ITEMS.items())
         if not items:
             lines.append("Пока товаров нет.")
         for k, v in items:
             owned = stars_item_owned(econ, 'cosm', k)
+            limited = k in STARS_HARD_LIMITED_ITEMS
+            stock = f" | Осталось: {stars_hard_limited_available(k)}/5" if limited else ''
             status = ' ✅ УЖЕ КУПЛЕНО' if owned else ''
-            lines.append(f"• <b>{v['name']}</b> — <b>{v['stars']} ⭐️</b>{status}\n  <i>{v['desc']}</i>")
-            if not owned:
+            lines.append(f"• <b>{v['name']}</b> — <b>{v['stars']} ⭐️</b>{stock}{status}\n  <i>{v['desc']}</i>")
+            if not owned and (not limited or stars_hard_limited_available(k) > 0):
                 markup.add(InlineKeyboardButton(f"Купить {v['name']} — {v['stars']} ⭐️", callback_data=f"star_buy_cosm_{k}:{user_id}"))
         lines.append("──────────────────────")
         markup.add(InlineKeyboardButton("🔙 Назад в донатный магазин", callback_data=f"stars_cat_main:{user_id}"))
@@ -7558,8 +7920,8 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
 
 # Stars-only товары НИКОГДА не показываются и не выдаются через обычный магазин.
 # Это отдельно защищено и на уровне кнопок, чтобы нельзя было купить их старым callback-ом.
-STARS_ONLY_THEME_IDS = {'stars_gold', 'stars_anime', 'stars_galaxy'}
-STARS_ONLY_PET_IDS = {'vip_griffin'}
+STARS_ONLY_THEME_IDS = {'stars_gold', 'stars_anime', 'stars_galaxy', 'stars_moonlit'}
+STARS_ONLY_PET_IDS = {'vip_griffin', 'moon_fox'}
 
 
 def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
@@ -9270,6 +9632,26 @@ def cmd_gift_stars(message):
                 callback_data=f"gift2|pass|{item_key}|{target_user_id}|{user_id}"
             ))
     for item_key, item in STARS_COSMETICS.items():
+        if item_key in STARS_HARD_LIMITED_ITEMS:
+            continue
+        stars = int(item.get('stars', 0))
+        if stars >= 1:
+            markup.add(InlineKeyboardButton(
+                f"🎁 {item['name']} — {stars} ⭐️",
+                callback_data=f"gift2|cosm|{item_key}|{target_user_id}|{user_id}"
+            ))
+    # Три новые позиции с общим лимитом 5.
+    for item_key in STARS_HARD_LIMITED_ITEMS:
+        item = STARS_COSMETICS.get(item_key, STARS_HARD_LIMITED_ITEMS[item_key])
+        stars = int(item.get('stars', 0))
+        remaining = stars_hard_limited_available(item_key)
+        if stars >= 1 and remaining > 0:
+            markup.add(InlineKeyboardButton(
+                f"🎁 {item['name']} — {stars} ⭐️ (осталось {remaining}/5)",
+                callback_data=f"gift2|cosm|{item_key}|{target_user_id}|{user_id}"
+            ))
+    # Десять визуальных эффектов всегда доступны и тоже можно дарить.
+    for item_key, item in STARS_LIMITED_ITEMS.items():
         stars = int(item.get('stars', 0))
         if stars >= 1:
             markup.add(InlineKeyboardButton(
@@ -9319,6 +9701,9 @@ def _grant_all_donations(econ):
 
     for item_id, item in STARS_COSMETICS.items():
         item_type = item.get('type')
+        if item_id in STARS_HARD_LIMITED_ITEMS and item_id not in paid:
+            if not reserve_stars_hard_limited(item_id):
+                continue
         if item_id not in paid:
             paid.append(item_id)
 
@@ -9371,6 +9756,9 @@ def _grant_all_donations(econ):
                     econ.setdefault('biz_last_collect', {})[bid] = purchase_now
                     econ.setdefault('biz_income_carry', {})[bid] = 0.0
 
+    for item_id in STARS_LIMITED_ITEMS:
+        if item_id not in paid:
+            paid.append(item_id)
     # Старые отдельные VIP-значки тоже возвращаем, чтобы у старого владельца
     # после миграций не исчезали ранее купленные варианты.
     for badge_id, badge in VIP_BADGES.items():
@@ -9539,9 +9927,27 @@ def _admin_grant(message):
         if pet_id not in PETS_DATA:
             bot.reply_to(message, "❌ Питомец не найден. Укажи его ID из PETS_DATA.")
             return True
-        pi = PETS_DATA[pet_id]
-        econ['pet'] = {'id': pet_id, 'name': pi['name'], 'luck_bonus': pi['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
-        changed.append(f'питомец {pi["name"]}')
+        # Глобально лимитированный Лунный Фокс не должен выдаваться
+        # через общий /give pet ... обходным путём. Админская выдача
+        # тоже расходует один из пяти экземпляров.
+        if pet_id == 'moon_fox':
+            limited_key = 'pet_moon_fox'
+            if stars_item_owned(econ, 'cosm', limited_key):
+                changed.append(f"{STARS_COSMETICS[limited_key]['name']} — уже выдан")
+            elif not reserve_stars_hard_limited(limited_key):
+                bot.reply_to(message, "❌ Лимит Лунного Фокса уже исчерпан: 5/5 экземпляров.", parse_mode='HTML')
+                return True
+            else:
+                try:
+                    changed.append(grant_hard_limited_stars_item(econ, limited_key))
+                except Exception as grant_error:
+                    print(f'[ADMIN STARS] hard-limited pet grant failed: {limited_key}: {grant_error}')
+                    bot.reply_to(message, '❌ Не удалось выдать лимитированного питомца.', parse_mode='HTML')
+                    return True
+        else:
+            pi = PETS_DATA[pet_id]
+            econ['pet'] = {'id': pet_id, 'name': pi['name'], 'luck_bonus': pi['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
+            changed.append(f'питомец {pi["name"]}')
 
     elif item in ('item', 'предмет'):
         item_id = amount or ''
@@ -9574,6 +9980,28 @@ def _admin_grant(message):
         else:
             bot.reply_to(message, "❌ Бизнес не найден. Укажи ID, например <code>club</code> или <code>donor_nightclub</code>.", parse_mode='HTML')
             return True
+
+    elif item in STARS_HARD_LIMITED_ITEMS:
+        if stars_item_owned(econ, 'cosm', item):
+            changed.append(f"{STARS_COSMETICS[item]['name']} — уже выдан")
+        elif not reserve_stars_hard_limited(item):
+            bot.reply_to(message, "❌ Лимит этого предмета уже исчерпан: 5/5 экземпляров.", parse_mode='HTML')
+            return True
+        else:
+            try:
+                changed.append(grant_hard_limited_stars_item(econ, item))
+            except Exception as grant_error:
+                print(f'[ADMIN STARS] hard-limited grant failed: {item}: {grant_error}')
+                bot.reply_to(message, '❌ Не удалось выдать лимитированный Stars-предмет.', parse_mode='HTML')
+                return True
+
+    elif item in STARS_LIMITED_ITEMS:
+        c = STARS_LIMITED_ITEMS[item]
+        econ.setdefault('paid_stars_items', [])
+        if item not in econ['paid_stars_items']:
+            econ['paid_stars_items'].append(item)
+        econ['active_limited_effect'] = c.get('emoji', '✨')
+        changed.append(c.get('name', item))
 
     elif item in STARS_COSMETICS:
         c = STARS_COSMETICS[item]
@@ -11597,6 +12025,19 @@ def callback_inline(call):
     try:
         if not call or not getattr(call, 'from_user', None) or not getattr(call, 'message', None):
             return
+        try:
+            cb_uid = int(call.from_user.id)
+            cb_lang = _bot_output_language(call.message.chat.id, cb_uid)
+            with _CALLBACK_LANG_LOCK:
+                now_locale = time.time()
+                stale = [k for k, v in _CALLBACK_LANG_BY_ID.items() if now_locale - float(v[1]) > 300]
+                for k in stale:
+                    _CALLBACK_LANG_BY_ID.pop(k, None)
+                _CALLBACK_LANG_BY_ID[str(call.id)] = (cb_lang, now_locale)
+            _LOCALE_CONTEXT.user_id = cb_uid
+            _LOCALE_CONTEXT.chat_id = int(call.message.chat.id)
+        except Exception:
+            pass
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         user_username = (call.from_user.username or '').lower()
@@ -12022,11 +12463,11 @@ def callback_inline(call):
                 )
                 bot.answer_callback_query(call.id, "⭐️ Счёт на 4 ⭐️ выставлен!")
             except Exception as e:
-                bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка выставления счёта.", show_alert=True)
             return
 
         # НАСТРОЙКИ ПРОФИЛЯ
-        elif action_data == 'open_profile_settings':
+        elif action_data == 'ps_back_settings':
             render_profile_settings_view(chat_id, user_id, user_name, call.message.message_id)
             bot.answer_callback_query(call.id)
             return
@@ -12050,7 +12491,7 @@ def callback_inline(call):
                     active_mark = " (Выбрана)" if t_k == cur_t else ""
                     markup.add(InlineKeyboardButton(f"{THEMES[t_k]['name']}{active_mark}", callback_data=f"set_theme_{t_k}:{user_id}"))
             markup.add(InlineKeyboardButton("🏪 Купить новые темы в Магазине", callback_data=f"shop_cat_themes:{user_id}"))
-            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"ps_back_settings:{user_id}"))
             try:
                 bot.edit_message_text(
                     "🎨 <b>ВЫБОР ТЕМЫ ОФОРМЛЕНИЯ ПРОФИЛЯ</b> 😺\n──────────────────────\nВыберите тему из купленных или приобретите новые в магазине: 😻",
@@ -12075,7 +12516,7 @@ def callback_inline(call):
             if row: markup.add(*row)
             if current_badge:
                 markup.add(InlineKeyboardButton("❌ Снять текущий значок", callback_data=f"remove_badge:{user_id}"))
-            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"ps_back_settings:{user_id}"))
             text = f"🏷 <b>НАСТРОЙКА ЗНАЧКА ПРОФИЛЯ</b>\n──────────────────────\nТекущий: <b>{current_badge or 'Отсутствует'}</b>"
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
@@ -12091,7 +12532,7 @@ def callback_inline(call):
                     markup.add(InlineKeyboardButton(f"Надеть {TITLES[title_key]['text']}", callback_data=f"set_title_{title_key}:{user_id}"))
             if active or econ.get('custom_title'):
                 markup.add(InlineKeyboardButton("❌ Снять текущий титул", callback_data=f"remove_title:{user_id}"))
-            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"open_profile_settings:{user_id}"))
+            markup.add(InlineKeyboardButton("🔙 Назад в настройки", callback_data=f"ps_back_settings:{user_id}"))
             text = "👑 <b>НАСТРОЙКА ТИТУЛА ПРОФИЛЯ</b>\n──────────────────────\nВыберите купленный титул или снимите текущий."
             try: bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
@@ -12165,7 +12606,7 @@ def callback_inline(call):
                     owned_error = 'У получателя уже есть сертификат титула.'
                 elif item_key == 'pet_griffin' and 'pet_griffin' in target_econ.get('paid_stars_items', []):
                     owned_error = 'У получателя уже есть Королевский Грифон.'
-                elif item_key in STARS_COSMETICS:
+                elif item_key in STARS_COSMETICS or item_key in STARS_LIMITED_ITEMS:
                     owned_error = stars_purchase_error(target_econ, 'cosm', item_key)
             if owned_error:
                 bot.answer_callback_query(call.id, "❌ " + owned_error.replace('❌ ', ''), show_alert=True)
@@ -12205,7 +12646,7 @@ def callback_inline(call):
                     )
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {pack['stars']} ⭐️ выставлен!")
                 except Exception as e:
-                    bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка выставления счёта.", show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: VIP PASS
@@ -12230,14 +12671,14 @@ def callback_inline(call):
                     )
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
                 except Exception as e:
-                    bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка выставления счёта.", show_alert=True)
             return
 
         # ИНИЦИАЦИЯ ОПЛАТЫ STARS: КОСМЕТИКА И СТАТУС
         elif action_data.startswith('star_buy_cosm_'):
             cosm_key = action_data.replace('star_buy_cosm_', '')
-            if cosm_key in STARS_COSMETICS:
-                item = STARS_COSMETICS[cosm_key]
+            if cosm_key in STARS_COSMETICS or cosm_key in STARS_LIMITED_ITEMS:
+                item = STARS_COSMETICS.get(cosm_key) or STARS_LIMITED_ITEMS.get(cosm_key)
                 econ = get_user_econ(user_id, user_name, username=user_username)
                 purchase_error = stars_purchase_error(econ, 'cosm', cosm_key)
                 if purchase_error:
@@ -12255,7 +12696,7 @@ def callback_inline(call):
                     )
                     bot.answer_callback_query(call.id, f"⭐️ Счёт на {item['stars']} ⭐️ выставлен!")
                 except Exception as e:
-                    bot.answer_callback_query(call.id, f"❌ Ошибка выставления счёта: {e}", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка выставления счёта.", show_alert=True)
             return
 
         if action_data == 'shop_main':
@@ -13075,7 +13516,14 @@ def callback_inline(call):
         elif action_data.startswith('msz_'):
             m_parts = action_data.split('_')
             game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
-            chosen_size = int(m_parts[4])
+            try:
+                chosen_size = int(m_parts[4])
+            except (IndexError, ValueError):
+                bot.answer_callback_query(call.id, "❌ Некорректный размер поля.", show_alert=True)
+                return
+            if chosen_size not in (3, 4, 5, 6):
+                bot.answer_callback_query(call.id, "❌ Такой размер поля недоступен.", show_alert=True)
+                return
             game = active_mines.get(game_id)
             if not game:
                 bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
@@ -13085,7 +13533,7 @@ def callback_inline(call):
                 return
             game['size'] = chosen_size
             markup = InlineKeyboardMarkup(row_width=3)
-            mines_options = [1, 2, 3, 5] if chosen_size == 3 else [2, 3, 5, 8] if chosen_size == 4 else [3, 5, 8, 12, 18]
+            mines_options = [1, 2, 3, 5] if chosen_size == 3 else [2, 3, 5, 8] if chosen_size == 4 else [3, 5, 8, 12] if chosen_size == 5 else [4, 6, 9, 12, 16]
             btns = [InlineKeyboardButton(f"💣 {cnt} мин", callback_data=f"mbm_{game_id}_{cnt}:{user_id}") for cnt in mines_options]
             markup.add(*btns)
             markup.add(InlineKeyboardButton("❌ Отмена (вернуть ставку)", callback_data=f"mcancel_{game_id}:{user_id}"))
@@ -13106,8 +13554,12 @@ def callback_inline(call):
 
         elif action_data.startswith('mbm_'):
             m_parts = action_data.split('_')
-            game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
-            mines_count = int(m_parts[4])
+            try:
+                game_id = f"{m_parts[1]}_{m_parts[2]}_{m_parts[3]}"
+                mines_count = int(m_parts[4])
+            except (IndexError, ValueError):
+                bot.answer_callback_query(call.id, "❌ Некорректное количество мин.", show_alert=True)
+                return
             game = active_mines.get(game_id)
             if not game:
                 bot.answer_callback_query(call.id, "❌ Игра устарела!", show_alert=True)
@@ -13117,6 +13569,10 @@ def callback_inline(call):
                 return
 
             total_cells = game['size'] * game['size']
+            allowed_mines = {3: {1, 2, 3, 5}, 4: {2, 3, 5, 8}, 5: {3, 5, 8, 12}, 6: {4, 6, 9, 12, 16}}
+            if mines_count not in allowed_mines.get(int(game.get('size', 4)), set()) or mines_count >= total_cells:
+                bot.answer_callback_query(call.id, "❌ Некорректное количество мин для этого поля.", show_alert=True)
+                return
             game['bombs'] = set(random.sample(range(total_cells), mines_count))
             text_board, markup = render_mines_board(game_id)
             try: bot.edit_message_text(text_board, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -14443,8 +14899,11 @@ def validate_stars_payload(payload, amount, buyer_id, currency='XTR'):
             _, gift_kind, item_key, target_raw, payload_buyer_raw = g
             catalogs = {'coins': STARS_COIN_PACKS, 'pass': STARS_VIP_PASS, 'cosm': STARS_COSMETICS}
             item = catalogs.get(gift_kind, {}).get(item_key)
+            if not item and gift_kind == 'cosm': item = STARS_LIMITED_ITEMS.get(item_key)
             if not item:
                 return False, 'Товар подарка не найден.'
+            if gift_kind == 'cosm' and item_key in STARS_HARD_LIMITED_ITEMS and stars_hard_limited_available(item_key) <= 0:
+                return False, 'Лимит этого предмета уже исчерпан (5/5).';
             if int(amount) != int(item['stars']):
                 return False, 'Неверная сумма товара.'
             try:
@@ -14463,7 +14922,7 @@ def validate_stars_payload(payload, amount, buyer_id, currency='XTR'):
                 if item_key == 'bp_premium' and target_econ.get('bp_premium'): return False, 'Получатель уже владеет Премиум Pass.'
                 if item_key == 'custom_title' and target_econ.get('has_custom_title_cert'): return False, 'Получатель уже владеет сертификатом.'
                 if item_key == 'pet_griffin' and 'pet_griffin' in target_econ.get('paid_stars_items', []): return False, 'Получатель уже владеет Грифоном.'
-                if item_key in STARS_COSMETICS:
+                if item_key in STARS_COSMETICS or item_key in STARS_LIMITED_ITEMS:
                     err = stars_purchase_error(target_econ, 'cosm', item_key)
                     if err: return False, 'Получатель уже владеет этим Stars-предметом.'
             return True, ''
@@ -14481,7 +14940,8 @@ def validate_stars_payload(payload, amount, buyer_id, currency='XTR'):
             expected = item.get('stars') if item else None
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
         elif key.startswith('cosm_'):
-            item = STARS_COSMETICS.get(key.replace('cosm_', ''))
+            item_key = key.replace('cosm_', '')
+            item = STARS_COSMETICS.get(item_key) or STARS_LIMITED_ITEMS.get(item_key)
             expected = item.get('stars') if item else None
             payload_buyer = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
             # GIF профиля также являются одноразовой Stars-косметикой и проверяются выше/ниже через stars_item_owned.
@@ -14680,6 +15140,19 @@ def process_stars_successful_payment(message):
                     target_econ['paid_stars_items'].append('pet_griffin')
                 target_econ['pet'] = {'id': 'vip_griffin', 'name': p_info['name'], 'luck_bonus': p_info['luck_bonus'], 'hunger': 100, 'cleanliness': 100, 'pet_exp': 0, 'last_update': time.time()}
                 prod_name = p_info['name']
+            elif actual_prod in STARS_HARD_LIMITED_ITEMS:
+                duplicate_error = stars_purchase_error(target_econ, 'cosm', actual_prod)
+                if duplicate_error:
+                    print(f'[STARS SECURITY] duplicate/limit gifted hard-limited item blocked: target={target_id} item={actual_prod}')
+                    mark_stars_charge_processed(charge_id); return
+                if not reserve_stars_hard_limited(actual_prod):
+                    print(f'[STARS SECURITY] limited item sold out at delivery: {actual_prod}')
+                    mark_stars_charge_processed(charge_id); return
+                try:
+                    prod_name = grant_hard_limited_stars_item(target_econ, actual_prod)
+                except Exception as grant_error:
+                    print(f'[STARS SECURITY] hard-limited gift grant failed: {actual_prod}: {grant_error}')
+                    mark_stars_charge_processed(charge_id); return
             elif actual_prod in STARS_COSMETICS:
                 cosm = STARS_COSMETICS[actual_prod]
                 c_type = cosm.get('type')
@@ -14852,11 +15325,28 @@ def process_stars_successful_payment(message):
         # 3. Покупка эксклюзивной косметики
         elif prod_type_key.startswith('cosm_'):
             cosm_id = prod_type_key.replace('cosm_', '')
-            if cosm_id in STARS_COSMETICS:
-                cosm = STARS_COSMETICS[cosm_id]
+            if cosm_id in STARS_COSMETICS or cosm_id in STARS_LIMITED_ITEMS:
+                cosm = STARS_COSMETICS.get(cosm_id) or STARS_LIMITED_ITEMS.get(cosm_id)
                 c_type = cosm['type']
                 
+                if cosm_id in STARS_HARD_LIMITED_ITEMS:
+                    if stars_purchase_error(econ, 'cosm', cosm_id):
+                        bot.reply_to(message, stars_purchase_error(econ, 'cosm', cosm_id), parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id); return
+                    if not reserve_stars_hard_limited(cosm_id):
+                        bot.reply_to(message, '❌ Лимит этого предмета уже исчерпан (5/5).', parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id); return
+                    try:
+                        granted_name = grant_hard_limited_stars_item(econ, cosm_id)
+                    except Exception as grant_error:
+                        print(f'[STARS SECURITY] hard-limited grant failed: {cosm_id}: {grant_error}')
+                        bot.reply_to(message, '⚠️ Не удалось выдать лимитированный предмет. Платёж помечен как обработанный для защиты от повторной выдачи.', parse_mode='HTML')
+                        mark_stars_charge_processed(charge_id); return
+                    remaining = stars_hard_limited_available(cosm_id)
+                    bot.reply_to(message, f"🔥 <b>ЛИМИТИРОВАННЫЙ ПРЕДМЕТ ПОЛУЧЕН!</b> 😻\n\n<b>{html.escape(granted_name)}</b> — вы получили экземпляр. Осталось: <b>{remaining}/5</b>.", parse_mode='HTML')
+                    mark_stars_charge_processed(charge_id); return
                 if c_type == 'title_cert':
+
                     econ['has_custom_title_cert'] = True
                     mark_dirty()
                     log_event('STARS ТИТУЛ', f'Игрок {user_link} купил сертификат кастомного титула за {stars_amount} ⭐️!')
