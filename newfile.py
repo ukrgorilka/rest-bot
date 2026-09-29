@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import secrets
 from urllib.parse import parse_qsl
-
+from core.database import load_data as database_load_data
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
 # ---------------------------------------------------------
@@ -2392,48 +2392,11 @@ def _load_local_json():
         return None
 
 def load_data():
-    """Load state from Neon first; migrate existing rests_data.json once if Neon is empty."""
-    base = _default_data()
-
-    if DATABASE_URL:
-        try:
-            pg_data = _pg_load()
-            local_data = _load_local_json()
-            if pg_data is not None:
-                pg_ts = float((pg_data.get('_meta') or {}).get('saved_at', 0) or 0) if isinstance(pg_data, dict) else 0.0
-                local_ts = float((local_data.get('_meta') or {}).get('saved_at', 0) or 0) if isinstance(local_data, dict) else 0.0
-                if local_data is not None and local_ts > pg_ts + 1.0:
-                    print('[DB] Локальный snapshot новее Neon; восстанавливается в Neon.')
-                    local_normalized = _normalize_loaded_data(local_data)
-                    try:
-                        if _pg_save(local_normalized):
-                            print('[DB] Локальный snapshot успешно синхронизирован с Neon.')
-                    except Exception as sync_error:
-                        print(f'[DB] Не удалось синхронизировать локальный snapshot с Neon: {sync_error}')
-                    return local_normalized
-                print('[DB] Загружена база из Neon PostgreSQL.')
-                return _normalize_loaded_data(pg_data)
-
-            
-            if local_data is not None:
-                migrated = _normalize_loaded_data(local_data)
-                if _pg_save(migrated):
-                    print('[DB] Выполнена первичная миграция rests_data.json -> Neon PostgreSQL.')
-                return migrated
-
-            print('[DB] Neon пустая, локальная JSON-база не найдена. Создаётся новая база.')
-            base = _normalize_loaded_data(base)
-            _pg_save(base)
-            return base
-        except Exception as e:
-            print(f'[DB ERROR] Не удалось загрузить Neon: {e}')
-            print('[DB] Переключение на локальный JSON как аварийный fallback.')
-
-    local_data = _load_local_json()
-    if local_data is not None:
-        return _normalize_loaded_data(local_data)
-
-    return _normalize_loaded_data(base)
+    """Load bot state through the new core.database module."""
+    return database_load_data(
+        _default_data,
+        _normalize_loaded_data
+    )
 
 def mark_dirty():
     global db_dirty, db_version, last_db_change_at
