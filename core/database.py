@@ -200,3 +200,10 @@ def _load_data_from_sources(default_data, normalize_loaded_data):
         return normalize_loaded_data(local_data)
 
     return normalize_loaded_data(default_data)
+
+def load_data(default_data_factory, normalize_loaded_data):
+    default_data = default_data_factory()
+    return _load_data_from_sources(
+        default_data,
+        normalize_loaded_data
+    )
