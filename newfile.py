@@ -11,6 +11,7 @@ import random
 import re
 import threading
 import time
+from core.database import load_data as database_load_data
 import telebot
 import psycopg2
 from psycopg2.extras import Json
