@@ -207,3 +207,68 @@ def load_data(default_data_factory, normalize_loaded_data):
         default_data,
         normalize_loaded_data
     )
+
+def save_snapshot(
+    snapshot,
+    snapshot_version,
+    db_version_getter,
+    db_dirty_setter,
+    send_backup=False,
+    db_channel_id=0,
+    bot_instance=None
+):
+    saved_to_pg = False
+
+    try:
+        if DATABASE_URL:
+            try:
+                saved_to_pg = _pg_save(snapshot)
+
+                if not saved_to_pg:
+                    raise RuntimeError("PostgreSQL недоступен")
+
+            except Exception as e:
+                print(f"[DB ERROR] Ошибка сохранения в Neon: {e}")
+
+        temp_file = f"{DATA_FILE}.tmp"
+
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(
+                snapshot,
+                f,
+                ensure_ascii=False,
+                indent=4
+            )
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(temp_file, DATA_FILE)
+
+        current_version = db_version_getter()
+
+        if current_version == snapshot_version:
+            if saved_to_pg or not DATABASE_URL:
+                db_dirty_setter(False)
+
+        if send_backup and db_channel_id and bot_instance:
+            with open(DATA_FILE, "rb") as f:
+                msg = bot_instance.send_document(
+                    db_channel_id,
+                    f,
+                    caption="💾 Экстренный бекап базы данных"
+                )
+
+                try:
+                    bot_instance.pin_chat_message(
+                        db_channel_id,
+                        msg.message_id,
+                        disable_notification=True
+                    )
+                except Exception as e:
+                    print(f"[BACKUP PIN ERROR] {e}")
+
+        return True
+
+    except Exception as e:
+        print(f"Ошибка при сохранении базы данных: {e}")
+        return False
