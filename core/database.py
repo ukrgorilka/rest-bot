@@ -127,3 +127,10 @@ def _load_local_json():
     except Exception as e:
         print(f"[DB] Ошибка чтения локального JSON: {e}")
         return None
+def mark_dirty():
+    global db_dirty, db_version, last_db_change_at
+
+    with db_lock:
+        db_dirty = True
+        db_version += 1
+        last_db_change_at = time.time()
