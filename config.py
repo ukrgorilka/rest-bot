@@ -1,8 +1,7 @@
 """NyaBot configuration.
 
-All environment-backed settings are kept here so the bot launcher and future
-handlers can use one configuration source. Existing newfile.py remains the
-legacy monolith for now and is not modified by this file.
+All environment-backed settings are kept here so the bot launcher and
+application modules use one configuration source during the migration.
 """
 
 import os
@@ -62,6 +61,8 @@ MEDIA_TG_CHAT_ID = normalize_tg_id(
 # ---------------------------------------------------------------------------
 # Mini App
 # ---------------------------------------------------------------------------
+
+PORT = int(os.environ.get("PORT", "8080"))
 
 MINIAPP_URL = (
     os.environ.get("MINIAPP_URL")
