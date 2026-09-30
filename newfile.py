@@ -18,6 +18,29 @@ import hashlib
 import hmac
 import secrets
 from urllib.parse import parse_qsl
+
+from config import (
+    ADMIN_ID,
+    ADMIN_USERNAME,
+    AUTOSAVE_DEBOUNCE,
+    AUTOSAVE_INTERVAL,
+    BACKUP_INTERVAL,
+    BOT_TOKEN,
+    DATA_FILE,
+    DATABASE_URL,
+    DB_CHANNEL_ID,
+    LOG_CHANNEL_ID,
+    MEDIA_TG_CHAT_ID,
+    MINIAPP_DAILY_REWARD_CAP,
+    MINIAPP_DIR as CONFIG_MINIAPP_DIR,
+    MINIAPP_GAME_TTL,
+    MINIAPP_URL as CONFIG_MINIAPP_URL,
+    PORT,
+    VD_CHAT_ID,
+    MSK_TZ,
+    now_msk as config_now_msk,
+    normalize_tg_id,
+)
 from core.database import load_data as database_load_data, save_snapshot
 from core.localization import (
     _CALLBACK_LANG_BY_ID,
@@ -59,10 +82,8 @@ from handlers import register_all as register_handlers
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
 # ---------------------------------------------------------
-MSK_TZ = timezone(timedelta(hours=3))
-
 def now_msk():
-    return datetime.now(MSK_TZ)
+    return config_now_msk()
 
 # ---------------------------------------------------------
 # ВЕБ-СЕРВЕР ДЛЯ KEEP-ALIVE (RENDER / REPLIT / VPS)
@@ -72,12 +93,10 @@ app = Flask('')
 # ---------------------------------------------------------
 # MINI APP 2.0
 # ---------------------------------------------------------
-MINIAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'miniapp')
-MINIAPP_URL = (os.environ.get('MINIAPP_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
+MINIAPP_DIR = CONFIG_MINIAPP_DIR
+MINIAPP_URL = CONFIG_MINIAPP_URL
 MINIAPP_GAMES = {}
 MINIAPP_LOCK = threading.RLock()
-MINIAPP_GAME_TTL = 2 * 60 * 60
-MINIAPP_DAILY_REWARD_CAP = 5000
 
 
 def _miniapp_user(init_data):
@@ -506,7 +525,7 @@ def health():
 
 
 def run_web():
-    port = int(os.environ.get("PORT", 8080))
+    port = PORT
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
@@ -517,7 +536,7 @@ def keep_alive():
 # ---------------------------------------------------------
 # НАСТРОЙКИ БОТА И БАЗЫ ДАННЫХ
 # ---------------------------------------------------------
-TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+TOKEN = BOT_TOKEN
 if not TOKEN:
     print("[ВНИМАНИЕ] BOT_TOKEN не задан в переменных окружения (ENV)! Бот ожидает BOT_TOKEN в Render.")
 bot = telebot.TeleBot(TOKEN)
@@ -534,8 +553,6 @@ last_db_change_at = 0.0
 db_dirty = False
 db_version = 0
 
-ADMIN_ID = 6081930693
-ADMIN_USERNAME = 'ukrgorilka'
 
 BOT_USERNAME_CACHE = None
 
@@ -549,26 +566,9 @@ def get_cached_bot_username():
             BOT_USERNAME_CACHE = ""
     return BOT_USERNAME_CACHE
 
-def normalize_tg_id(cid_val):
-    if not cid_val:
-        return 0
-    cid_str = str(cid_val).strip()
-    try:
-        val = int(cid_str)
-        if val < 0 and not str(val).startswith('-100') and len(str(abs(val))) >= 9:
-            return int(f"-100{abs(val)}")
-        return val
-    except ValueError:
-        return 0
-
 # ID каналов и чатов
 # PostgreSQL/Neon is now the primary persistent database.
-DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
-# Telegram-channel database backups are disabled by default.
-DB_CHANNEL_ID = normalize_tg_id(os.environ.get('DB_CHANNEL_ID', '0'))
-LOG_CHANNEL_ID = normalize_tg_id(os.environ.get('LOG_CHANNEL_ID', '-1004369517562'))
-VD_CHAT_ID = normalize_tg_id(os.environ.get('VD_CHAT_ID', '-1003703264754'))
-DATA_FILE = 'rests_data.json'
+# All values come from config.py so there is a single configuration source.
 
 def leave_banned_chats():
     """Leave chats explicitly listed as banned in persistent DB/config."""
@@ -596,7 +596,6 @@ def is_chat_banned(chat_id):
     except (TypeError, ValueError):
         return False
 
-MEDIA_TG_CHAT_ID = normalize_tg_id(os.environ.get('MEDIA_TG_CHAT_ID', '-1004311479842'))
 
 MONTHS = {
     'января': 1, 'январь': 1,
@@ -3853,14 +3852,14 @@ def start_background_threads():
         data_file=DATA_FILE,
         db_channel_id=DB_CHANNEL_ID,
         bot_instance=bot,
-        interval=7200,
+        interval=BACKUP_INTERVAL,
     )
     saving_service.start_autosave_worker(
         is_dirty=lambda: db_dirty,
         last_change_at=lambda: last_db_change_at,
         save_callback=save_data,
-        debounce=25.0,
-        interval=5.0,
+        debounce=AUTOSAVE_DEBOUNCE,
+        interval=AUTOSAVE_INTERVAL,
     )
     threading.Thread(target=rest_manager_worker, daemon=True).start()
     threading.Thread(target=memory_and_debt_worker, daemon=True).start()
@@ -7585,11 +7584,26 @@ mark_stars_charge_processed = stars_service.mark_stars_charge_processed
 register_handlers(globals())
 
 # ---------------------------------------------------------
-# СТАРТ И ИНИЦИАЛИЗАЦИЯ БОТА
+# ЗАПУСК ПРИЛОЖЕНИЯ
 # ---------------------------------------------------------
-setup_bot_commands()
-start_background_threads()
-keep_alive()
+def run_bot():
+    """Initialize runtime workers and start Telegram long polling.
 
-print('Бот успешно запущен со всеми обновлениями и исправлениями! 😸')
-bot.infinity_polling()
+    Importing this module no longer starts the bot. This lets bot.py own the
+    process lifecycle and makes the module safe to import for tests/tools.
+    """
+    setup_bot_commands()
+    start_background_threads()
+    keep_alive()
+    print('Бот успешно запущен со всеми обновлениями и исправлениями! 😸')
+    bot.infinity_polling()
+
+
+def get_application():
+    """Return the Flask application and Telegram bot for integrations/tests."""
+    return app, bot
+
+
+if __name__ == '__main__':
+    # Direct execution remains supported for emergency/manual local runs.
+    run_bot()
