@@ -45,6 +45,13 @@ from core.locks import (
     serialize_user_action,
     serialize_stars_payment,
 )
+from services import (
+    economy as economy_service,
+    inventory as inventory_service,
+    stars as stars_service,
+    users as users_service,
+    saving as saving_service,
+)
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -1472,8 +1479,8 @@ def _normalize_loaded_data(data):
     return base
 
 def load_data():
-    """Load bot state through the shared core.database module."""
-    return database_load_data(
+    """Load bot state through the shared persistence service."""
+    return saving_service.load_data(
         _default_data,
         _normalize_loaded_data,
     )
@@ -1506,15 +1513,22 @@ def _save_data_locked(send_backup=False):
         with db_lock:
             db_dirty = bool(value)
 
-    return save_snapshot(
-        snapshot=snapshot,
-        snapshot_version=snapshot_version,
+    return saving_service.save_data(
+        db,
+        db_lock=db_lock,
+        db_version=db_version,
         db_version_getter=_get_version,
         db_dirty_setter=_set_dirty,
+        data_file=DATA_FILE,
         send_backup=send_backup,
         db_channel_id=DB_CHANNEL_ID,
         bot_instance=bot,
     )
+
+# База загружается один раз после объявления loader/normalizer.
+# Это сохраняет исходную архитектуру монолита и делает db доступной
+# всем обработчикам и сервисам ниже.
+db = load_data()
 
 # ---------------------------------------------------------
 # МОНИТОРИНГ ГРУПП, ГДЕ НАХОДИТСЯ БОТ
@@ -2183,6 +2197,40 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         return _get_user_econ_unlocked(user_id, user_tag, username)
 
 
+# Подключаем staged service layer после объявления канонического get_user_econ.
+# Старые функции остаются совместимыми точками входа; сервисы используют ту же
+# общую db/lock/mark_dirty и не создают вторую систему хранения.
+economy_service.configure(
+    db=db,
+    db_lock=db_lock,
+    mark_dirty=mark_dirty,
+    get_user_econ=get_user_econ,
+    titles=TITLES,
+    vehicles=VEHICLES,
+    donor_vehicles=DONOR_VEHICLES,
+    season_rollover=lambda: globals().get('season_rollover', lambda: None)(),
+)
+inventory_service.configure(
+    db=db,
+    db_lock=db_lock,
+    mark_dirty=mark_dirty,
+)
+stars_service.configure(
+    db=db,
+    db_lock=db_lock,
+    mark_dirty=mark_dirty,
+    get_user=get_user_econ,
+    titles=TITLES,
+    themes=THEMES,
+    pets_data=PETS_DATA,
+)
+users_service.configure(
+    get_user_econ=get_user_econ,
+    get_global_user_key=get_global_user_key,
+    merge_user_econ_data=merge_user_econ_data,
+    clean_tag=clean_tag,
+)
+
 # Подключаем локализацию после объявления зависимых функций.
 configure_localization(
     get_user_econ=get_user_econ,
@@ -2253,6 +2301,56 @@ def add_coins(user_id=None, user_tag=None, amount=0, username=None):
         mark_dirty()
     check_achievements(user_id, user_tag, 'balance_check', 0, username=username)
     return new_balance
+
+# Economy service takeover for helpers whose legacy behavior is equivalent.
+def get_global_user_key(user_id=None, user_tag=None):
+    return economy_service.get_global_user_key(user_id=user_id, user_tag=user_tag, clean_tag=clean_tag)
+
+def get_account_level(exp):
+    return economy_service.get_account_level(exp)
+
+def account_exp_for_level(level):
+    return economy_service.account_exp_for_level(level)
+
+def is_vip_active(econ):
+    return economy_service.is_vip_active(econ)
+
+def get_donor_title_buffs(econ):
+    return economy_service.get_donor_title_buffs(econ)
+
+def get_title_work_bonus(econ):
+    return economy_service.get_title_work_bonus(econ)
+
+def get_title_bonus_multiplier(econ):
+    return economy_service.get_title_bonus_multiplier(econ)
+
+def get_title_business_bonus(econ):
+    return economy_service.get_title_business_bonus(econ)
+
+def get_vip_work_bonus(econ):
+    return economy_service.get_vip_work_bonus(econ)
+
+def get_vip_business_bonus(econ):
+    return economy_service.get_vip_business_bonus(econ)
+
+def get_user_cd_reduction(econ):
+    return economy_service.get_user_cd_reduction(econ)
+
+def cooldown_text(last_time, cooldown, user_econ=None):
+    return economy_service.cooldown_text(last_time, cooldown, user_econ)
+
+def update_pet_stats(pet):
+    return economy_service.update_pet_stats(pet)
+
+def update_bank_interest(econ):
+    return economy_service.update_bank_interest(econ)
+
+def change_karma(user_id, user_tag, amount, username=None):
+    return economy_service.change_karma(user_id, user_tag, amount, username=username)
+
+def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
+    economy_service.add_account_exp(user_id, user_tag, exp_amount, username=username)
+    return None
 
 def check_casino_limits(econ, bet, is_multiplayer=False):
     return True
@@ -14212,6 +14310,13 @@ def mark_stars_charge_processed(charge_id):
         del processed[:-10000]
     mark_dirty()
 
+
+# Stars service takeover: payment handlers below keep their public names/signatures.
+stars_item_owned = stars_service.stars_item_owned
+stars_purchase_error = stars_service.stars_purchase_error
+grant_hard_limited_stars_item = stars_service.grant_hard_limited_stars_item
+validate_stars_payload = stars_service.validate_stars_payload
+mark_stars_charge_processed = stars_service.mark_stars_charge_processed
 
 @bot.message_handler(content_types=['successful_payment'])
 @serialize_user_action
