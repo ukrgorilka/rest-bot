@@ -2224,13 +2224,6 @@ stars_service.configure(
     themes=THEMES,
     pets_data=PETS_DATA,
 )
-users_service.configure(
-    get_user_econ=get_user_econ,
-    get_global_user_key=get_global_user_key,
-    merge_user_econ_data=merge_user_econ_data,
-    clean_tag=clean_tag,
-)
-
 # Подключаем локализацию после объявления зависимых функций.
 configure_localization(
     get_user_econ=get_user_econ,
@@ -2305,6 +2298,13 @@ def add_coins(user_id=None, user_tag=None, amount=0, username=None):
 # Economy service takeover for helpers whose legacy behavior is equivalent.
 def get_global_user_key(user_id=None, user_tag=None):
     return economy_service.get_global_user_key(user_id=user_id, user_tag=user_tag, clean_tag=clean_tag)
+
+users_service.configure(
+    get_user_econ=get_user_econ,
+    get_global_user_key=get_global_user_key,
+    merge_user_econ_data=merge_user_econ_data,
+    clean_tag=clean_tag,
+)
 
 def get_account_level(exp):
     return economy_service.get_account_level(exp)
@@ -3846,8 +3846,19 @@ def start_background_threads():
     threading.Thread(target=chat_quiz_worker, daemon=True).start()
     threading.Thread(target=chat_silence_worker, daemon=True).start()
     threading.Thread(target=group_info_refresh_worker, daemon=True).start()
-    threading.Thread(target=periodic_backup_worker, daemon=True).start()
-    threading.Thread(target=auto_save_worker, daemon=True).start()
+    saving_service.start_periodic_backup_worker(
+        data_file=DATA_FILE,
+        db_channel_id=DB_CHANNEL_ID,
+        bot_instance=bot,
+        interval=7200,
+    )
+    saving_service.start_autosave_worker(
+        is_dirty=lambda: db_dirty,
+        last_change_at=lambda: last_db_change_at,
+        save_callback=save_data,
+        debounce=25.0,
+        interval=5.0,
+    )
     threading.Thread(target=rest_manager_worker, daemon=True).start()
     threading.Thread(target=memory_and_debt_worker, daemon=True).start()
 
