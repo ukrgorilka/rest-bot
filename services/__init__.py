@@ -1,1 +1,0 @@
-"""NyaBot service layer."""
