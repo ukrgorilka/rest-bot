@@ -21,6 +21,10 @@ from urllib.parse import parse_qsl
 
 from config import (
     ADMIN_ID,
+    ALLOW_JSON_BOOTSTRAP,
+    BOT_VERSION,
+    BUSINESS_SELL_RATE,
+    BUSINESS_TAX_RATE,
     ADMIN_USERNAME,
     AUTOSAVE_DEBOUNCE,
     AUTOSAVE_INTERVAL,
@@ -80,6 +84,7 @@ from services import (
     saving as saving_service,
 )
 from handlers import register_all as register_handlers
+from data.jobs import JOBS
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -93,12 +98,15 @@ def now_msk():
 app = Flask('')
 
 # ---------------------------------------------------------
-# MINI APP 2.0
+# NYABOT v0.3 — MINI APP
 # ---------------------------------------------------------
 MINIAPP_DIR = CONFIG_MINIAPP_DIR
 MINIAPP_URL = CONFIG_MINIAPP_URL
 MINIAPP_GAMES = {}
 MINIAPP_LOCK = threading.RLock()
+
+
+BOT_VERSION_TEXT = f"NyaBot v{BOT_VERSION}"
 
 
 def _miniapp_user(init_data):
@@ -159,7 +167,115 @@ def mini_profile_api():
     econ = get_user_econ(uid, name, username=user.get('username'))
     lvl, exp, nxt, bar = get_account_level(econ.get('account_exp', 0))
     st = econ.get('msg_stats', {}) or {}
-    return jsonify({'ok': True, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}, 'language': econ.get('language','ru')})
+    return jsonify({'ok': True, 'version': BOT_VERSION, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}, 'language': econ.get('language','ru')})
+
+
+@app.route('/api/mini/empire', methods=['POST'])
+def mini_empire_api():
+    """Return the live player's business empire from the Neon-backed state."""
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    econ = get_user_econ(uid, name, username=user.get('username'))
+    _migrate_legacy_businesses(econ)
+
+    rows = []
+    gross_hourly = 0
+    owned = econ.get('businesses', {}) if isinstance(econ.get('businesses'), dict) else {}
+    donor_owned = econ.get('donor_businesses', {}) if isinstance(econ.get('donor_businesses'), dict) else {}
+    for number, b_id, info, is_donor in _business_catalog():
+        source = donor_owned if is_donor else owned
+        if b_id not in source:
+            continue
+        level = _business_level(econ, b_id)
+        hourly = _business_hourly_income(b_id, level)
+        gross_hourly += hourly
+        purchase_price = _business_purchase_price(econ, b_id) if not is_donor else 0
+        rows.append({
+            'number': number,
+            'id': b_id,
+            'name': info.get('name', b_id),
+            'short': info.get('short', info.get('name', b_id)),
+            'world': info.get('world', 'earth'),
+            'level': level,
+            'max_level': 5,
+            'hourly_gross': hourly,
+            'hourly_net_estimate': int(hourly * (1.0 - BUSINESS_TAX_RATE)),
+            'purchase_price': purchase_price,
+            'legacy': any(
+                isinstance(x, dict) and x.get('to') == b_id
+                for x in (econ.get('legacy_assets') or [])
+            ),
+            'donor': bool(is_donor),
+        })
+
+    return jsonify({
+        'ok': True,
+        'version': BOT_VERSION,
+        'business_tax_rate': BUSINESS_TAX_RATE,
+        'sell_rate': BUSINESS_SELL_RATE,
+        'business_count': len(rows),
+        'gross_hourly': int(gross_hourly),
+        'net_hourly_estimate': int(gross_hourly * (1.0 - BUSINESS_TAX_RATE)),
+        'tax_paid': int(econ.get('business_tax_paid', 0) or 0),
+        'legacy_assets': len(econ.get('legacy_assets', []) or []),
+        'rows': rows,
+    })
+
+
+def _mini_world_snapshot():
+    """Compute bounded world statistics from the live in-memory state."""
+    with db_lock:
+        snapshot = list((db.get('economy') or {}).items())
+        news = list(db.get('bot_news') or [])[-20:]
+    unique_users = set()
+    total_coins = total_bank = 0
+    business_counts = {b_id: 0 for b_id in BUSINESSES}
+    donor_counts = {b_id: 0 for b_id in DONOR_BUSINESSES}
+    for key, econ in snapshot:
+        if not isinstance(econ, dict):
+            continue
+        uid = econ.get('user_id')
+        try:
+            if int(uid) > 0:
+                unique_users.add(int(uid))
+        except (TypeError, ValueError):
+            # Old tag-only records are still useful for economy totals, but are
+            # not counted as a unique Telegram account.
+            pass
+        total_coins += int(econ.get('balance', 0) or 0)
+        total_bank += int(econ.get('bank_deposit', 0) or 0)
+        for b_id in business_counts:
+            if b_id in (econ.get('businesses') or {}):
+                business_counts[b_id] += 1
+        for b_id in donor_counts:
+            if b_id in (econ.get('donor_businesses') or {}):
+                donor_counts[b_id] += 1
+    return {
+        'players': len(unique_users),
+        'profiles': len(snapshot),
+        'coins': int(total_coins),
+        'bank': int(total_bank),
+        'total_wealth': int(total_coins + total_bank),
+        'businesses': int(sum(business_counts.values())),
+        'donor_businesses': int(sum(donor_counts.values())),
+        'mars': int(business_counts.get('mars_colony', 0)),
+        'intergalactic_port': int(business_counts.get('intergalactic_port', 0)),
+        'business_counts': business_counts,
+        'donor_counts': donor_counts,
+        'news': news,
+    }
+
+
+@app.route('/api/mini/world', methods=['POST'])
+def mini_world_api():
+    user = _miniapp_auth(request.get_json(silent=True) or {})
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+    world = _mini_world_snapshot()
+    return jsonify({'ok': True, 'version': BOT_VERSION, 'tax_rate': BUSINESS_TAX_RATE, **world})
 
 
 @app.route('/api/mini/tasks', methods=['POST'])
@@ -533,8 +649,10 @@ def health():
 
 
 def run_web():
+    """Run Mini App/health HTTP server with a production WSGI server."""
+    from waitress import serve
     port = PORT
-    app.run(host='0.0.0.0', port=port)
+    serve(app, host='0.0.0.0', port=port, threads=4)
 
 def keep_alive():
     t = threading.Thread(target=run_web)
@@ -577,6 +695,25 @@ def get_cached_bot_username():
 # ID каналов и чатов
 # PostgreSQL/Neon is now the primary persistent database.
 # All values come from config.py so there is a single configuration source.
+
+def clear_persistent_chat_bans():
+    """Remove the legacy global chat-ban list from persistent state.
+
+    Old versions could keep a chat in banned_chats after the administrator
+    intended the ban only temporarily. Such a record makes can_process_user_message
+    silently ignore every update from that chat. Chat/user moderation bans remain
+    separate in db['moderation'] and are not touched here.
+    """ 
+    banned = db.get('banned_chats', [])
+    if banned:
+        count = len(banned) if hasattr(banned, '__len__') else 1
+        db['banned_chats'] = []
+        mark_dirty()
+        print(f'[CHAT BAN CLEANUP] Removed {count} legacy globally banned chat record(s).')
+        critical_save('Remove legacy banned_chats', retries=3)
+    else:
+        print('[CHAT BAN CLEANUP] No legacy globally banned chats found.')
+
 
 def leave_banned_chats():
     """Leave chats explicitly listed as banned in persistent DB/config."""
@@ -837,9 +974,9 @@ VIP_BADGES = {
 }
 
 DONOR_VEHICLES = {
-    'donor_lambo': {'name': '🏎 Lamborghini Aventador SVJ VIP', 'short': '🏎 Lambo VIP', 'stars': 8, 'cd_cut': 0.34, 'desc': '-34% ко всем таймерам', 'tier': 15, 'donor_only': True},
-    'donor_batmobile': {'name': '🦇 Batmobile Nya Edition', 'short': '🦇 Batmobile', 'stars': 12, 'cd_cut': 0.42, 'desc': '-42% ко всем таймерам', 'tier': 16, 'donor_only': True},
-    'donor_ufo': {'name': '🛸 НЛО Императора Ня', 'short': '🛸 НЛО', 'stars': 18, 'cd_cut': 0.50, 'desc': '-50% ко всем таймерам', 'tier': 17, 'donor_only': True},
+    'donor_lambo': {'name': '🏎 Lamborghini Aventador SVJ VIP', 'short': '🏎 Lambo VIP', 'stars': 8, 'cd_cut': 0.34, 'desc': '-34% ко всем таймерам', 'tier': 15, 'donor_only': True, 'class': 'luxury', 'work_bonus': 0.12},
+    'donor_batmobile': {'name': '🦇 Batmobile Nya Edition', 'short': '🦇 Batmobile', 'stars': 12, 'cd_cut': 0.42, 'desc': '-42% ко всем таймерам', 'tier': 16, 'donor_only': True, 'class': 'hyper', 'work_bonus': 0.16},
+    'donor_ufo': {'name': '🛸 НЛО Императора Ня', 'short': '🛸 НЛО', 'stars': 18, 'cd_cut': 0.50, 'desc': '-50% ко всем таймерам', 'tier': 17, 'donor_only': True, 'class': 'galactic', 'work_bonus': 0.2},
 }
 
 DONOR_BUSINESSES = {
@@ -998,19 +1135,37 @@ BUFF_ITEMS = {
 # РАСШИРЕННЫЕ БИЗНЕСЫ
 # ---------------------------------------------------------
 BUSINESSES = {
-    'bottles': {'name': '🥫 Приём стеклотары', 'short': 'Стеклотара', 'price': 200, 'base_income': 3, 'upgrade_cost': 120},
-    'lemonade': {'name': '🍋 Лоток с лимонадом', 'short': 'Лимонад', 'price': 450, 'base_income': 6, 'upgrade_cost': 280},
-    'shawarma': {'name': '🌯 Ларек с Шаурмой', 'short': 'Шаурма', 'price': 800, 'base_income': 9, 'upgrade_cost': 500},
-    'coffee': {'name': '☕️ Уютная Кофейня', 'short': 'Кофейня', 'price': 2400, 'base_income': 24, 'upgrade_cost': 1800},
-    'bakery': {'name': '🥐 Пекарня Булочек', 'short': 'Пекарня', 'price': 6000, 'base_income': 54, 'upgrade_cost': 4500},
-    'crypto_farm': {'name': '💻 Крипто-Ферма', 'short': 'Крипто-Ферма', 'price': 18000, 'base_income': 150, 'upgrade_cost': 13000},
-    'club': {'name': '🏰 Ночной Клуб', 'short': 'Ночной Клуб', 'price': 54000, 'base_income': 420, 'upgrade_cost': 38000},
-    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'short': 'Автосалон', 'price': 120000, 'base_income': 900, 'upgrade_cost': 85000},
-    'space_station': {'name': '🛰 Космическая Станция', 'short': 'Космостанция', 'price': 450000, 'base_income': 3150, 'upgrade_cost': 300000},
-    'megacorp': {'name': '🏢 Мегакорпорация', 'short': 'Мегакорп', 'price': 1500000, 'base_income': 10500, 'upgrade_cost': 1000000},
-    'oil_rig': {'name': '🛢 Нефтяная вышка в Сибири', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 24000, 'upgrade_cost': 2200000},
-    'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 66000, 'upgrade_cost': 6500000},
-    'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 50000000, 'base_income': 300000, 'upgrade_cost': 30000000}
+    # v0.3 starter tier — replaces the three weakest businesses.
+    'smoothie_bar': {'name': '🍓 Смуси-бар', 'short': 'Смуси-бар', 'price': 900, 'base_income': 10, 'upgrade_cost': 650, 'world': 'earth'},
+    'food_truck': {'name': '🚚 Фудтрак', 'short': 'Фудтрак', 'price': 1600, 'base_income': 16, 'upgrade_cost': 1100, 'world': 'earth'},
+    'pizzeria': {'name': '🍕 Пиццерия', 'short': 'Пиццерия', 'price': 2200, 'base_income': 22, 'upgrade_cost': 1600, 'world': 'earth'},
+    'coffee': {'name': '☕️ Уютная Кофейня', 'short': 'Кофейня', 'price': 2400, 'base_income': 24, 'upgrade_cost': 1800, 'world': 'earth'},
+    'bakery': {'name': '🥐 Пекарня Булочек', 'short': 'Пекарня', 'price': 6000, 'base_income': 54, 'upgrade_cost': 4500, 'world': 'earth'},
+    'crypto_farm': {'name': '💻 Крипто-Ферма', 'short': 'Крипто-Ферма', 'price': 18000, 'base_income': 150, 'upgrade_cost': 13000, 'world': 'earth'},
+    'club': {'name': '🏰 Ночной Клуб', 'short': 'Ночной Клуб', 'price': 54000, 'base_income': 420, 'upgrade_cost': 38000, 'world': 'earth'},
+    'autoshow': {'name': '🏎 Автосалон Спорткаров', 'short': 'Автосалон', 'price': 120000, 'base_income': 900, 'upgrade_cost': 85000, 'world': 'earth'},
+    'space_station': {'name': '🛰 Космическая Станция', 'short': 'Космостанция', 'price': 450000, 'base_income': 3150, 'upgrade_cost': 300000, 'world': 'space'},
+    'megacorp': {'name': '🏢 Мегакорпорация', 'short': 'Мегакорп', 'price': 1500000, 'base_income': 10500, 'upgrade_cost': 1000000, 'world': 'earth'},
+    'oil_rig': {'name': '🛢 Нефтяная вышка', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 24000, 'upgrade_cost': 2200000, 'world': 'earth'},
+    'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 66000, 'upgrade_cost': 6500000, 'world': 'space'},
+    'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 80000000, 'base_income': 220000, 'upgrade_cost': 30000000, 'world': 'mars', 'legacy_price': 50000000},
+    'lunar_corporation': {'name': '🌕 Лунная Корпорация', 'short': 'Лунная Корпорация', 'price': 130000000, 'base_income': 245000, 'upgrade_cost': 45000000, 'world': 'moon'},
+    'solar_station': {'name': '☀️ Солнечная Станция', 'short': 'Солнечная Станция', 'price': 220000000, 'base_income': 270000, 'upgrade_cost': 70000000, 'world': 'solar'},
+    'intergalactic_port': {'name': '🌌 Межгалактический Порт', 'short': 'Межгалактический Порт', 'price': 400000000, 'base_income': 300000, 'upgrade_cost': 120000000, 'world': 'galaxy'},
+}
+
+# Старые три стартовых предприятия исчезают из нового каталога, но их ID используются
+# только для безопасной миграции живых Neon-профилей. Никакое состояние из rests_data.json
+# при этом не подмешивается в Neon.
+LEGACY_BUSINESS_REPLACEMENTS = {
+    'bottles': 'smoothie_bar',
+    'lemonade': 'food_truck',
+    'shawarma': 'pizzeria',
+}
+LEGACY_BUSINESS_INFO = {
+    'bottles': {'name': '🥫 Приём стеклотары', 'price': 200},
+    'lemonade': {'name': '🍋 Лоток с лимонадом', 'price': 450},
+    'shawarma': {'name': '🌯 Ларек с Шаурмой', 'price': 800},
 }
 
 CUSTOM_TITLE_CERT_PRICE = 15000
@@ -1059,21 +1214,21 @@ BOWS = {
 }
 
 VEHICLES = {
-    'slippers': {'name': '🩴 Дырявые сланцы', 'short': '🩴 Сланцы', 'price': 100, 'cd_cut': 0.01, 'desc': '-1% ко всем таймерам', 'tier': 0, 'msg_id': None},
-    'rusty_bike': {'name': '🚲 Ржавый велосипед «Салют»', 'short': '🚲 Велосипед', 'price': 250, 'cd_cut': 0.02, 'desc': '-2% ко всем таймерам', 'tier': 1, 'msg_id': None},
-    'skateboard': {'name': '🛹 Скейтборд Pro', 'short': '🛹 Скейт', 'price': 500, 'cd_cut': 0.03, 'desc': '-3% ко всем таймерам', 'tier': 2, 'msg_id': None},
-    'scooter': {'name': '🛴 Электросамокат', 'short': '🛴 Самокат', 'price': 1500, 'cd_cut': 0.05, 'desc': '-5% ко всем таймерам', 'tier': 3, 'msg_id': 274},
-    'vaz_2107': {'name': '🚗 ВАЗ-2107 «Семёрка» Боевая', 'short': '🚗 ВАЗ-2107', 'price': 3500, 'cd_cut': 0.08, 'desc': '-8% ко всем таймерам', 'tier': 4, 'msg_id': None},
-    'bike': {'name': '🏍 Спортбайк Yamaha R1', 'short': '🏍 Спортбайк', 'price': 7500, 'cd_cut': 0.12, 'desc': '-12% ко всем таймерам', 'tier': 5, 'msg_id': 275},
-    'supra': {'name': '🏎 Toyota Supra A80 Twin-Turbo', 'short': '🏎 Supra', 'price': 15000, 'cd_cut': 0.16, 'desc': '-16% ко всем таймерам', 'tier': 6, 'msg_id': None},
-    'bmw': {'name': '🚗 BMW M5 CS', 'short': '🚗 BMW M5', 'price': 30000, 'cd_cut': 0.22, 'desc': '-22% ко всем таймерам', 'tier': 7, 'msg_id': 276},
-    'ferrari': {'name': '🏎 Ferrari SF90 Stradale', 'short': '🏎 Ferrari', 'price': 95000, 'cd_cut': 0.30, 'desc': '-30% ко всем таймерам', 'tier': 8, 'msg_id': 277},
-    'helicopter': {'name': '🚁 Вертолёт Robinson R44', 'short': '🚁 Вертолёт', 'price': 200000, 'cd_cut': 0.38, 'desc': '-38% ко всем таймерам', 'tier': 9, 'msg_id': None},
-    'rocket': {'name': '🚀 Ракета SpaceX Starship', 'short': '🚀 Starship', 'price': 350000, 'cd_cut': 0.45, 'desc': '-45% ко всем таймерам', 'tier': 10, 'msg_id': 278},
-    'yacht': {'name': '🛥 Суперяхта Олигарха Eclipse', 'short': '🛥 Суперяхта', 'price': 650000, 'cd_cut': 0.52, 'desc': '-52% ко всем таймерам', 'tier': 11, 'msg_id': None},
-    'teleport': {'name': '🌀 Квантовый Телепорт', 'short': '🌀 Телепорт', 'price': 1000000, 'cd_cut': 0.60, 'desc': '-60% ко всем таймерам', 'tier': 12, 'msg_id': None},
-    'private_jet': {'name': '🛩 Частный Бизнес-джет Gulfstream G650', 'short': '🛩 Бизнес-джет', 'price': 2500000, 'cd_cut': 0.68, 'desc': '-68% ко всем таймерам', 'tier': 13, 'msg_id': None},
-    'star_cruiser': {'name': '🛸 Космический Крейсер Империи', 'short': '🛸 Космокрейсер', 'price': 10000000, 'cd_cut': 0.75, 'desc': '-75% ко всем таймерам', 'tier': 14, 'msg_id': None}
+    'slippers': {'name': '🩴 Дырявые сланцы', 'short': '🩴 Сланцы', 'price': 100, 'cd_cut': 0.01, 'desc': '-1% ко всем таймерам · Эконом: +1% к зарплате', 'tier': 0, 'msg_id': None, 'class': 'economy', 'work_bonus': 0.01},
+    'rusty_bike': {'name': '🚲 Ржавый велосипед «Салют»', 'short': '🚲 Велосипед', 'price': 250, 'cd_cut': 0.02, 'desc': '-2% ко всем таймерам · Эконом: +1.5% к зарплате', 'tier': 1, 'msg_id': None, 'class': 'economy', 'work_bonus': 0.015},
+    'skateboard': {'name': '🛹 Скейтборд Pro', 'short': '🛹 Скейт', 'price': 500, 'cd_cut': 0.03, 'desc': '-3% ко всем таймерам · Эконом: +2% к зарплате', 'tier': 2, 'msg_id': None, 'class': 'economy', 'work_bonus': 0.02},
+    'scooter': {'name': '🛴 Электросамокат', 'short': '🛴 Самокат', 'price': 1500, 'cd_cut': 0.05, 'desc': '-5% ко всем таймерам · Эконом: +2.5% к зарплате', 'tier': 3, 'msg_id': 274, 'class': 'economy', 'work_bonus': 0.025},
+    'vaz_2107': {'name': '🚗 ВАЗ-2107 «Семёрка» Боевая', 'short': '🚗 ВАЗ-2107', 'price': 3500, 'cd_cut': 0.08, 'desc': '-8% ко всем таймерам · Спорт: +3% к зарплате', 'tier': 4, 'msg_id': None, 'class': 'sport', 'work_bonus': 0.03},
+    'bike': {'name': '🏍 Спортбайк Yamaha R1', 'short': '🏍 Спортбайк', 'price': 7500, 'cd_cut': 0.12, 'desc': '-12% ко всем таймерам · Спорт: +4% к зарплате', 'tier': 5, 'msg_id': 275, 'class': 'sport', 'work_bonus': 0.04},
+    'supra': {'name': '🏎 Toyota Supra A80 Twin-Turbo', 'short': '🏎 Supra', 'price': 15000, 'cd_cut': 0.16, 'desc': '-16% ко всем таймерам · Спорт: +5% к зарплате', 'tier': 6, 'msg_id': None, 'class': 'sport', 'work_bonus': 0.05},
+    'bmw': {'name': '🚗 BMW M5 CS', 'short': '🚗 BMW M5', 'price': 30000, 'cd_cut': 0.22, 'desc': '-22% ко всем таймерам · Luxury: +6% к зарплате', 'tier': 7, 'msg_id': 276, 'class': 'luxury', 'work_bonus': 0.06},
+    'ferrari': {'name': '🏎 Ferrari SF90 Stradale', 'short': '🏎 Ferrari', 'price': 95000, 'cd_cut': 0.30, 'desc': '-30% ко всем таймерам · Luxury: +8% к зарплате', 'tier': 8, 'msg_id': 277, 'class': 'luxury', 'work_bonus': 0.08},
+    'helicopter': {'name': '🚁 Вертолёт Robinson R44', 'short': '🚁 Вертолёт', 'price': 200000, 'cd_cut': 0.38, 'desc': '-38% ко всем таймерам · Luxury: +10% к зарплате', 'tier': 9, 'msg_id': None, 'class': 'luxury', 'work_bonus': 0.1},
+    'rocket': {'name': '🚀 Ракета SpaceX Starship', 'short': '🚀 Starship', 'price': 350000, 'cd_cut': 0.45, 'desc': '-45% ко всем таймерам · Hyper: +12% к зарплате', 'tier': 10, 'msg_id': 278, 'class': 'hyper', 'work_bonus': 0.12},
+    'yacht': {'name': '🛥 Суперяхта Олигарха Eclipse', 'short': '🛥 Суперяхта', 'price': 650000, 'cd_cut': 0.52, 'desc': '-52% ко всем таймерам · Hyper: +14% к зарплате', 'tier': 11, 'msg_id': None, 'class': 'hyper', 'work_bonus': 0.14},
+    'teleport': {'name': '🌀 Квантовый Телепорт', 'short': '🌀 Телепорт', 'price': 1000000, 'cd_cut': 0.60, 'desc': '-60% ко всем таймерам · Hyper: +16% к зарплате', 'tier': 12, 'msg_id': None, 'class': 'hyper', 'work_bonus': 0.16},
+    'private_jet': {'name': '🛩 Частный Бизнес-джет Gulfstream G650', 'short': '🛩 Бизнес-джет', 'price': 2500000, 'cd_cut': 0.68, 'desc': '-68% ко всем таймерам · Galactic: +18% к зарплате', 'tier': 13, 'msg_id': None, 'class': 'galactic', 'work_bonus': 0.18},
+    'star_cruiser': {'name': '🛸 Космический Крейсер Империи', 'short': '🛸 Космокрейсер', 'price': 10000000, 'cd_cut': 0.75, 'desc': '-75% ко всем таймерам · Galactic: +20% к зарплате', 'tier': 14, 'msg_id': None, 'class': 'galactic', 'work_bonus': 0.2}
 }
 
 MARKET_DEFAULT = {
@@ -1083,16 +1238,7 @@ MARKET_DEFAULT = {
     'PAT': {'name': '🦶 Пятка-Коин (PAT)', 'price': 5.0, 'old_price': 6.0, 'volatility': 0.35, 'min_price': 0.5, 'max_price': 200.0, 'last_update': 0}
 }
 
-JOBS = {
-    'fermer': {'name': '👨‍🌾 Фермер', 'req_exp': 0, 'chance': 95, 'min_pay': 25, 'max_pay': 55, 'exp_gain': 10},
-    'janitor': {'name': '🧹 Дворник', 'req_exp': 0, 'chance': 90, 'min_pay': 35, 'max_pay': 65, 'exp_gain': 12},
-    'courier': {'name': '🛵 Курьер', 'req_exp': 50, 'chance': 80, 'min_pay': 75, 'max_pay': 145, 'exp_gain': 15},
-    'cook': {'name': '👨‍🍳 Повар', 'req_exp': 150, 'chance': 70, 'min_pay': 145, 'max_pay': 290, 'exp_gain': 20},
-    'office': {'name': '👨‍💻 Офисный клерк', 'req_exp': 350, 'chance': 60, 'min_pay': 280, 'max_pay': 550, 'exp_gain': 25},
-    'programmer': {'name': '💻 Программист', 'req_exp': 800, 'chance': 45, 'min_pay': 650, 'max_pay': 1300, 'exp_gain': 35},
-    'boss': {'name': '💼 Бизнесмен', 'req_exp': 1800, 'chance': 30, 'min_pay': 1500, 'max_pay': 3800, 'exp_gain': 50}
-}
-
+# Job definitions live in data/jobs.py so the legacy runtime module stays focused on orchestration.
 FISH_TYPES = [
     ('🐟 Речной Карась', 'Обычный', 12, 50),
     ('🐠 Речной Окунь', 'Обычный', 20, 40),
@@ -1155,6 +1301,9 @@ ACHIEVEMENTS = {
     'first_marriage': {'title': '💍 Счастливы вместе', 'desc': 'Вступить в законный брак', 'stat': 'marriages', 'target': 1, 'reward': 250},
     'first_biz': {'title': '🏢 Первое предприятие', 'desc': 'Приобрести свой первый бизнес', 'stat': 'biz_bought', 'target': 1, 'reward': 300},
     'biz_all': {'title': '🏰 Бизнес-магнат', 'desc': 'Купить 4 разных бизнеса', 'stat': 'biz_bought', 'target': 4, 'reward': 2500},
+    'mars_owner': {'title': '🪐 Первопроходец Марса', 'desc': 'Стать владельцем Марса', 'stat': 'mars_owned', 'target': 1, 'reward': 5000},
+    'port_owner': {'title': '🌌 Владелец Межгалактического Порта', 'desc': 'Стать владельцем Межгалактического Порта', 'stat': 'port_owned', 'target': 1, 'reward': 15000},
+    'empire_10': {'title': '👑 Империя', 'desc': 'Одновременно владеть 10 предприятиями', 'stat': 'biz_owned_total', 'target': 10, 'reward': 8000},
     'first_bonus': {'title': '🎁 Первые коины', 'desc': 'Собрать свой первый часовой бонус', 'stat': 'bonuses', 'target': 1, 'reward': 40},
     'bonus_50': {'title': '💎 Бонусный коллекционер', 'desc': 'Собрать 50 часовых бонусов', 'stat': 'bonuses', 'target': 50, 'reward': 800},
     'bonus_150': {'title': '⏳ Хранитель времени', 'desc': 'Собрать 150 часовых бонусов', 'stat': 'bonuses', 'target': 150, 'reward': 2000},
@@ -1417,6 +1566,8 @@ def _default_data():
         'marriages': {},
         'lottery': {'tickets': {}, 'pot': 0, 'last_draw': 0},
         'bot_active': True,
+        'bot_status_note': '',
+        'bot_maintenance_started_at': 0,
         'casino_pool': 1000000,
         'safe': {'code': f"{random.randint(0, 9999):04d}", 'pot': 30000, 'tried_codes': []},
         'daily_memes': [],
@@ -1426,6 +1577,7 @@ def _default_data():
         'meme_winners': [],
         'chest_claims': {},
         'bot_chats': {},
+        'bot_news': [],
         'banned_chats': [],
         'guilds': {},
         'player_market': {},
@@ -1661,6 +1813,113 @@ def _fmt_seen(ts):
     if not ts: return 'нет данных'
     try: return datetime.fromtimestamp(float(ts), tz=now_msk().tzinfo).strftime('%d.%m.%Y %H:%M')
     except Exception: return 'нет данных'
+
+
+MAINTENANCE_MESSAGE = (
+    "🔧 <b>ТЕХНИЧЕСКИЕ РАБОТЫ</b>\n\n"
+    "<blockquote>NyaBot временно приостановил работу.\n"
+    "Сейчас мы исправляем технические проблемы и обновляем системы.</blockquote>\n\n"
+    "🕐 Игровые и экономические операции временно недоступны.\n"
+    "😺 Спасибо за терпение!"
+)
+
+RESTORE_MESSAGE = (
+    "🟢 <b>NYABOT СНОВА В СТРОЮ</b>\n\n"
+    "<blockquote>Технические работы завершены.\n"
+    "Все системы снова работают.</blockquote>\n\n"
+    "💾 Данные сохранены.\n"
+    "😼 Можно возвращаться к игре."
+)
+
+
+def _known_broadcast_chat_ids():
+    """Return deduplicated chats that NyaBot has learned about from live traffic."""
+    ids = set()
+    with db_lock:
+        inactive_ids = set()
+        for raw_id in (db.get('broadcast_inactive_ids') or []):
+            try:
+                inactive_ids.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+        for item in (db.get('bot_chats') or {}).values():
+            if not isinstance(item, dict) or item.get('status') != 'active':
+                continue
+            try:
+                cid = int(item.get('chat_id'))
+            except (TypeError, ValueError):
+                continue
+            if cid and cid not in inactive_ids:
+                ids.add(cid)
+        for econ in (db.get('economy') or {}).values():
+            if not isinstance(econ, dict):
+                continue
+            for cid in econ.get('chat_ids', []) or []:
+                try:
+                    normalized = int(cid)
+                except (TypeError, ValueError):
+                    continue
+                if normalized and normalized not in inactive_ids:
+                    ids.add(normalized)
+    return sorted(ids)
+
+
+def _broadcast_error_means_inactive(exc):
+    msg = str(exc).lower()
+    return any(marker in msg for marker in (
+        'bot was kicked', 'chat not found', 'user is deactivated',
+        'forbidden: bot was blocked', 'forbidden: bot is not a member',
+        'have no rights to send a message', 'not enough rights'
+    ))
+
+
+def broadcast_system_message(text):
+    """Broadcast a system notice to every known chat, without stopping the bot."""
+    sent = failed = 0
+    for chat_id in _known_broadcast_chat_ids():
+        try:
+            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=True)
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            if _broadcast_error_means_inactive(exc):
+                with db_lock:
+                    item = (db.get('bot_chats') or {}).get(str(chat_id))
+                    if isinstance(item, dict):
+                        item['status'] = 'inactive'
+                        item['broadcast_failed_at'] = time.time()
+                        item['broadcast_error'] = str(exc)[:300]
+                    inactive = db.setdefault('broadcast_inactive_ids', [])
+                    if chat_id not in inactive:
+                        inactive.append(chat_id)
+                        del inactive[:-50000]
+                    mark_dirty()
+                print(f'[SYSTEM BROADCAST] {chat_id}: inactive after Telegram rejection; future broadcasts will skip this chat.')
+            else:
+                print(f'[SYSTEM BROADCAST] {chat_id}: {exc}')
+    if sent or failed:
+        mark_dirty()
+    return sent, failed
+
+
+def publish_bot_news(title, text, kind='system'):
+    """Append a bounded live-world news item; this is a Neon-backed game feed."""
+    item = {
+        'title': str(title)[:120],
+        'text': str(text)[:500],
+        'kind': str(kind)[:32],
+        'time': time.time(),
+        'created_at': now_msk().strftime('%d.%m.%Y %H:%M'),
+    }
+    with db_lock:
+        news = db.setdefault('bot_news', [])
+        if not isinstance(news, list):
+            news = []
+            db['bot_news'] = news
+        news.append(item)
+        del news[:-100]
+        mark_dirty()
+    return item
 
 def _bot_chat_items(active_only=False):
     with db_lock:
@@ -2025,6 +2284,18 @@ def merge_user_econ_data(dest, src):
     for bl_k, bl_v in bl_src.items():
         bl_dest[bl_k] = max(bl_dest.get(bl_k, 1), bl_v)
 
+    price_dest = dest.setdefault('biz_purchase_price', {})
+    price_src = src.get('biz_purchase_price', {})
+    for price_k, price_v in price_src.items():
+        if price_k not in price_dest:
+            price_dest[price_k] = price_v
+    tx_dest = dest.setdefault('business_transactions', [])
+    tx_src = src.get('business_transactions', [])
+    if isinstance(tx_src, list):
+        tx_dest.extend(tx_src[-200:])
+        del tx_dest[:-200]
+    dest['business_tax_paid'] = int(dest.get('business_tax_paid', 0) or 0) + int(src.get('business_tax_paid', 0) or 0)
+
     pet_dest=dest.setdefault('pet_inventory',[])
     for pet_id in src.get('pet_inventory',[]) or []:
         if pet_id in PETS_DATA and pet_id not in pet_dest: pet_dest.append(pet_id)
@@ -2184,7 +2455,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_pet_walk', 0), ('last_pet_care', 0), ('rest_rewards_count', 0),
         ('titles', []), ('active_title', None), ('custom_title', None),
         ('has_custom_title_cert', False), ('rings', []), ('active_ring', None),
-        ('marriage', None), ('businesses', {}), ('biz_levels', {}),
+        ('marriage', None), ('businesses', {}), ('biz_levels', {}), ('biz_purchase_price', {}), ('business_transactions', []), ('business_tax_paid', 0),
         ('last_biz_collect', time.time()), ('biz_last_collect', {}), ('biz_income_carry', {}), ('donor_business_purchased_at', {}), ('vehicle', None), ('vehicle_inventory', []), ('equipped_vehicle', None), ('donor_businesses', {}),
         ('equipped_rod', None), ('equipped_bow', None), ('rod_inventory', []), ('bow_inventory', []), ('daily_tasks_date', ''),
         ('daily_progress', {}), ('daily_claimed', []), ('weekly_tasks_yearweek', ''),
@@ -2201,7 +2472,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('backpack', {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
         ('luck_clover_until', 0), ('invis_until', 0), ('daily_casino_win', 0),
         ('daily_casino_profit', 0), ('daily_transferred', 0), ('daily_stats_date', ''),
-        ('karma', 0), ('chat_ids', []), ('garden', None), ('garden_capacity', 1), ('pet_clothes', []), ('equipped_pet_clothes', None), ('public_business', None), ('public_business_workers', []), ('employer_salary', None), ('home', None), ('home_installment', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
+        ('karma', 0), ('chat_ids', []), ('world_titles', []), ('legacy_assets', []), ('news_seen', 0), ('garden', None), ('garden_capacity', 1), ('pet_clothes', []), ('equipped_pet_clothes', None), ('public_business', None), ('public_business_workers', []), ('employer_salary', None), ('home', None), ('home_installment', None), ('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1}), 
         ('last_stream_time', 0), ('last_cmd_time', 0), ('last_cmd_text', ""), ('last_activity_reward_time', 0),
         ('loan', {'amount': 0, 'due': 0, 'defaulted': False}),
         ('bonus_streak', 0), ('last_streak_time', 0),
@@ -2255,6 +2526,14 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
 
     if u_data.get('pet'):
         update_pet_stats(u_data['pet'])
+
+    # v0.3 business migration is lazy and idempotent. Neon remains the source
+    # of truth; only legacy business IDs already present in this live profile
+    # are transformed. The helper is defined later in this monolith but exists
+    # by the time runtime requests reach this getter.
+    migration_fn = globals().get('_migrate_legacy_businesses')
+    if migration_fn:
+        migration_fn(u_data)
 
     return u_data
 
@@ -4244,6 +4523,9 @@ def start_background_threads():
         if BACKGROUND_THREADS_STARTED:
             return
         BACKGROUND_THREADS_STARTED = True
+    # Legacy global chat bans can silently block every handler for a chat.
+    # Clear that old list before any incoming updates are processed.
+    clear_persistent_chat_bans()
     leave_banned_chats()
     # Start moderation expiry only after the singleton guard has been acquired.
     start_moderation_worker()
@@ -5322,6 +5604,28 @@ def render_durak_board(game_id, viewer_id=None):
 # ---------------------------------------------------------
 # ГАРАЖ (РАСШИРЕННЫЙ КАТАЛОГ)
 # ---------------------------------------------------------
+def _vehicle_class_label(info):
+    labels = {
+        'economy': '🟢 ECONOMY',
+        'sport': '🔵 SPORT',
+        'luxury': '🟣 LUXURY',
+        'hyper': '🟠 HYPER',
+        'galactic': '🌌 GALACTIC',
+    }
+    return labels.get(str(info.get('class', '')).lower(), '🚗 CLASSIC')
+
+def _vehicle_benefit_text(info):
+    parts=[]
+    if info.get('cd_cut'):
+        parts.append(f"-{int(float(info.get('cd_cut',0))*100)}% таймеров")
+    try:
+        wb=float(info.get('work_bonus',0) or 0)
+    except (TypeError, ValueError):
+        wb=0.0
+    if wb:
+        parts.append(f"+{wb*100:.1f}% зарплаты")
+    return ' · '.join(parts) or 'Без дополнительных бонусов'
+
 def render_garage_view(chat_id, user_id, user_name, message_id=None):
     econ = get_user_econ(user_id, user_name)
     equipped = econ.get('equipped_vehicle') or econ.get('vehicle')
@@ -5330,6 +5634,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
     else:
         cur_info = VEHICLES.get(equipped)
     cur_name = cur_info['name'] if cur_info else "Пешеход 🚶‍♂️"
+    cur_class = _vehicle_class_label(cur_info) if cur_info else '🚶 PEDESTRIAN'
 
     owned = list(dict.fromkeys(econ.get('vehicle_inventory', [])))
     lines = [
@@ -5337,6 +5642,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
         "━━━━━━━━━━━━━━━━━━━━",
         f"👤 Владелец: {make_link(chat_id, user_name, user_id, ping=False)}",
         f"🚘 Надет сейчас: <b>{cur_name}</b>",
+        f"🏷 Класс: <b>{cur_class}</b>",
         "",
         "<i>Купленные машины сохраняются навсегда. Надеть одновременно можно только одну.</i>",
         "",
@@ -5349,7 +5655,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
         if not info:
             continue
         status = " ✅ НАДЕТА" if vid == equipped else ""
-        lines.append(f"• <b>{info['name']}</b>{status} — {info.get('desc','')}")
+        lines.append(f"• <b>{info['name']}</b>{status} — {html.escape(_vehicle_class_label(info))} — {html.escape(_vehicle_benefit_text(info))}")
         if vid != equipped:
             owned_btns.append(InlineKeyboardButton(f"Надеть {info['short']}", callback_data=f"equip_veh_{vid}:{user_id}"))
     if owned_btns:
@@ -5363,7 +5669,7 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
     for v_id, v_info in VEHICLES.items():
         if v_id in owned:
             continue
-        lines.append(f"• <b>{v_info['name']}</b> — <code>{v_info['price']} 🪙</code> ({v_info['desc']})")
+        lines.append(f"• <b>{v_info['name']}</b> — <code>{v_info['price']:,} 🪙</code> — {html.escape(_vehicle_class_label(v_info))} — {html.escape(_vehicle_benefit_text(v_info))}")
         catalog_btns.append(InlineKeyboardButton(f"Купить {v_info['short']} — {v_info['price']} 🪙", callback_data=f"buy_veh_{v_id}:{user_id}"))
     for i in range(0, len(catalog_btns), 2):
         markup.add(*catalog_btns[i:i+2])
@@ -5520,6 +5826,189 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
 # ---------------------------------------------------------
 # БИЗНЕСЫ 2.1 — АУДИТ: РАЗДЕЛЬНОЕ НАКОПЛЕНИЕ И ЕДИНЫЙ РАСЧЁТ
 # ---------------------------------------------------------
+def _migrate_legacy_businesses(econ):
+    """Convert only legacy business IDs already present in the live Neon profile.
+
+    This is deliberately lazy and idempotent: no JSON snapshot is consulted.
+    If the replacement is already owned, the removed business is compensated at its
+    legacy purchase price * 80% so no purchased asset simply vanishes.
+    """
+    if not isinstance(econ, dict):
+        return False
+    businesses = econ.setdefault('businesses', {})
+    levels = econ.setdefault('biz_levels', {})
+    prices = econ.setdefault('biz_purchase_price', {})
+    legacy_assets = econ.setdefault('legacy_assets', [])
+    tx = econ.setdefault('business_transactions', [])
+    changed = False
+    for old_id, new_id in LEGACY_BUSINESS_REPLACEMENTS.items():
+        if old_id not in businesses:
+            continue
+        old_value = businesses.pop(old_id)
+        old_level = max(1, min(5, int(levels.pop(old_id, 1) or 1)))
+        old_price = int(prices.pop(old_id, LEGACY_BUSINESS_INFO[old_id]['price']) or LEGACY_BUSINESS_INFO[old_id]['price'])
+        if new_id not in businesses:
+            businesses[new_id] = old_value if old_value else time.time()
+            levels[new_id] = old_level
+            prices[new_id] = old_price
+            legacy_assets.append({'type': 'business_conversion', 'from': old_id, 'to': new_id, 'old_price': old_price, 'time': time.time()})
+            tx.append({'type':'migration','business':new_id,'from':old_id,'old_price':old_price,'time':time.time()})
+        else:
+            refund = int(old_price * BUSINESS_SELL_RATE)
+            econ['balance'] = int(econ.get('balance', 0) or 0) + refund
+            tx.append({'type':'migration_compensation','business':old_id,'refund':refund,'time':time.time()})
+            changed = True
+        changed = True
+        clocks = econ.setdefault('biz_last_collect', {})
+        carries = econ.setdefault('biz_income_carry', {})
+        if old_id in clocks:
+            clocks[new_id] = clocks.pop(old_id)
+        elif new_id not in clocks:
+            clocks[new_id] = float(businesses.get(new_id) or time.time())
+        if old_id in carries:
+            carries[new_id] = carries.pop(old_id)
+        else:
+            carries.setdefault(new_id, 0.0)
+    if len(tx) > 200:
+        del tx[:-200]
+    if changed:
+        mark_dirty()
+    return changed
+
+def _business_catalog():
+    rows=[]
+    for idx, (b_id, info) in enumerate(BUSINESSES.items(), 1):
+        rows.append((idx, b_id, info, False))
+    donor_start = len(rows) + 1
+    for idx, (b_id, info) in enumerate(DONOR_BUSINESSES.items(), donor_start):
+        rows.append((idx, b_id, info, True))
+    return rows
+
+def _business_by_number(number):
+    try:
+        number=int(number)
+    except (TypeError, ValueError):
+        return None
+    for idx, b_id, info, donor in _business_catalog():
+        if idx == number:
+            return idx, b_id, info, donor
+    return None
+
+def _business_user_owns(econ, b_id, donor=False):
+    return b_id in (econ.get('donor_businesses', {}) if donor else econ.get('businesses', {}))
+
+def _business_purchase_price(econ, b_id):
+    prices=econ.setdefault('biz_purchase_price', {})
+    if b_id not in prices:
+        info=_business_info(b_id)
+        if info and b_id in BUSINESSES:
+            prices[b_id]=int(info.get('price', 0) or 0)
+            mark_dirty()
+    return int(prices.get(b_id, 0) or 0)
+
+def _business_stars_price(b_id):
+    item = next((v for v in (STARS_COSMETICS or {}).values()
+                 if isinstance(v, dict) and v.get('type') == 'donor_business'
+                 and v.get('business_id') == b_id), None)
+    try:
+        return int(item.get('stars', item.get('price', 0)) or 0) if item else 0
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+def _render_business_catalog(chat_id, user_id, user_name, message_id=None):
+    econ=get_user_econ(user_id,user_name)
+    _migrate_legacy_businesses(econ)
+    rows=[]
+    ordinary=[]
+    donor=[]
+    for idx,b_id,info,is_donor in _business_catalog():
+        owned = _business_user_owns(econ, b_id, is_donor)
+        status = '✅ Куплен' if owned else '❌ Не куплен'
+        if is_donor:
+            price_text = f"{_business_stars_price(b_id)} ⭐"
+            line=f"{idx}. {info['name']} — {price_text} — {status}"
+            donor.append(line)
+        else:
+            price_text = f"{int(info.get('price', 0) or 0):,} 🪙"
+            line=f"{idx}. {info['name']} — {price_text} — {status}"
+            ordinary.append(line)
+    lines=[
+        '🏢 <b>БИЗНЕСЫ NYABOT</b>',
+        '',
+        *[f'<blockquote>{html.escape(line)}</blockquote>' for line in ordinary],
+        '',
+        '💎 <b>ДОНАТНЫЕ</b>',
+        *[f'<blockquote>{html.escape(line)}</blockquote>' for line in donor],
+        '',
+        '━━━━━━━━━━━━━━━━━━━━',
+        '💡 Откройте конкретное предприятие сообщением:',
+        '<code>бизнес 1</code>',
+        f'🪙 Ваш баланс: <b>{int(econ.get("balance",0) or 0):,}</b>'
+    ]
+    text='\n'.join(lines)
+    if message_id:
+        try:
+            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id,text,parse_mode='HTML')
+
+def render_business_detail(chat_id,user_id,user_name,number,message_id=None):
+    target=_business_by_number(number)
+    if not target:
+        bot.send_message(chat_id,'❌ Такого номера бизнеса нет. Напишите <code>бизнесы</code>.',parse_mode='HTML')
+        return
+    idx,b_id,info,is_donor=target
+    econ=get_user_econ(user_id,user_name)
+    _migrate_legacy_businesses(econ)
+    owned=_business_user_owns(econ,b_id,is_donor)
+    lvl=_business_level(econ,b_id) if owned else 1
+    inc=_business_hourly_income(b_id,lvl)
+    price=int(info.get('price',0) or 0)
+    if owned:
+        pending=_business_pending_amount(econ,b_id,time.time())
+        purchase_price=_business_purchase_price(econ,b_id)
+        sell_value=int(purchase_price*BUSINESS_SELL_RATE)
+        text=(f"🏢 <b>ВАШ БИЗНЕС #{idx}</b>\n\n"
+              f'<blockquote>{html.escape(info["name"])}\n'
+              f'👤 Владелец: {html.escape(user_name)}\n'
+              f'⭐ Уровень: <b>{lvl}/5</b>\n'
+              f'📈 Доход: <b>{inc:,} 🪙/ч</b>\n'
+              f'💰 Накоплено: <b>{pending:,} 🪙</b></blockquote>\n'
+              f'━━━━━━━━━━━━━━━━━━━━\n'
+              f'💸 При продаже вы получите <b>{sell_value:,} 🪙</b> (80% от цены покупки).')
+        kb=InlineKeyboardMarkup(row_width=2)
+        if lvl<5: kb.add(InlineKeyboardButton('⬆️ Улучшить',callback_data=f'biz_detail_up:{b_id}:{user_id}'))
+        kb.add(InlineKeyboardButton('💸 Продать',callback_data=f'biz_detail_sell:{b_id}:{user_id}'))
+    else:
+        text=(f"🏢 <b>БИЗНЕС #{idx}</b>\n\n"
+              f'<blockquote>{html.escape(info["name"])}\n'
+              f'❌ У вас пока нет этого бизнеса.</blockquote>\n'
+              f'💰 Стоимость: <b>{price:,} 🪙</b>\n'
+              f'📈 Доход: <b>{inc:,} 🪙/ч</b>')
+        kb=InlineKeyboardMarkup()
+        cb=f'biz_detail_buy:{b_id}:{user_id}' if not is_donor else f'biz_detail_donor:{b_id}:{user_id}'
+        kb.add(InlineKeyboardButton('🛒 Купить' if not is_donor else '💎 Открыть в Stars-магазине',callback_data=cb))
+    if message_id:
+        try:
+            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=kb,parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id,text,reply_markup=kb,parse_mode='HTML')
+
+def _delete_message_quietly(chat_id,message_id):
+    try:
+        bot.delete_message(chat_id,message_id)
+    except Exception:
+        pass
+
+def _record_business_tx(econ, entry):
+    tx=econ.setdefault('business_transactions',[])
+    tx.append(entry)
+    del tx[:-200]
+
 def _business_info(b_id):
     return BUSINESSES.get(b_id) or DONOR_BUSINESSES.get(b_id)
 
@@ -5646,6 +6135,25 @@ def _settle_one_business(econ, b_id, now=None, credit=True):
     return amount
 
 
+def _settle_business_net_profit(econ, b_id, now=None):
+    """Settle one business at its current level and apply the 20% tax once.
+
+    Used for boundary events such as upgrade/sale. Normal collection uses the
+    aggregate event/bonus engine below, so those operations keep their existing
+    gameplay modifiers.
+    """
+    raw = _settle_one_business(econ, b_id, now, credit=False)
+    if raw <= 0:
+        return 0, 0
+    tax = int(raw * BUSINESS_TAX_RATE)
+    net = max(0, raw - tax)
+    econ['business_tax_paid'] = int(econ.get('business_tax_paid', 0) or 0) + tax
+    if net:
+        _adjust_balance(econ, net)
+    mark_dirty()
+    return net, tax
+
+
 def collect_business_base_profit(econ, now=None):
     """Collect all ordinary/donor business income using exactly the same engine everywhere."""
     now = float(now or time.time())
@@ -5675,112 +6183,53 @@ def collect_business_base_profit(econ, now=None):
 
 
 def _apply_business_payout_modifiers(econ, base_profit, chat_id, user_id, user_name):
-    """Apply the same business bonuses/events for /collect and the inline Collect All button."""
+    """Apply events/bonuses, then the v0.3 20% business tax exactly once."""
     if base_profit <= 0:
         return 0, ''
-    profit = int(base_profit)
+    gross = int(base_profit)
+    profit = gross
     event_text = ''
     econ_event = get_economic_event() if 'get_economic_event' in globals() else None
     if econ_event and econ_event.get('biz_income'):
         mult = float(econ_event['biz_income'])
         profit = int(profit * mult)
-        event_text = f"\n🌍 Событие <b>{econ_event['name']}</b>: прибыль {mult:.0%} от обычной."
+        event_text += f"\n🌍 Событие <b>{html.escape(str(econ_event['name']))}</b>: ×{mult:.2f}"
 
     if random.random() < 0.15:
         if random.random() < 0.70:
             boost = int(profit * 0.5)
             profit += boost
-            event_text += f"\n🌟 <b>Вирусный тренд в сети!</b> Приток клиентов дал <b>+{boost} 🪙</b>! 😻"
+            event_text += f"\n🌟 <b>Вирусный тренд!</b> Бонус <b>+{boost:,} 🪙</b>."
         else:
-            tax = int(profit * 0.15)
-            profit = max(0, profit - tax)
-            event_text += f"\n⚠️ <b>Плановое техобслуживание:</b> расход <b>-{tax} 🪙</b>. 😿"
+            extra = int(profit * 0.15)
+            profit = max(0, profit - extra)
+            event_text += f"\n⚠️ Техобслуживание: <b>-{extra:,} 🪙</b>."
 
     active_t = econ.get('active_title')
     if active_t and active_t in TITLES and TITLES[active_t].get('buff') == 'biz_bonus':
         bonus_t = int(profit * (TITLES[active_t]['val'] / 100.0))
         profit += bonus_t
-        event_text += f"\n👑 Бонус титула: <b>+{bonus_t} 🪙</b>"
+        event_text += f"\n👑 Бонус титула: <b>+{bonus_t:,} 🪙</b>"
 
     donor_biz = get_title_business_bonus(econ)
     vip_biz = get_vip_business_bonus(econ)
     if donor_biz or vip_biz:
         bonus_biz = int(profit * (donor_biz + vip_biz))
         profit += bonus_biz
-        event_text += f"\n💎 VIP/донат-бонус бизнеса: <b>+{bonus_biz} 🪙</b>"
+        event_text += f"\n💎 VIP/донат-бонус: <b>+{bonus_biz:,} 🪙</b>"
 
-    # Рест больше НЕ даёт денежный бонус. Состояние реста влияет только на доступные
-    # игровые/чатовые действия и таймер реста, но не увеличивает выплаты.
-
-    return max(0, int(profit)), event_text
+    tax = int(max(0, profit) * BUSINESS_TAX_RATE)
+    net = max(0, profit - tax)
+    econ['business_tax_paid'] = int(econ.get('business_tax_paid', 0) or 0) + tax
+    event_text = (f"\n💰 Валовая прибыль: <b>+{profit:,} 🪙</b>"
+                  f"\n📉 Налог бизнеса ({BUSINESS_TAX_RATE:.0%}): <b>-{tax:,} 🪙</b>"
+                  f"\n🪙 <b>К получению: +{net:,} 🪙</b>" + event_text)
+    return net, event_text
 
 
 def render_business_view(chat_id, user_id, user_name, message_id=None):
-    econ = get_user_econ(user_id, user_name)
-    user_biz = econ.setdefault('businesses', {})
-    biz_levels = econ.setdefault('biz_levels', {})
-    donor_owned = econ.setdefault('donor_businesses', {})
-    now = time.time()
-    _ensure_business_clocks(econ, now)
-
-    total_hourly = 0
-    lines = [
-        "🏢 <b>МОИ БИЗНЕСЫ</b> 😺",
-        "━━━━━━━━━━━━━━━━━━━━",
-        f"💵 Баланс: <b>{int(econ.get('balance', 0) or 0):,} 🪙</b>",
-        "👇 <i>Чтобы купить обычный бизнес, нажмите кнопку «Купить» напротив него. После покупки он сразу начинает накапливать доход.</i>",
-        "",
-        "<b>Обычные предприятия:</b>"
-    ]
-    markup = InlineKeyboardMarkup(row_width=2)
-    btns = []
-
-    for b_id, b_info in BUSINESSES.items():
-        if b_id in user_biz:
-            lvl = _business_level(econ, b_id)
-            inc = _business_hourly_income(b_id, lvl)
-            pending = _business_pending_amount(econ, b_id, now)
-            total_hourly += inc
-            lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — <b>{inc:,} 🪙/ч</b> | накоплено <b>~{pending:,} 🪙</b>")
-            if lvl < 5:
-                cost = int(b_info['upgrade_cost']) * lvl
-                btns.append(InlineKeyboardButton(f"⬆️ {b_info['short']} {lvl+1} — {cost:,} 🪙", callback_data=f"upg_biz_{b_id}:{user_id}"))
-        else:
-            lines.append(f"• {b_info['name']} — <code>{b_info['price']:,} 🪙</code>")
-            btns.append(InlineKeyboardButton(f"🛒 Купить {b_info['short']} — {b_info['price']:,} 🪙", callback_data=f"buy_biz_{b_id}:{user_id}"))
-
-    if donor_owned:
-        lines.append("\n💎 <b>ДОНАТНЫЕ ПРЕДПРИЯТИЯ</b>")
-    for b_id, b_info in DONOR_BUSINESSES.items():
-        if b_id not in donor_owned:
-            continue
-        lvl = _business_level(econ, b_id)
-        inc = _business_hourly_income(b_id, lvl)
-        pending = _business_pending_amount(econ, b_id, now)
-        total_hourly += inc
-        lines.append(f"• <b>{b_info['name']}</b>: ур. <b>{lvl}/5</b> — <b>{inc:,} 🪙/ч</b> | накоплено <b>~{pending:,} 🪙</b> 💎")
-        if lvl < 5:
-            cost = int(b_info.get('upgrade_cost', 5000)) * lvl
-            btns.append(InlineKeyboardButton(f"💎⬆️ {b_info['name']} {lvl+1} — {cost:,} 🪙", callback_data=f"upg_donor_biz_{b_id}:{user_id}"))
-
-    for i in range(0, len(btns), 2):
-        markup.add(*btns[i:i+2])
-    markup.add(InlineKeyboardButton("💰 Собрать всю прибыль", callback_data=f"collect_biz_profit:{user_id}"))
-    markup.add(InlineKeyboardButton("⭐️ Купить донатный бизнес", callback_data=f"stars_cat_businesses:{user_id}"))
-    markup.add(InlineKeyboardButton("🏢 Мой публичный бизнес", callback_data=f"pubbiz_view:{user_id}"), InlineKeyboardButton("💼 Вакансии", callback_data=f"pubbiz_jobs:{user_id}"))
-    lines += ["━━━━━━━━━━━━━━━━━━━━", f"📈 Общий доход: <b>{total_hourly:,} 🪙/ч</b>"]
-    text = "\n".join(lines)
-    if message_id:
-        try:
-            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-            return
-        except Exception:
-            pass
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-
-
-
-
+    # v0.3: catalog first; concrete cards are opened by "бизнес N".
+    return _render_business_catalog(chat_id, user_id, user_name, message_id=message_id)
 
 
 
@@ -8111,6 +8560,20 @@ def mark_stars_charge_processed(charge_id):
     return _mark_stars_charge_processed_service(charge_id)
 
 # ---------------------------------------------------------
+# ПРОВЕРОЧНЫЙ PING + ДИАГНОСТИКА TELEGRAM POLLING
+# ---------------------------------------------------------
+# Registered before the legacy catch-all handler so /ping is a deterministic
+# end-to-end test: Telegram -> getUpdates -> handler -> sendMessage.
+def _nyabot_ping_handler(message):
+    try:
+        bot.reply_to(message, "🟢 NyaBot получает сообщения и отвечает.")
+    except Exception as exc:
+        print(f"[PING HANDLER ERROR] {exc}")
+
+bot.message_handler(commands=["ping", "пинг"])(_nyabot_ping_handler)
+
+
+# ---------------------------------------------------------
 # РЕГИСТРАЦИЯ ВЫНЕСЕННЫХ HANDLERS
 # ---------------------------------------------------------
 register_handlers(globals())
@@ -8118,23 +8581,93 @@ register_handlers(globals())
 # ---------------------------------------------------------
 # ЗАПУСК ПРИЛОЖЕНИЯ
 # ---------------------------------------------------------
-def run_bot():
-    """Initialize runtime workers and start Telegram long polling.
+class TelegramPollingConflict(RuntimeError):
+    """Raised when Telegram reports that another getUpdates consumer exists."""
 
-    Importing this module no longer starts the bot. This lets bot.py own the
-    process lifecycle and makes the module safe to import for tests/tools.
+
+
+def run_bot(stop_event=None, lock_health_check=None):
+    """Initialize workers and run a single, supervised Telegram polling loop.
+
+    We intentionally do not use ``infinity_polling()`` here. pyTelegramBotAPI's
+    internal threaded polling can catch a 409 in its worker and keep retrying
+    forever, which hides the real conflict from the Railway supervisor. The
+    explicit getUpdates loop makes 409 a hard, observable process-level event.
     """
-    if DATABASE_URL and not saving_service.acquire_single_instance_lock():
-        print('[STARTUP] Второй экземпляр бота не запущен: Neon уже занят другим процессом.')
-        return
     recovered = recover_stars_entitlements_from_journal()
     if recovered and db_dirty:
         critical_save('Stars entitlement recovery', retries=3)
     setup_bot_commands()
     start_background_threads()
     keep_alive()
+
+    # Verify the exact Telegram identity used by Railway. This catches the
+    # common case where Railway has a valid token for a different bot.
+    try:
+        me = bot.get_me()
+        print(f"[TELEGRAM] Connected as @{getattr(me, 'username', None) or 'unknown'} id={getattr(me, 'id', None)}")
+    except Exception as exc:
+        print(f"[TELEGRAM] getMe failed: {exc}")
+        raise
+
+    try:
+        webhook = bot.get_webhook_info()
+        print(f"[TELEGRAM] webhook url after cleanup: {getattr(webhook, 'url', '') or '<empty>'}")
+    except Exception as exc:
+        print(f"[TELEGRAM] getWebhookInfo failed: {exc}")
+
     print('Бот успешно запущен со всеми обновлениями и исправлениями! 😸')
-    bot.infinity_polling()
+
+    stop_event = stop_event or threading.Event()
+    offset = None
+    health_counter = 0
+    last_poll_log = 0.0
+
+    while not stop_event.is_set():
+        if lock_health_check and not lock_health_check():
+            raise RuntimeError('Neon singleton lock was lost; stopping Telegram polling fail-closed.')
+
+        try:
+            updates = bot.get_updates(
+                offset=offset,
+                limit=100,
+                timeout=30,
+                long_polling_timeout=30,
+            )
+        except Exception as exc:
+            error_code = getattr(exc, 'error_code', None)
+            text = str(exc or '').lower()
+            if error_code == 409 or ('409' in text and ('getupdates' in text or 'conflict' in text)):
+                raise TelegramPollingConflict(
+                    'Telegram 409 Conflict: another process is consuming getUpdates.'
+                ) from exc
+            # Network/API hiccups are retried, but never create a second polling thread.
+            print(f'[POLLING] Telegram API error: {exc}; retrying in 3s.')
+            stop_event.wait(3.0)
+            continue
+
+        if updates:
+            print(f"[POLLING] Received {len(updates)} Telegram update(s); last_update_id={updates[-1].update_id}")
+            offset = updates[-1].update_id + 1
+            try:
+                bot.process_new_updates(updates)
+            except Exception as exc:
+                # Never silently kill the polling loop because one handler
+                # raised. Log the exception and continue with the next update.
+                print(f"[POLLING] process_new_updates failed: {exc}")
+                import traceback as _traceback
+                _traceback.print_exc()
+        elif time.time() - last_poll_log >= 30:
+            last_poll_log = time.time()
+            print('[POLLING] Telegram long polling is alive; no updates received in the last interval.')
+
+        health_counter += 1
+        if health_counter >= 5:
+            health_counter = 0
+            if lock_health_check and not lock_health_check():
+                raise RuntimeError('Neon singleton lock was lost during polling; stopping.')
+
+    print('[POLLING] Stop requested; Telegram polling loop exited.')
 
 
 def get_application():
