@@ -360,6 +360,7 @@ def save_snapshot(
     snapshot_version,
     db_version_getter,
     db_dirty_setter,
+    db_dirty_clear_if_version=None,
     send_backup=False,
     db_channel_id=0,
     bot_instance=None
@@ -390,26 +391,47 @@ def save_snapshot(
                 print(f"[DB ERROR] Ошибка сохранения в Neon: {e}")
 
         temp_file = f"{DATA_FILE}.tmp"
+        local_snapshot_saved = False
+        try:
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    snapshot,
+                    f,
+                    ensure_ascii=False,
+                    indent=4
+                )
+                f.flush()
+                os.fsync(f.fileno())
 
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(
-                snapshot,
-                f,
-                ensure_ascii=False,
-                indent=4
-            )
-            f.flush()
-            os.fsync(f.fileno())
+            os.replace(temp_file, DATA_FILE)
+            local_snapshot_saved = True
+        except Exception as e:
+            # Neon is the canonical store whenever DATABASE_URL is configured.
+            # If PostgreSQL has already committed this snapshot, failure to write
+            # the secondary local backup must not report the transaction as failed:
+            # callers may otherwise roll back memory even though Neon has committed.
+            print(f"[LOCAL SNAPSHOT ERROR] Could not write local backup: {e}")
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception:
+                pass
+            if not saved_to_pg:
+                return False
 
-        os.replace(temp_file, DATA_FILE)
+        if saved_to_pg or (not DATABASE_URL and local_snapshot_saved):
+            if db_dirty_clear_if_version is not None:
+                # Version comparison and dirty-flag clearing must happen under
+                # one lock. A new mutation between a separate getter/setter can
+                # otherwise have its dirty flag cleared before it is persisted.
+                # A bookkeeping error after a successful durable save is not a
+                # persistence failure: leaving the flag dirty only causes a retry.
+                try:
+                    db_dirty_clear_if_version(snapshot_version)
+                except Exception as e:
+                    print(f"[DB SAVE STATE ERROR] Saved snapshot but could not clear dirty state: {e}")
 
-        current_version = db_version_getter()
-
-        if current_version == snapshot_version:
-            if saved_to_pg or not DATABASE_URL:
-                db_dirty_setter(False)
-
-        if send_backup and db_channel_id and bot_instance:
+        if local_snapshot_saved and send_backup and db_channel_id and bot_instance:
             # Telegram backup delivery is best-effort. A backup API error must
             # never make an already persisted Neon/local snapshot look failed.
             try:
@@ -431,7 +453,7 @@ def save_snapshot(
             except Exception as e:
                 print(f"[BACKUP ERROR] {e}")
 
-        return (saved_to_pg or not DATABASE_URL)
+        return bool(saved_to_pg or (not DATABASE_URL and local_snapshot_saved))
 
     except Exception as e:
         print(f"Ошибка при сохранении базы данных: {e}")
