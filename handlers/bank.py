@@ -14,7 +14,7 @@ def _inject(ctx):
             globals()[_name] = _value
 
 
-HANDLER_NAMES = ['cmd_loan', 'cmd_repay', 'cmd_bank', 'cmd_case', 'cmd_lottery', 'cmd_history', 'cmd_safe']
+HANDLER_NAMES = ['cmd_loan', 'cmd_repay', 'cmd_bank', 'cmd_case', 'cmd_lottery', 'cmd_history', 'cmd_money_history', 'cmd_safe']
 
 
 def cmd_loan(message):
@@ -50,7 +50,7 @@ def cmd_loan(message):
         return
         
     repay_amount = int(amount * 1.15)
-    _adjust_balance(econ, amount)
+    _adjust_balance(econ, amount, reason='Получение кредита')
     econ['loan'] = {
         'amount': repay_amount,
         'due': time.time() + 86400,
@@ -77,7 +77,7 @@ def cmd_repay(message):
         bot.reply_to(message, f"❌ Недостаточно средств для погашения! Нужно <b>{amount_to_pay} 🪙</b>, у вас: {econ['balance']}. 😿", parse_mode='HTML')
         return
         
-    _adjust_balance(econ, -(amount_to_pay))
+    _adjust_balance(econ, -(amount_to_pay), reason='Погашение кредита')
     econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
     mark_dirty()
     bot.reply_to(message, f"✅ Кредит успешно погашен! Списано <b>{amount_to_pay} 🪙</b>. Ваша кредитная история чиста. 😻", parse_mode='HTML')
@@ -115,7 +115,7 @@ def cmd_case(message):
     roll = random.random()
     if roll < 0.50:
         coins_reward = random.randint(80, 250)
-        _adjust_balance(econ, coins_reward)
+        _adjust_balance(econ, coins_reward, reason='Награда из сундука')
         prize_str = f"💰 <b>+{coins_reward} Ня-коинов 🪙</b>"
     elif roll < 0.75:
         exp_reward = random.randint(30, 80)
@@ -130,10 +130,10 @@ def cmd_case(message):
         add_inventory_item(econ['hunt_inventory'], trophy)
         prize_str = f"🏹 Охотничий трофей: <b>{trophy}</b>!"
 
-    add_account_exp(user_id, user_name, 20, username=message.from_user.username)
+    add_account_exp(user_id, user_name, 20, username=message.from_user.username, source='case_open')
     if econ.get('chest_streak', 0) >= 3:
         streak_bonus = min(1000, econ['chest_streak'] * 100)
-        _adjust_balance(econ, streak_bonus)
+        _adjust_balance(econ, streak_bonus, reason='Бонус серии сундуков')
         prize_str += f"\n🔥 Серия сундуков {econ['chest_streak']} дн.: <b>+{streak_bonus} 🪙</b>"
     check_achievements(user_id, user_name, 'cases_opened', 1, message.chat.id, username=message.from_user.username)
     mark_dirty()
@@ -182,6 +182,50 @@ def cmd_history(message):
         )
     lines.append("━━━━━━━━━━━━━━━━━━━━")
     bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
+
+
+def cmd_money_history(message):
+    """Show the last balance changes without changing the existing /history command."""
+    if not can_process_user_message(message):
+        return
+    user = message.from_user
+    user_id = user.id
+    user_name = (f"{user.first_name or ''} {user.last_name or ''}").strip() or user.username or 'Игрок'
+    econ = get_user_econ(user_id, user_name, username=getattr(user, 'username', None))
+    current_balance = int(econ.get('balance', 0) or 0)
+    records = econ.get('economy_transactions', [])
+    if not isinstance(records, list):
+        records = []
+    records = [row for row in records if isinstance(row, dict)][-10:]
+
+    lines = [
+        '🧾 <b>История баланса</b>',
+        f'💳 Текущий баланс: <b>{current_balance:,} 🪙</b>',
+    ]
+    if not records:
+        lines.append('')
+        lines.append('<i>Записей пока нет. Новые изменения баланса будут сохраняться здесь.</i>')
+    else:
+        lines.append('')
+        lines.append('<b>Последние операции:</b>')
+        for row in reversed(records):
+            try:
+                delta = int(row.get('delta', 0) or 0)
+                before = int(row.get('before', 0) or 0)
+                after = int(row.get('after', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            try:
+                stamp = datetime.fromtimestamp(float(row.get('time', 0) or 0), MSK_TZ).strftime('%d.%m %H:%M')
+            except (TypeError, ValueError, OverflowError, OSError):
+                stamp = 'время неизвестно'
+            sign = '+' if delta > 0 else ''
+            reason = html.escape(str(row.get('reason') or 'Изменение баланса'))
+            lines.append(
+                f'🕒 <code>{stamp}</code> · <b>{sign}{delta:,} 🪙</b> — {reason}\n'
+                f'<code>{before:,} → {after:,}</code>'
+            )
+    bot.reply_to(message, '\n'.join(lines), parse_mode='HTML')
 
 def cmd_safe(message):
     if not can_process_user_message(message):
@@ -305,6 +349,13 @@ def register(ctx, only=None):
         ctx["cmd_history"] = _handler
         globals()["cmd_history"] = _handler
         registered.append("cmd_history")
+    if "cmd_money_history" in wanted:
+        _handler = cmd_money_history
+        _handler = serialize_user_action(_handler)
+        bot.message_handler(commands=['moneyhistory', 'coinhistory', 'история_денег'])(_handler)
+        ctx["cmd_money_history"] = _handler
+        globals()["cmd_money_history"] = _handler
+        registered.append("cmd_money_history")
     if "cmd_safe" in wanted:
         _handler = cmd_safe
         _handler = serialize_user_action(_handler)

@@ -93,20 +93,30 @@ def cmd_collect(message):
         return
 
     now = time.time()
+    # Snapshot BEFORE settling clocks/carries. If Neon save fails, every part of
+    # collection (including elapsed time) must roll back, not just the balance.
+    state_before = copy.deepcopy(econ)
+    period_text = _business_collection_period_text(econ, now)
     base_profit = collect_business_base_profit(econ, now)
     if base_profit <= 0:
-        bot.reply_to(message, "⏳ Пока накопилось меньше 1 🪙. Подождите немного! 😿")
+        bot.reply_to(message, "⏳ Пока накопилось меньше 1 🪙. Дробный доход сохранён — попробуйте чуть позже! 😿")
         return
 
-    state_before = copy.deepcopy(econ)
     total_profit, event_text = _apply_business_payout_modifiers(econ, base_profit, message.chat.id, user_id, user_name)
-    _adjust_balance(econ, total_profit)
+    _adjust_balance(econ, total_profit, reason='Сбор прибыли бизнесов')
     mark_dirty()
     if not critical_save('business profit collection command', retries=3):
         econ.clear(); econ.update(state_before); mark_dirty()
-        bot.reply_to(message, "❌ Не удалось сохранить прибыль в Neon. Начисление отменено.")
+        bot.reply_to(message, "❌ Neon не сохранил сбор. Начисление отменено, прибыль и таймеры возвращены к прежнему состоянию.")
         return
-    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{total_profit:,} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']:,} 🪙</b> 😸", parse_mode='HTML')
+    receipt = (
+        "🏢 <b>Сбор прибыли бизнесов</b>\n"
+        f"⏱ Период накопления: {period_text}\n"
+        f"{event_text.lstrip()}\n\n"
+        f"✅ <b>Начислено: +{total_profit:,} 🪙</b>\n"
+        f"💳 Баланс: <b>{int(econ.get('balance', 0) or 0):,} 🪙</b> 😸"
+    )
+    bot.reply_to(message, receipt, parse_mode='HTML')
 
 def register(ctx, only=None):
     """Register selected handlers from this feature module."""

@@ -14,7 +14,85 @@ def _inject(ctx):
             globals()[_name] = _value
 
 
-HANDLER_NAMES = ['cmd_global_stats', 'cmd_economy_stats', 'cmd_game_stats', 'cmd_bot_status', 'cmd_dashboard', 'admin_force_save_command', 'admin_give_gif_command', 'admin_give_stars_all_command', 'admin_give_command', 'dragon_audio_file_id']
+HANDLER_NAMES = ['cmd_xp_audit', 'cmd_global_stats', 'cmd_economy_stats', 'cmd_game_stats', 'cmd_bot_status', 'cmd_dashboard', 'admin_force_save_command', 'admin_give_gif_command', 'admin_give_stars_all_command', 'admin_give_command', 'dragon_audio_file_id']
+
+
+def _audit_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def cmd_xp_audit(message):
+    """Owner-only inspection of profile XP and recent award provenance."""
+    if not _is_owner_admin(message):
+        return
+    parts = (message.text or '').strip().split(maxsplit=1)
+    target_id = None
+    target_name = None
+    if message.reply_to_message and (len(parts) < 2 or parts[1].lower() in ('reply', '.', '-', '@reply', 'this')):
+        target = message.reply_to_message.from_user
+        target_id = target.id
+        target_name = target.username or target.first_name or f'ID:{target_id}'
+    elif len(parts) >= 2:
+        target_id, target_name = resolve_user_from_string(message.chat.id, parts[1])
+    if not target_id:
+        bot.reply_to(message, '❌ Формат: <code>/xpaudit @username</code> или ответом на сообщение.', parse_mode='HTML')
+        return
+
+    econ = get_user_econ(user_id=target_id, user_tag=target_name)
+    try:
+        xp = max(0, int(econ.get('account_exp', 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        xp = 0
+    level, _, next_exp, bar = get_account_level(xp)
+    level_100_exp = account_exp_for_level(100)
+    msg_stats = econ.get('msg_stats', {}) if isinstance(econ.get('msg_stats'), dict) else {}
+    achievements = econ.get('achievements', [])
+    achievements_count = len(achievements) if isinstance(achievements, (list, tuple, set)) else 0
+    games_played = max(0, _audit_int(econ.get('mini_games_played', 0)))
+    game_wins = max(0, _audit_int(econ.get('mini_games_wins', 0)))
+    messages = max(0, _audit_int(msg_stats.get('total_count', 0)))
+    work_exp = max(0, _audit_int(econ.get('work_exp', 0)))
+    stars_donated = max(0, _audit_int(econ.get('stars_donated', 0)))
+    season_points = max(0, _audit_int(econ.get('season_points', 0)))
+    text_lines = [
+        '🔎 <b>АУДИТ ОПЫТА ПРОФИЛЯ</b>',
+        '━━━━━━━━━━━━━━━━━━━━',
+        f'👤 Игрок: <b>{html.escape(str(target_name or target_id))}</b> (<code>{int(target_id)}</code>)',
+        f'⭐ Текущий уровень: <b>{level}</b>',
+        f'📈 Всего EXP: <b>{xp:,}</b>',
+        f'🧮 До следующего уровня: <b>{max(0, next_exp - xp):,}</b> EXP',
+        f'🎯 Порог 100 уровня: <b>{level_100_exp:,}</b> EXP',
+        f'📊 Прогресс: <code>{bar}</code>',
+        '━━━━━━━━━━━━━━━━━━━━',
+        '<b>Контекст аккаунта:</b>',
+        f'💬 Сообщений: <b>{messages:,}</b> · 🎮 Мини-игр: <b>{games_played:,}</b> (побед: {game_wins:,})',
+        f'🏆 Достижений: <b>{achievements_count}</b> · 💼 Опыт работы: <b>{work_exp:,}</b>',
+        f'⭐ Сезонные очки: <b>{season_points:,}</b> · 💎 Stars в статистике: <b>{stars_donated:,}</b>',
+        '━━━━━━━━━━━━━━━━━━━━',
+        '<b>Последние начисления:</b>',
+    ]
+    history = econ.get('account_exp_history', [])
+    history = history if isinstance(history, list) else []
+    if not history:
+        text_lines.append('Истории старых начислений нет. Источник прежнего EXP определить задним числом нельзя; новые награды будут записываться после обновления.')
+    else:
+        for entry in reversed(history[-8:]):
+            if not isinstance(entry, dict):
+                continue
+            try:
+                gained = int(entry.get('gained', 0) or 0)
+                before = int(entry.get('before', 0) or 0)
+                after = int(entry.get('after', 0) or 0)
+                timestamp = time.strftime('%d.%m %H:%M', time.localtime(float(entry.get('time', 0) or 0)))
+            except (TypeError, ValueError, OverflowError, OSError):
+                timestamp, gained, before, after = '?', 0, 0, 0
+            source = html.escape(str(entry.get('source', 'activity'))[:64])
+            signed = f'{gained:+,}'
+            text_lines.append(f'• <code>{timestamp}</code> <b>{signed}</b> EXP · {source} · {before:,} → {after:,}')
+    bot.reply_to(message, '\n'.join(text_lines), parse_mode='HTML')
 
 
 def cmd_global_stats(message):
@@ -165,6 +243,13 @@ def register(ctx, only=None):
     bot = ctx["bot"]
     wanted = set(only) if only is not None else set(HANDLER_NAMES)
     registered = []
+    if "cmd_xp_audit" in wanted:
+        _handler = cmd_xp_audit
+        _handler = serialize_user_action(_handler)
+        bot.message_handler(commands=['xpaudit', 'xp_audit', 'опытаудит'])(_handler)
+        ctx["cmd_xp_audit"] = _handler
+        globals()["cmd_xp_audit"] = _handler
+        registered.append("cmd_xp_audit")
     if "cmd_global_stats" in wanted:
         _handler = cmd_global_stats
         _handler = serialize_user_action(_handler)

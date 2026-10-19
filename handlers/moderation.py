@@ -245,7 +245,7 @@ def cmd_admin_control(message):
     action=parts[0].lower()
     cid=str(message.chat.id)
     if action in ('функции','функция','админфункции'):
-        if get_admin_level(message.chat.id, message.from_user.id) != 4:
+        if not is_chat_owner(message.chat.id, message.from_user.id):
             bot.reply_to(message, '❌ Включать/выключать функции админов может только владелец чата.')
             return
     elif not can_admin_action(message.chat.id, message.from_user.id, 'admin_manage'):
@@ -503,7 +503,7 @@ def handle_messages(message):
     activity_reward_allowed = (now_ts - float(econ.get('last_activity_reward_time', 0) or 0)) >= 5.0
     if activity_reward_allowed:
         econ['last_activity_reward_time'] = now_ts
-        add_account_exp(user_id, user_name, 2, username=user_username)
+        add_account_exp(user_id, user_name, 2, username=user_username, source='message_activity')
         add_bp_exp(user_id, user_name, 2, username=user_username)
         mark_dirty()
     # A very rare pack sticker can appear organically in active groups.
@@ -590,7 +590,7 @@ def handle_messages(message):
             if reward <= 0:
                 return
             add_coins(user_id, user_name, reward, username=user_username)
-            add_account_exp(user_id, user_name, 20, username=user_username)
+            add_account_exp(user_id, user_name, 20, username=user_username, source='quiz_win')
             mark_dirty()
         u_link = make_link(chat_id, user_name, user_id, ping=True)
         bot.reply_to(message, f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b> 😻\n\nПервым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!", parse_mode='HTML')
@@ -733,10 +733,9 @@ def handle_messages(message):
                 bot.reply_to(message, "❌ Формат: <code>/take_coins @username 500</code>", parse_mode='HTML')
                 return
             t_econ = get_user_econ(t_uid, t_uname)
-            _set_balance(t_econ, max(0, t_econ.get('balance', 0) - t_amt))
-            mark_dirty()
+            removed, balance_after = _debit_balance_up_to(t_econ, t_amt, reason='Админское списание коинов')
             u_link = make_link(chat_id, t_uname, t_uid, ping=True)
-            bot.reply_to(message, f"💸 <b>Списано -{t_amt} 🪙</b> у {u_link}!\nБаланс: <b>{t_econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💸 <b>Списано -{removed} 🪙</b> у {u_link}!\nБаланс: <b>{balance_after} 🪙</b>", parse_mode='HTML')
             return
 
         m_give = re.match(r'^(?:/give_coins|/give|выдать\s+коины|начислить\s+коины)\s*(.*)', text, re.IGNORECASE)
@@ -760,10 +759,9 @@ def handle_messages(message):
                 bot.reply_to(message, "❌ Формат: <code>/give_coins @username 1000</code>", parse_mode='HTML')
                 return
             t_econ = get_user_econ(t_uid, t_uname)
-            _set_balance(t_econ, t_econ.get('balance', 0) + t_amt)
-            mark_dirty()
+            balance_after = _adjust_balance(t_econ, t_amt, reason='Админская выдача коинов')
             u_link = make_link(chat_id, t_uname, t_uid, ping=True)
-            bot.reply_to(message, f"🎁 <b>Начислено +{t_amt} 🪙</b> для {u_link}!\nБаланс: <b>{t_econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"🎁 <b>Начислено +{t_amt} 🪙</b> для {u_link}!\nБаланс: <b>{balance_after} 🪙</b>", parse_mode='HTML')
             return
 
     # ТОРГОВЛЯ НА БИРЖЕ ТЕКСТОМ
@@ -825,7 +823,7 @@ def handle_messages(message):
                 with TRANSFER_LOCK:
                     m['vault'] = cur_vault - amt
                     if isinstance(p_econ.get('marriage'), dict): p_econ['marriage']['vault'] = m['vault']
-                    _set_balance(econ, max(0, int(econ.get('balance', 0) or 0)) + amt)
+                    _adjust_balance(econ, amt, reason='Снятие из семейного сейфа')
                     mark_dirty()
             bot.reply_to(message, f"💸 Вы взяли <b>{amt} 🪙</b> из семейного сейфа!\nОстаток: <b>{m['vault']} 🪙</b> 😸", parse_mode='HTML')
             return
@@ -938,27 +936,21 @@ def handle_messages(message):
         m_amt = re.search(r'(\d+)', text)
         if m_amt:
             amt = int(m_amt.group(1))
-            if amt <= 0 or econ['balance'] < amt:
-                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙 😿")
+            ok, moved, wallet_after, deposit_after = _bank_deposit(econ, amt, user_id=user_id)
+            if not ok:
+                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ.get('balance', 0)} 🪙 😿")
                 return
-            _adjust_balance(econ, -(amt))
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amt
-            check_achievements(user_id, user_name, 'bank_deposit', amt, chat_id, username=user_username)
-            mark_dirty()
-            bot.reply_to(message, f"🏦 Вы внесли <b>{amt} 🪙</b> на депозит в Ня-Банк! 😻\nНа депозите: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
+            check_achievements(user_id, user_name, 'bank_deposit', moved, chat_id, username=user_username)
+            bot.reply_to(message, f"🏦 Вы внесли <b>{moved} 🪙</b> на депозит в Ня-Банк! 😻\nНа депозите: <b>{deposit_after} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять всё'):
         econ = get_user_econ(user_id, user_name, username=user_username)
         update_bank_interest(econ)
-        dep = econ.get('bank_deposit', 0)
-        if dep <= 0:
+        ok, moved, wallet_after, deposit_after = _bank_withdraw(econ, user_id=user_id)
+        if not ok:
             bot.reply_to(message, "❌ Ваш банковский депозит пуст! 😿")
             return
-        _adjust_balance(econ, dep)
-        econ['bank_deposit'] = 0
-        econ['last_bank_calc'] = time.time()
-        mark_dirty()
-        bot.reply_to(message, f"💸 Вы забрали весь вклад из банка: <b>+{dep} 🪙</b>! 😸\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+        bot.reply_to(message, f"💸 Вы забрали весь вклад из банка: <b>+{moved} 🪙</b>! 😸\nБаланс: <b>{wallet_after} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять'):
         econ = get_user_econ(user_id, user_name, username=user_username)
@@ -966,16 +958,11 @@ def handle_messages(message):
         m_amt = re.search(r'(\d+)', text)
         if m_amt:
             amt = int(m_amt.group(1))
-            dep = econ.get('bank_deposit', 0)
-            if amt <= 0 or dep < amt:
-                bot.reply_to(message, f"❌ В банке недостаточно средств! На депозите: {dep} 🪙 😿")
+            ok, moved, wallet_after, deposit_after = _bank_withdraw(econ, amt, user_id=user_id)
+            if not ok:
+                bot.reply_to(message, f"❌ В банке недостаточно средств! На депозите: {econ.get('bank_deposit', 0)} 🪙 😿")
                 return
-            econ['bank_deposit'] -= amt
-            _adjust_balance(econ, amt)
-            if econ['bank_deposit'] == 0:
-                econ['last_bank_calc'] = time.time()
-            mark_dirty()
-            bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💸 Вы сняли <b>{moved} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{deposit_after} 🪙</b>", parse_mode='HTML')
         return
 
     # РП-КОМАНДЫ МОЖНО ОТКЛЮЧИТЬ ДЛЯ КОНКРЕТНОГО ЧАТА
@@ -986,7 +973,7 @@ def handle_messages(message):
             if text_lower == solo_cmd or text_lower.startswith(f"{solo_cmd} "):
                 sender_link = make_link(chat_id, user_name, user_id, ping=True)
                 check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
-                add_account_exp(user_id, user_name, 3, username=user_username)
+                add_account_exp(user_id, user_name, 3, username=user_username, source='rp_solo')
                 bot.send_message(chat_id, f"{solo_emoji} {sender_link} {solo_text}", parse_mode='HTML')
                 return
 
@@ -1013,7 +1000,7 @@ def handle_messages(message):
                     sender_link = make_link(chat_id, user_name, user_id, ping=True)
                     target_link = make_link(chat_id, target_user, target_user_id, ping=True)
                     check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
-                    add_account_exp(user_id, user_name, 3, username=user_username)
+                    add_account_exp(user_id, user_name, 3, username=user_username, source='rp_pair')
                     k_val = rp_data.get('karma', 0)
                     if k_val != 0:
                         change_karma(user_id, user_name, k_val)
@@ -1115,20 +1102,17 @@ def handle_messages(message):
         econ = get_user_econ(user_id, user_name, username=user_username)
         update_bank_interest(econ)
         if action in ('положить', 'внести', 'пополнить'):
-            if econ.get('balance', 0) < amount:
+            ok, moved, _wallet_after, deposit_after = _bank_deposit(econ, amount, user_id=user_id)
+            if not ok:
                 bot.reply_to(message, f"❌ В кошельке только <b>{econ.get('balance', 0)} 🪙</b>.", parse_mode='HTML')
                 return
-            _adjust_balance(econ, -(amount))
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amount
-            action_text = f"📥 На счёт внесено <b>{amount:,} 🪙</b>"
+            action_text = f"📥 На счёт внесено <b>{moved:,} 🪙</b>"
         else:
-            if econ.get('bank_deposit', 0) < amount:
+            ok, moved, _wallet_after, deposit_after = _bank_withdraw(econ, amount, user_id=user_id)
+            if not ok:
                 bot.reply_to(message, f"❌ На депозите только <b>{econ.get('bank_deposit', 0)} 🪙</b>.", parse_mode='HTML')
                 return
-            econ['bank_deposit'] -= amount
-            _adjust_balance(econ, amount)
-            action_text = f"📤 Со счёта снято <b>{amount:,} 🪙</b>"
-        mark_dirty()
+            action_text = f"📤 Со счёта снято <b>{moved:,} 🪙</b>"
         bot.reply_to(message, f"🏦 <b>НЯ-БАНК</b>\n{action_text}\n💳 В банке: <b>{econ.get('bank_deposit', 0):,} 🪙</b>\n💵 В кошельке: <b>{econ.get('balance', 0):,} 🪙</b>", parse_mode='HTML')
         return
 
@@ -1152,6 +1136,9 @@ def handle_messages(message):
         return
 
     # ТЕКСТОВЫЕ КОМАНДЫ
+    # Каталог работ поддерживает числовые карточки так же, как каталог бизнесов:
+    # «работа 1» / «робота 1» / «work 1» открывает конкретную профессию.
+    if re.fullmatch(r'(?:работа|работы|робота|work|job)\s+[#№]?\d+', text_lower): cmd_work(message); return
     # v0.3: concrete business cards are opened by plain text, e.g. "бизнес 1",
     # not only by slash commands. Keep the exact "бизнес"/"бизнесы" aliases below.
     if re.fullmatch(r'бизнес\s+\d+', text_lower): cmd_business(message); return
@@ -1272,7 +1259,7 @@ def handle_messages(message):
 
             _adjust_balance(econ, final_reward)
             econ['last_hourly'] = now_ts
-            add_account_exp(user_id, user_name, 10, username=user_username)
+            add_account_exp(user_id, user_name, 10, username=user_username, source='hourly_bonus')
             mark_dirty()
             check_achievements(user_id, user_name, 'bonuses', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'bonus', 1, chat_id, username=user_username)
@@ -1320,7 +1307,7 @@ def handle_messages(message):
                 result += f'\n✅ Победа! Выплата: <b>+{win} 🪙</b> (фактически x{effective_mult:.2f}) 😻'
             else:
                 result += f'\n💸 Вы проиграли <b>{bet} 🪙</b>. 😿'
-            add_account_exp(user_id, user_name, 5, username=user_username)
+            add_account_exp(user_id, user_name, 5, username=user_username, source='dice_bet')
             mark_dirty()
             check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'dice', 1, chat_id, username=user_username)
@@ -1411,7 +1398,7 @@ def handle_messages(message):
                     mark_dirty()
                     completed = []
                     try:
-                        add_account_exp(user_id, user_name, 5, username=user_username)
+                        add_account_exp(user_id, user_name, 5, username=user_username, source='slots_bet')
                         check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
                         completed = track_daily_task(user_id, user_name, 'slots', 1, chat_id, username=user_username)
                         mark_dirty()
@@ -1456,7 +1443,7 @@ def handle_messages(message):
         caught = random.choices(FISH_TYPES, weights=weights, k=1)[0]
         econ['last_fish_time'] = time.time()
         add_inventory_item(econ['fish_inventory'], caught[0])
-        add_account_exp(user_id, user_name, 8, username=user_username)
+        add_account_exp(user_id, user_name, 8, username=user_username, source='fishing')
         mark_dirty()
         check_achievements(user_id, user_name, 'fish', 1, chat_id, username=user_username)
         rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""
@@ -1480,7 +1467,7 @@ def handle_messages(message):
         caught = random.choices(HUNT_TYPES, weights=weights, k=1)[0]
         econ['last_hunt_time'] = time.time()
         add_inventory_item(econ['hunt_inventory'], caught[0])
-        add_account_exp(user_id, user_name, 8, username=user_username)
+        add_account_exp(user_id, user_name, 8, username=user_username, source='hunting')
         mark_dirty()
         check_achievements(user_id, user_name, 'hunt', 1, chat_id, username=user_username)
         rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""

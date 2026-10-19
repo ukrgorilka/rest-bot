@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import copy
 import contextvars
-from handlers.economy import _perform_job_shift
+from contextlib import nullcontext
+from handlers.economy import (
+    _perform_job_shift, _job_number_for_id, render_job_catalog, render_job_detail,
+)
 from services.rules import random_law, game_sentence
 
 
 _CALLBACK_ANSWERED = contextvars.ContextVar('nyabot_callback_answered', default=False)
+_STARS_PAYMENT_SAVE_FAILURES = set()
 
 
 def _answer_callback_query(call_id, text=None, show_alert=False, cache_time=0):
@@ -37,6 +41,577 @@ def _inject(ctx):
 
 
 HANDLER_NAMES = ['callback_inline', 'process_stars_pre_checkout', 'process_stars_successful_payment']
+
+
+def _apply_halloween_bp_rewards(econ):
+    """Apply every currently unlocked battle-pass reward exactly once.
+
+    Persistence and rollback are owned by the callback branch; this helper only
+    mutates the supplied profile and returns a compact receipt for the UI.
+    """
+    try:
+        bp_exp = max(0, int(econ.get('bp_exp', 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        bp_exp = 0
+    lvl, _, _, _ = get_user_bp_level(bp_exp)
+    paid_items = econ.get('paid_stars_items', [])
+    is_prem = bool(econ.get('bp_premium') or (
+        isinstance(paid_items, (list, tuple, set)) and 'bp_premium' in paid_items
+    ))
+
+    def normalized_claims(key):
+        raw = econ.get(key, [])
+        if not isinstance(raw, (list, tuple, set)):
+            raw = []
+        result = []
+        for value in raw:
+            try:
+                value = int(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if 1 <= value <= HALLOWEEN_BP_MAX_LEVEL and value not in result:
+                result.append(value)
+        return result
+
+    claimed_free = normalized_claims('bp_claimed_free')
+    claimed_prem = normalized_claims('bp_claimed_prem')
+    econ['bp_claimed_free'] = claimed_free
+    econ['bp_claimed_prem'] = claimed_prem
+    inventory = econ.setdefault('inventory', [])
+    if not isinstance(inventory, list):
+        inventory = []
+        econ['inventory'] = inventory
+    titles = econ.setdefault('titles', [])
+    if not isinstance(titles, list):
+        titles = []
+        econ['titles'] = titles
+
+    free_gains = 0
+    premium_gains = 0
+    granted = 0
+    milestone_free = {5: '🎃 Маленький фонарь', 10: '🕸 Паутинка', 25: '🦇 Летучая мышь'}
+    for level in range(1, lvl + 1):
+        if level not in claimed_free:
+            claimed_free.append(level)
+            free_gains += 100 * level
+            granted += 1
+            item = milestone_free.get(level)
+            if item and item not in inventory:
+                inventory.append(item)
+            if level == 15 and '🎃' not in inventory:
+                inventory.append('🎃')
+            if level == 30 and 'pumpkin_lord' not in titles:
+                titles.append('pumpkin_lord')
+                econ['active_title'] = 'pumpkin_lord'
+
+    if is_prem:
+        for level in range(1, lvl + 1):
+            if level not in claimed_prem:
+                claimed_prem.append(level)
+                premium_gains += 350 * level
+                granted += 1
+                if level == 10 and '🎃 Премиум-тыква' not in inventory:
+                    inventory.append('🎃 Премиум-тыква')
+                elif level == 20:
+                    activate_pet(econ, 'pumpkin_cat')
+                elif level == 30:
+                    purchased_themes = econ.setdefault('purchased_themes', ['default'])
+                    if not isinstance(purchased_themes, list):
+                        purchased_themes = ['default']
+                        econ['purchased_themes'] = purchased_themes
+                    if 'halloween' not in purchased_themes:
+                        purchased_themes.append('halloween')
+                    econ['profile_theme'] = 'halloween'
+
+    total = free_gains + premium_gains
+    if total:
+        _adjust_balance(econ, total, reason='Награды Battle Pass')
+    return {
+        'level': lvl,
+        'premium': is_prem,
+        'free_coins': free_gains,
+        'premium_coins': premium_gains,
+        'total_coins': total,
+        'granted': granted,
+    }
+
+
+def _durable_profile_transaction(econ, reason, fields, mutation, cost=0, extra_accounts=None, validate=None):
+    """Commit a profile/shop mutation to Neon with a field-scoped rollback.
+
+    ``fields`` lists the keys owned by this transaction on ``econ``. Optional
+    ``extra_accounts`` contains ``(profile, fields)`` pairs for shared objects
+    such as family houses. Wallet changes are compensated through _adjust_balance
+    so an unrelated balance update is not overwritten by a stale snapshot.
+    Returns (success, result_or_reason).
+    """
+    try:
+        price = int(cost or 0)
+    except (TypeError, ValueError, OverflowError):
+        return False, 'invalid_cost'
+    if price < 0:
+        return False, 'invalid_cost'
+
+    account_fields = [(econ, tuple(dict.fromkeys(fields or ())))]
+    for entry in (extra_accounts or []):
+        if not isinstance(entry, (tuple, list)) or len(entry) != 2 or not isinstance(entry[0], dict):
+            continue
+        target, target_fields = entry
+        existing = next((i for i, (profile, _keys) in enumerate(account_fields) if profile is target), None)
+        if existing is None:
+            account_fields.append((target, tuple(dict.fromkeys(target_fields or ()))))
+        else:
+            profile, old_keys = account_fields[existing]
+            account_fields[existing] = (profile, tuple(dict.fromkeys((*old_keys, *(target_fields or ())))))
+
+    snapshots = []
+    result = None
+    failure = None
+    charged = False
+    pre_mutation_balance = None
+    mutation_balance_delta = 0
+    with BALANCE_TX_LOCK:
+        with db_lock:
+            if validate is not None:
+                validation_error = validate()
+                if validation_error:
+                    return False, validation_error
+            if price > 0:
+                try:
+                    current_balance = int(econ.get('balance', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    current_balance = 0
+                if current_balance < price:
+                    return False, 'insufficient'
+
+            for profile, keys in account_fields:
+                field_snapshot = {
+                    key: (key in profile, copy.deepcopy(profile.get(key)))
+                    for key in keys
+                }
+                snapshots.append((profile, field_snapshot))
+
+            try:
+                if price > 0:
+                    _adjust_balance(econ, -price, reason=reason)
+                    charged = True
+                try:
+                    pre_mutation_balance = int(econ.get('balance', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    pre_mutation_balance = 0
+                result = mutation()
+                try:
+                    mutation_balance_delta = int(econ.get('balance', 0) or 0) - pre_mutation_balance
+                except (TypeError, ValueError, OverflowError):
+                    mutation_balance_delta = 0
+                mark_dirty()
+            except Exception as exc:
+                failure = f'mutation_error:{type(exc).__name__}'
+                if pre_mutation_balance is not None:
+                    try:
+                        mutation_balance_delta = int(econ.get('balance', 0) or 0) - pre_mutation_balance
+                    except (TypeError, ValueError, OverflowError):
+                        mutation_balance_delta = 0
+                for profile, field_snapshot in snapshots:
+                    for key, (existed, value) in field_snapshot.items():
+                        if existed:
+                            profile[key] = copy.deepcopy(value)
+                        else:
+                            profile.pop(key, None)
+                if mutation_balance_delta:
+                    _adjust_balance(econ, -mutation_balance_delta, reason=f'Откат начисления/списания: {reason}')
+                    mutation_balance_delta = 0
+                if charged:
+                    _adjust_balance(econ, price, reason=f'Откат операции: {reason}')
+                    charged = False
+                mark_dirty()
+
+    if failure is None and critical_save(reason, retries=3):
+        return True, result
+    if failure is None:
+        failure = 'save_failed'
+
+    # Roll back only the touched profile fields, not an old copy of the entire
+    # profile. This preserves concurrent/orthogonal progress during Neon I/O.
+    with BALANCE_TX_LOCK:
+        with db_lock:
+            for profile, field_snapshot in snapshots:
+                for key, (existed, value) in field_snapshot.items():
+                    if existed:
+                        profile[key] = copy.deepcopy(value)
+                    else:
+                        profile.pop(key, None)
+            if mutation_balance_delta:
+                _adjust_balance(econ, -mutation_balance_delta, reason=f'Откат начисления/списания: {reason}')
+                mutation_balance_delta = 0
+            if charged:
+                _adjust_balance(econ, price, reason=f'Откат не сохранённой операции: {reason}')
+                charged = False
+            mark_dirty()
+    critical_save(f'rollback {reason}', retries=2)
+    return False, failure
+
+
+def _purchase_coin_vehicle(econ, vehicle_id):
+    """Purchase one ordinary vehicle as a durable, idempotent transaction."""
+    info = VEHICLES.get(vehicle_id) if isinstance(VEHICLES, dict) else None
+    if not isinstance(info, dict):
+        return False, '❌ Машина не найдена в каталоге.'
+    try:
+        price = int(info.get('price', 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        price = 0
+    if price <= 0:
+        return False, '❌ Этот транспорт нельзя купить за коины.'
+
+    did_equip = False
+    had_equipped_vehicle = 'equipped_vehicle' in econ
+    old_equipped_vehicle = econ.get('equipped_vehicle')
+    had_legacy_vehicle = 'vehicle' in econ
+    old_legacy_vehicle = econ.get('vehicle')
+    with BALANCE_TX_LOCK:
+        with db_lock:
+            owned = econ.get('vehicle_inventory', [])
+            if not isinstance(owned, list):
+                owned = []
+                econ['vehicle_inventory'] = owned
+            if vehicle_id in owned:
+                return False, '❌ Этот транспорт уже куплен. Надеть его можно из гаража! 😸'
+            try:
+                balance = int(econ.get('balance', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                balance = 0
+            if balance < price:
+                return False, f'❌ Нужно {price:,} 🪙! 😿'
+            _adjust_balance(econ, -price, reason=f'Покупка машины: {info.get("name", vehicle_id)}')
+            owned.append(vehicle_id)
+            if not econ.get('equipped_vehicle') and not econ.get('vehicle'):
+                did_equip = True
+                econ['equipped_vehicle'] = vehicle_id
+                econ['vehicle'] = vehicle_id
+            mark_dirty()
+
+    if not critical_save(f'coin vehicle purchase {vehicle_id}', retries=3):
+        with BALANCE_TX_LOCK:
+            with db_lock:
+                # Reverse only this purchase; do not overwrite unrelated profile
+                # fields that might have changed while Neon I/O was in progress.
+                owned = econ.get('vehicle_inventory', [])
+                if isinstance(owned, list):
+                    try:
+                        owned.remove(vehicle_id)
+                    except ValueError:
+                        pass
+                _adjust_balance(econ, price, reason=f'Откат не сохранённой покупки машины: {vehicle_id}')
+                if did_equip:
+                    if had_equipped_vehicle:
+                        econ['equipped_vehicle'] = old_equipped_vehicle
+                    else:
+                        econ.pop('equipped_vehicle', None)
+                    if had_legacy_vehicle:
+                        econ['vehicle'] = old_legacy_vehicle
+                    else:
+                        econ.pop('vehicle', None)
+                mark_dirty()
+        critical_save(f'rollback coin vehicle purchase {vehicle_id}', retries=2)
+        return False, '⚠️ Не удалось сохранить покупку в Neon. Коины и гараж восстановлены.'
+    return True, f'🎉 Вы приобрели {info.get("name", vehicle_id)}! Машина сохранена в гараже. 😻'
+
+
+
+def _purchase_ordinary_business(econ, business_id):
+    """Buy a coin business durably, rejecting stale duplicate callbacks."""
+    info = BUSINESSES.get(business_id) if isinstance(BUSINESSES, dict) else None
+    if not isinstance(info, dict):
+        return False, 'not_found'
+    try:
+        price = int(info.get('price', 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        price = 0
+    if price <= 0:
+        return False, 'invalid_price'
+
+    def validate():
+        owned = econ.get('businesses', {})
+        if isinstance(owned, dict) and business_id in owned:
+            return 'already_owned'
+        return None
+
+    def mutate():
+        now = time.time()
+        businesses = econ.get('businesses')
+        if not isinstance(businesses, dict):
+            businesses = {}
+            econ['businesses'] = businesses
+        levels = econ.get('biz_levels')
+        if not isinstance(levels, dict):
+            levels = {}
+            econ['biz_levels'] = levels
+        prices = econ.get('biz_purchase_price')
+        if not isinstance(prices, dict):
+            prices = {}
+            econ['biz_purchase_price'] = prices
+        clocks = econ.get('biz_last_collect')
+        if not isinstance(clocks, dict):
+            clocks = {}
+            econ['biz_last_collect'] = clocks
+        carries = econ.get('biz_income_carry')
+        if not isinstance(carries, dict):
+            carries = {}
+            econ['biz_income_carry'] = carries
+        businesses[business_id] = now
+        levels[business_id] = 1
+        prices[business_id] = price
+        clocks[business_id] = now
+        carries[business_id] = 0.0
+        _record_business_tx(econ, {'type': 'buy', 'business': business_id, 'price': price, 'time': now})
+        stats = econ.get('stats')
+        if not isinstance(stats, dict):
+            stats = {}
+            econ['stats'] = stats
+        stats['biz_owned_total'] = len(businesses) + len(econ.get('donor_businesses', {}) or {})
+        if business_id == 'mars_colony':
+            stats['mars_owned'] = 1
+        elif business_id == 'intergalactic_port':
+            stats['port_owned'] = 1
+        return {'price': price, 'time': now, 'name': info.get('name', business_id)}
+
+    fields = [
+        'businesses', 'biz_levels', 'biz_purchase_price', 'biz_last_collect',
+        'biz_income_carry', 'business_transactions', 'stats',
+    ]
+    return _durable_profile_transaction(
+        econ, f'Покупка бизнеса: {business_id}', fields, mutate,
+        cost=price, validate=validate,
+    )
+
+
+def _upgrade_business_durably(econ, business_id, donor=False):
+    """Upgrade a business at its old income rate and atomically settle pending profit."""
+    catalog = DONOR_BUSINESSES if donor else BUSINESSES
+    info = catalog.get(business_id) if isinstance(catalog, dict) else None
+    if not isinstance(info, dict):
+        return False, 'not_found'
+    try:
+        levels = econ.get('biz_levels', {})
+        current_level = max(1, min(5, int((levels.get(business_id, 1) if isinstance(levels, dict) else 1) or 1)))
+        unit_cost = int(info.get('upgrade_cost', 5000 if donor else 0) or 0)
+        cost = unit_cost * current_level
+    except (TypeError, ValueError, OverflowError):
+        return False, 'invalid_price'
+    if current_level >= 5:
+        return False, 'max_level'
+    if cost <= 0:
+        return False, 'invalid_price'
+
+    def validate():
+        ownership = econ.get('donor_businesses', {}) if donor else econ.get('businesses', {})
+        if not isinstance(ownership, dict) or business_id not in ownership:
+            return 'not_owned'
+        live_levels = econ.get('biz_levels', {})
+        try:
+            live_level = max(1, min(5, int((live_levels.get(business_id, 1) if isinstance(live_levels, dict) else 1) or 1)))
+        except (TypeError, ValueError, OverflowError):
+            live_level = 1
+        if live_level != current_level:
+            return 'level_changed'
+        if live_level >= 5:
+            return 'max_level'
+        return None
+
+    def mutate():
+        # Settling occurs before changing the level, so old income is never
+        # recalculated retroactively at the new rate.
+        settled_net, settled_tax = _settle_business_net_profit(econ, business_id, time.time())
+        live_levels = econ.get('biz_levels')
+        if not isinstance(live_levels, dict):
+            live_levels = {}
+            econ['biz_levels'] = live_levels
+        next_level = current_level + 1
+        live_levels[business_id] = next_level
+        if donor:
+            owned = econ.get('donor_businesses')
+            owned[business_id] = next_level
+        else:
+            _record_business_tx(econ, {
+                'type': 'upgrade', 'business': business_id,
+                'from_level': current_level, 'to_level': next_level,
+                'cost': cost, 'time': time.time(),
+            })
+        return {'level': next_level, 'cost': cost, 'net': settled_net, 'tax': settled_tax}
+
+    fields = ['biz_levels', 'biz_last_collect', 'biz_income_carry', 'business_tax_paid']
+    if donor:
+        fields.extend(['donor_businesses', 'business_transactions'])
+    else:
+        fields.append('business_transactions')
+    return _durable_profile_transaction(
+        econ, f'{"Улучшение донатного бизнеса" if donor else "Улучшение бизнеса"}: {business_id}',
+        fields, mutate, cost=cost, validate=validate,
+    )
+
+
+def _sell_ordinary_business_durably(econ, business_id):
+    """Sell one ordinary business once, crediting its refund and settled net profit."""
+    info = BUSINESSES.get(business_id) if isinstance(BUSINESSES, dict) else None
+    if not isinstance(info, dict):
+        return False, 'not_found'
+    prices = econ.get('biz_purchase_price', {})
+    try:
+        purchase_price = int((prices.get(business_id, info.get('price', 0)) if isinstance(prices, dict) else info.get('price', 0)) or 0)
+    except (TypeError, ValueError, OverflowError):
+        purchase_price = 0
+    value = max(0, int(purchase_price * BUSINESS_SELL_RATE))
+
+    def validate():
+        businesses = econ.get('businesses', {})
+        if not isinstance(businesses, dict) or business_id not in businesses:
+            return 'already_sold'
+        return None
+
+    def mutate():
+        pending_net, pending_tax = _settle_business_net_profit(econ, business_id, time.time())
+        businesses = econ.get('businesses')
+        businesses.pop(business_id, None)
+        for field in ('biz_levels', 'biz_purchase_price', 'biz_last_collect', 'biz_income_carry'):
+            mapping = econ.get(field)
+            if isinstance(mapping, dict):
+                mapping.pop(business_id, None)
+        _adjust_balance(econ, value, reason=f'Возврат за продажу бизнеса: {business_id}')
+        _record_business_tx(econ, {
+            'type': 'sell', 'business': business_id, 'refund': value,
+            'pending_profit_gross': int(pending_net + pending_tax),
+            'pending_profit_net': pending_net, 'pending_tax': pending_tax, 'time': time.time(),
+        })
+        stats = econ.get('stats')
+        if not isinstance(stats, dict):
+            stats = {}
+            econ['stats'] = stats
+        stats['biz_owned_total'] = len(businesses) + len(econ.get('donor_businesses', {}) or {})
+        return {'value': value, 'pending_net': pending_net, 'pending_tax': pending_tax}
+
+    fields = [
+        'businesses', 'biz_levels', 'biz_purchase_price', 'biz_last_collect',
+        'biz_income_carry', 'business_transactions', 'business_tax_paid', 'stats',
+    ]
+    return _durable_profile_transaction(
+        econ, f'Продажа бизнеса: {business_id}', fields, mutate, cost=0, validate=validate,
+    )
+
+def _purchase_player_market_listing(buyer_id, buyer_name, buyer_username, listing_id):
+    """Purchase one player-market listing as a durable two-account transaction.
+
+    Returns (status, message), where status is success, failed, or expired.
+    Both account locks are acquired before the market lock; the listing and
+    both balances/inventories are revalidated and saved as one transaction.
+    """
+    lid = str(listing_id)
+    with PLAYER_MARKET_LOCK:
+        initial_listing = copy.deepcopy(db.get('player_market', {}).get(lid))
+    if not isinstance(initial_listing, dict):
+        return 'failed', '❌ Объявление уже продано или удалено.'
+    try:
+        seller_id = int(initial_listing.get('seller_id', 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        seller_id = 0
+    if seller_id == int(buyer_id):
+        return 'failed', '❌ Нельзя купить собственное объявление.'
+    if seller_id <= 0:
+        return 'failed', '❌ Повреждённое объявление. Покупка невозможна.'
+
+    failure_text = None
+    expired_listing = False
+    committed = False
+    buyer_econ = seller_econ = None
+    listing_before = None
+    price = qty = 0
+    kind = item_name = None
+
+    with serialized_multi_user_action(buyer_id, seller_id):
+        with PLAYER_MARKET_LOCK:
+            with BALANCE_TX_LOCK:
+                with db_lock:
+                    listing = db.get('player_market', {}).get(lid)
+                    if not isinstance(listing, dict):
+                        failure_text = '❌ Объявление уже продано или удалено.'
+                    else:
+                        try:
+                            current_seller_id = int(listing.get('seller_id', 0) or 0)
+                            created_at = float(listing.get('created_at', 0) or 0)
+                            price = int(listing.get('price', 0) or 0)
+                            qty = int(listing.get('qty', 0) or 0)
+                        except (TypeError, ValueError, OverflowError):
+                            current_seller_id = 0
+                            created_at = 0
+                            price = 0
+                            qty = 0
+                        kind = listing.get('kind')
+                        item_name = listing.get('item_name')
+                        catalog = FISH_TYPES if kind == 'fish' else HUNT_TYPES if kind == 'hunt' else None
+                        valid_names = {row[0] for row in catalog} if catalog else set()
+                        if current_seller_id != seller_id or current_seller_id <= 0:
+                            failure_text = '❌ Объявление изменилось. Обновите рынок.'
+                        elif time.time() - created_at > 86400:
+                            expired_listing = True
+                        elif price <= 0 or price > 10**12 or not 0 < qty <= 1_000_000 or item_name not in valid_names:
+                            failure_text = '❌ Объявление повреждено. Покупка невозможна.'
+                        else:
+                            buyer_econ = get_user_econ(buyer_id, buyer_name, username=buyer_username)
+                            seller_econ = get_user_econ(seller_id, listing.get('seller_name', 'Игрок'))
+                            try:
+                                balance = int(buyer_econ.get('balance', 0) or 0)
+                            except (TypeError, ValueError, OverflowError):
+                                balance = 0
+                            if balance < price:
+                                failure_text = f'❌ Нужно {price:,} 🪙.'
+                            else:
+                                listing_before = copy.deepcopy(listing)
+                                _adjust_balance(buyer_econ, -price, reason=f'Покупка на рынке игроков #{lid}')
+                                _adjust_balance(seller_econ, price, reason=f'Продажа на рынке игроков #{lid}')
+                                inv_key = 'fish_inventory' if kind == 'fish' else 'hunt_inventory'
+                                inv = buyer_econ.setdefault(inv_key, {})
+                                if not isinstance(inv, dict):
+                                    inv = {}
+                                    buyer_econ[inv_key] = inv
+                                try:
+                                    current_qty = max(0, int(inv.get(item_name, 0) or 0))
+                                except (TypeError, ValueError, OverflowError):
+                                    current_qty = 0
+                                inv[item_name] = current_qty + qty
+                                db.setdefault('player_market', {}).pop(lid, None)
+                                mark_dirty()
+                                committed = True
+
+            if committed and not critical_save(f'player market purchase {lid}', retries=3):
+                with BALANCE_TX_LOCK:
+                    with db_lock:
+                        # Compensate only the fields this deal changed so
+                        # unrelated buyer/seller progress is not erased.
+                        _adjust_balance(buyer_econ, price, reason=f'Откат сделки рынка игроков #{lid}')
+                        _adjust_balance(seller_econ, -price, reason=f'Откат сделки рынка игроков #{lid}')
+                        inv_key = 'fish_inventory' if kind == 'fish' else 'hunt_inventory'
+                        inv = buyer_econ.get(inv_key)
+                        if isinstance(inv, dict):
+                            try:
+                                current_qty = max(0, int(inv.get(item_name, 0) or 0))
+                            except (TypeError, ValueError, OverflowError):
+                                current_qty = 0
+                            restored_qty = max(0, current_qty - qty)
+                            if restored_qty:
+                                inv[item_name] = restored_qty
+                            else:
+                                inv.pop(item_name, None)
+                        db.setdefault('player_market', {})[lid] = listing_before
+                        mark_dirty()
+                critical_save(f'rollback player market purchase {lid}', retries=2)
+                failure_text = '⚠️ Neon не сохранила сделку. Деньги, ресурс и объявление восстановлены.'
+                committed = False
+
+    if expired_listing:
+        return 'expired', '⏳ Объявление истекло и больше не продаётся.'
+    if not committed:
+        return 'failed', failure_text or '❌ Сделка не выполнена.'
+    return 'success', '🛒 Покупка сохранена в Neon!'
 
 
 def callback_inline(call):
@@ -181,42 +756,69 @@ def callback_inline(call):
         if action_data.startswith('inv_equip_theme_'):
             theme_key = action_data.replace('inv_equip_theme_', '', 1)
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if theme_key not in THEMES or theme_key not in (econ.get('purchased_themes', ['default']) or ['default']):
-                _answer_callback_query(call.id, '❌ Этой темы нет в вашей коллекции.', show_alert=True)
+            if theme_key not in THEMES:
+                _answer_callback_query(call.id, '❌ Неизвестная тема.', show_alert=True)
                 return
-            econ['profile_theme'] = theme_key
-            mark_dirty()
+            def _validate_inventory_theme():
+                purchased = econ.get('purchased_themes', ['default']) or ['default']
+                if not isinstance(purchased, list) or theme_key not in purchased:
+                    return 'not_owned'
+                return None
+            ok, result = _durable_profile_transaction(
+                econ, f'Выбор темы: {theme_key}', ['profile_theme'],
+                lambda: econ.__setitem__('profile_theme', theme_key), cost=0,
+                validate=_validate_inventory_theme,
+            )
+            if not ok:
+                _answer_callback_query(call.id, '❌ Этой темы нет в вашей коллекции.' if result == 'not_owned' else '⚠️ Не удалось сохранить тему.', show_alert=True)
+                return
             render_inventory_view(chat_id, user_id, user_name, category='themes', message_id=call.message.message_id)
             _answer_callback_query(call.id, '✅ Тема активирована!')
             return
         if action_data.startswith('inv_equip_pet_'):
             pet_key = action_data.replace('inv_equip_pet_', '', 1)
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if pet_key not in PETS_DATA or pet_key not in (econ.get('pet_inventory', []) or []):
-                _answer_callback_query(call.id, '❌ Этого питомца нет в коллекции.', show_alert=True)
+            if pet_key not in PETS_DATA:
+                _answer_callback_query(call.id, '❌ Неизвестный питомец.', show_alert=True)
                 return
-            try:
-                activate_pet(econ, pet_key)
-                mark_dirty()
-                render_inventory_view(chat_id, user_id, user_name, category='pets', message_id=call.message.message_id)
-                _answer_callback_query(call.id, '✅ Питомец выбран!')
-            except Exception as exc:
-                print(f'[INVENTORY PET EQUIP ERROR] {exc}')
-                _answer_callback_query(call.id, '⚠️ Не удалось выбрать питомца.', show_alert=True)
+            def _validate_inventory_pet():
+                inventory = econ.get('pet_inventory', [])
+                if not isinstance(inventory, list) or pet_key not in inventory:
+                    return 'not_owned'
+                return None
+            ok, result = _durable_profile_transaction(
+                econ, f'Выбор питомца из инвентаря: {pet_key}', ['pet', 'pet_inventory'],
+                lambda: bool(activate_pet(econ, pet_key)), cost=0,
+                validate=_validate_inventory_pet,
+            )
+            if not ok:
+                _answer_callback_query(call.id, '❌ Этого питомца нет в коллекции.' if result == 'not_owned' else '⚠️ Не удалось сохранить питомца.', show_alert=True)
+                return
+            render_inventory_view(chat_id, user_id, user_name, category='pets', message_id=call.message.message_id)
+            _answer_callback_query(call.id, '✅ Питомец выбран!')
             return
         if action_data.startswith('inv_equip_vehicle_'):
             vehicle_key = action_data.replace('inv_equip_vehicle_', '', 1)
             econ = get_user_econ(user_id, user_name, username=user_username)
-            owned_vehicles = econ.get('vehicle_inventory', []) or []
             if vehicle_key not in VEHICLES and vehicle_key not in DONOR_VEHICLES:
                 _answer_callback_query(call.id, '❌ Неизвестный транспорт.', show_alert=True)
                 return
-            if vehicle_key not in owned_vehicles:
-                _answer_callback_query(call.id, '❌ Этого транспорта нет в гараже.', show_alert=True)
+            def _validate_inventory_vehicle():
+                owned = econ.get('vehicle_inventory', [])
+                if not isinstance(owned, list) or vehicle_key not in owned:
+                    return 'not_owned'
+                return None
+            def _equip_inventory_vehicle():
+                econ['equipped_vehicle'] = vehicle_key
+                econ['vehicle'] = vehicle_key
+                return vehicle_key
+            ok, result = _durable_profile_transaction(
+                econ, f'Выбор транспорта из инвентаря: {vehicle_key}', ['equipped_vehicle', 'vehicle'],
+                _equip_inventory_vehicle, cost=0, validate=_validate_inventory_vehicle,
+            )
+            if not ok:
+                _answer_callback_query(call.id, '❌ Этого транспорта нет в гараже.' if result == 'not_owned' else '⚠️ Не удалось сохранить выбранный транспорт.', show_alert=True)
                 return
-            econ['equipped_vehicle'] = vehicle_key
-            econ['vehicle'] = vehicle_key
-            mark_dirty()
             render_inventory_view(chat_id, user_id, user_name, category='vehicles', message_id=call.message.message_id)
             _answer_callback_query(call.id, '✅ Транспорт выбран!')
             return
@@ -328,53 +930,133 @@ def callback_inline(call):
 
         # СЕМЕЙНЫЙ ДОМ: КНОПКИ
         elif action_data.startswith('buy_house_'):
-            h_k = action_data.replace('buy_house_', '')
-            if h_k in FAMILY_HOUSES:
-                h_info = FAMILY_HOUSES[h_k]
+            h_k = action_data.replace('buy_house_', '', 1)
+            if h_k not in FAMILY_HOUSES:
+                _answer_callback_query(call.id, '❌ Дом не найден.', show_alert=True)
+                return
+            h_info = FAMILY_HOUSES[h_k]
+            price = int(h_info.get('price', 0) or 0)
+            if price <= 0:
+                _answer_callback_query(call.id, '❌ Этот дом не продаётся за коины.', show_alert=True)
+                return
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            marriage = econ.get('marriage')
+            if not isinstance(marriage, dict):
+                _answer_callback_query(call.id, '❌ Только для пар в браке!', show_alert=True)
+                return
+            try:
+                partner_id = int(marriage.get('partner_id', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                partner_id = 0
+            if partner_id <= 0:
+                _answer_callback_query(call.id, '❌ Не удалось определить второго супруга. Обновите профиль.', show_alert=True)
+                return
+
+            with serialized_multi_user_action(user_id, partner_id):
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                m = econ.get('marriage')
-                if not m:
-                    _answer_callback_query(call.id, "❌ Только для пар в браке!", show_alert=True)
-                    return
-                if econ['balance'] < h_info['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {h_info['price']:,} 🪙! 😿", show_alert=True)
-                    return
-                _adjust_balance(econ, -(h_info['price']))
-                m['house'] = h_k
-                m['furniture'] = []
-                m['last_house_calc'] = time.time()
-                p_econ = get_user_econ(m.get('partner_id'))
-                if p_econ.get('marriage'):
-                    p_econ['marriage']['house'] = h_k
-                    p_econ['marriage']['furniture'] = []
-                    p_econ['marriage']['last_house_calc'] = time.time()
-                mark_dirty()
-                _answer_callback_query(call.id, f"🎉 Вы приобрели {h_info['name']}! 😻", show_alert=True)
-                render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+                p_econ = get_user_econ(partner_id, user_tag=f'ID:{partner_id}')
+                def _validate_house_purchase():
+                    current = econ.get('marriage')
+                    if not isinstance(current, dict):
+                        return 'not_married'
+                    try:
+                        current_partner = int(current.get('partner_id', 0) or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        current_partner = 0
+                    return None if current_partner == partner_id else 'partner_changed'
+                def _apply_house_purchase():
+                    current = econ['marriage']
+                    current['house'] = h_k
+                    current['furniture'] = []
+                    current['last_house_calc'] = time.time()
+                    partner_marriage = p_econ.get('marriage')
+                    if isinstance(partner_marriage, dict):
+                        partner_marriage['house'] = h_k
+                        partner_marriage['furniture'] = []
+                        partner_marriage['last_house_calc'] = current['last_house_calc']
+                    return None
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка семейного дома: {h_k}', ['marriage'], _apply_house_purchase,
+                    cost=price, extra_accounts=[(p_econ, ['marriage'])], validate=_validate_house_purchase,
+                )
+            if not ok:
+                if result == 'insufficient':
+                    _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙! 😿', show_alert=True)
+                elif result == 'not_married':
+                    _answer_callback_query(call.id, '❌ Семейный статус изменился. Обновите меню.', show_alert=True)
+                elif result == 'partner_changed':
+                    _answer_callback_query(call.id, '❌ Состав семьи изменился. Обновите меню.', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку в Neon. Деньги и состояние дома восстановлены.', show_alert=True)
+                return
+            _answer_callback_query(call.id, f'🎉 Вы приобрели {h_info["name"]}! 😻', show_alert=True)
+            render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
             return
 
         elif action_data.startswith('buy_furn_'):
-            f_k = action_data.replace('buy_furn_', '')
-            if f_k in FAMILY_FURNITURE:
-                f_info = FAMILY_FURNITURE[f_k]
+            f_k = action_data.replace('buy_furn_', '', 1)
+            if f_k not in FAMILY_FURNITURE:
+                _answer_callback_query(call.id, '❌ Предмет мебели не найден.', show_alert=True)
+                return
+            f_info = FAMILY_FURNITURE[f_k]
+            price = int(f_info.get('price', 0) or 0)
+            if price <= 0:
+                _answer_callback_query(call.id, '❌ Эта мебель не продаётся за коины.', show_alert=True)
+                return
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            marriage = econ.get('marriage')
+            if not isinstance(marriage, dict):
+                _answer_callback_query(call.id, '❌ Только для пар в браке!', show_alert=True)
+                return
+            try:
+                partner_id = int(marriage.get('partner_id', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                partner_id = 0
+            if partner_id <= 0:
+                _answer_callback_query(call.id, '❌ Не удалось определить второго супруга. Обновите профиль.', show_alert=True)
+                return
+
+            with serialized_multi_user_action(user_id, partner_id):
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                m = econ.get('marriage')
-                if not m: return
-                furn_list = m.setdefault('furniture', [])
-                if f_k in furn_list:
-                    _answer_callback_query(call.id, "❌ Этот предмет мебели уже куплен!", show_alert=True)
-                    return
-                if econ['balance'] < f_info['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {f_info['price']:,} 🪙! 😿", show_alert=True)
-                    return
-                _adjust_balance(econ, -(f_info['price']))
-                furn_list.append(f_k)
-                p_econ = get_user_econ(m.get('partner_id'))
-                if p_econ.get('marriage'):
-                    p_econ['marriage'].setdefault('furniture', []).append(f_k)
-                mark_dirty()
-                _answer_callback_query(call.id, f"🛋 Куплена мебель: {f_info['name']}! 😻", show_alert=True)
-                render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+                p_econ = get_user_econ(partner_id, user_tag=f'ID:{partner_id}')
+                def _validate_furniture_purchase():
+                    current = econ.get('marriage')
+                    if not isinstance(current, dict):
+                        return 'not_married'
+                    try:
+                        current_partner = int(current.get('partner_id', 0) or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        current_partner = 0
+                    if current_partner != partner_id:
+                        return 'partner_changed'
+                    current_furniture = current.get('furniture', [])
+                    partner_marriage = p_econ.get('marriage')
+                    partner_furniture = partner_marriage.get('furniture', []) if isinstance(partner_marriage, dict) else []
+                    if f_k in (current_furniture or []) or f_k in (partner_furniture or []):
+                        return 'already_owned'
+                    return None
+                def _apply_furniture_purchase():
+                    econ['marriage'].setdefault('furniture', []).append(f_k)
+                    partner_marriage = p_econ.get('marriage')
+                    if isinstance(partner_marriage, dict):
+                        partner_marriage.setdefault('furniture', []).append(f_k)
+                    return None
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка семейной мебели: {f_k}', ['marriage'], _apply_furniture_purchase,
+                    cost=price, extra_accounts=[(p_econ, ['marriage'])], validate=_validate_furniture_purchase,
+                )
+            if not ok:
+                if result == 'insufficient':
+                    _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙! 😿', show_alert=True)
+                elif result == 'already_owned':
+                    _answer_callback_query(call.id, '❌ Этот предмет мебели уже куплен.', show_alert=True)
+                elif result in {'not_married', 'partner_changed'}:
+                    _answer_callback_query(call.id, '❌ Семейный статус изменился. Обновите меню.', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку в Neon. Коины и мебель восстановлены.', show_alert=True)
+                return
+            _answer_callback_query(call.id, f'🛋 Куплена мебель: {f_info["name"]}! 😻', show_alert=True)
+            render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
             return
 
         elif action_data == 'house_refresh':
@@ -401,7 +1083,7 @@ def callback_inline(call):
                     if not live_seed: return
                     if int(live.get('balance',0) or 0)<15: _answer_callback_query(call.id,'Нужно 15 🪙!',show_alert=True); return
                     if int(live_g.get('water_count',0) or 0)>=live_seed['water_req']: _answer_callback_query(call.id,'Земля уже достаточно влажная.',show_alert=True); return
-                    _set_balance(live, int(live.get('balance',0) or 0)-15)
+                    _adjust_balance(live, -15, reason='Полив грядки')
                     live_g['water_count']=int(live_g.get('water_count',0) or 0)+1
                     live_g['last_dry_calc']=time.time()
                     mark_dirty()
@@ -677,78 +1359,72 @@ def callback_inline(call):
 
         # АПТЕКА: КНОПКИ
         elif action_data.startswith('buy_med_'):
-            med_k = action_data.replace('buy_med_', '')
-            if med_k in PHARMACY_ITEMS:
-                med = PHARMACY_ITEMS[med_k]
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ['balance'] < med['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {med['price']} 🪙! 😿", show_alert=True)
-                    return
-                _adjust_balance(econ, -(med['price']))
-                cur_d = econ.get('disease')
-                if med['cure'] == 'all':
-                    econ['disease'] = None
+            med_k = action_data.replace('buy_med_', '', 1)
+            if med_k not in PHARMACY_ITEMS:
+                _answer_callback_query(call.id, '❌ Препарат не найден.', show_alert=True)
+                return
+            med = PHARMACY_ITEMS[med_k]
+            price = int(med.get('price', 0) or 0)
+            if price <= 0:
+                _answer_callback_query(call.id, '❌ Этот предмет не продаётся за коины.', show_alert=True)
+                return
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            current_disease = econ.get('disease')
+            if med.get('cure') != 'all' and current_disease != med.get('cure'):
+                diagnosis = MEME_DISEASES.get(current_disease, {}).get('name', 'другой диагноз')
+                _answer_callback_query(call.id, f'❌ Препарат не подходит: сейчас у вас {diagnosis}. Коины не списаны.', show_alert=True)
+                return
+
+            def _apply_medicine():
+                econ['disease'] = None
+                if med.get('cure') == 'all':
                     econ['disease_immunity_until'] = time.time() + 86400
-                    _answer_callback_query(call.id, "🧪 Панацея Айболита исцелила от всего и дала иммунитет на 24 часа! 😻", show_alert=True)
-                elif cur_d == med['cure']:
-                    econ['disease'] = None
-                    _answer_callback_query(call.id, f"✅ Вы выпили лекарство и полностью исцелились от {MEME_DISEASES[cur_d]['name']}! 😸", show_alert=True)
+                return 'all' if med.get('cure') == 'all' else 'specific'
+
+            ok, result = _durable_profile_transaction(
+                econ, f'Покупка лекарства: {med_k}',
+                ['disease', 'disease_immunity_until'], _apply_medicine, cost=price,
+            )
+            if not ok:
+                if result == 'insufficient':
+                    _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙! 😿', show_alert=True)
                 else:
-                    _answer_callback_query(call.id, f"💊 Препарат куплен, но у вас другой диагноз! 😸")
-                mark_dirty()
-                render_pharmacy_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+                    _answer_callback_query(call.id, '⚠️ Neon не сохранила покупку. Коины возвращены; попробуйте ещё раз.', show_alert=True)
+                return
+            if result == 'all':
+                _answer_callback_query(call.id, '🧪 Панацея Айболита исцелила от всего и дала иммунитет на 24 часа! 😻', show_alert=True)
+            else:
+                _answer_callback_query(call.id, f'✅ Вы выпили лекарство и полностью исцелились от {MEME_DISEASES[current_disease]["name"]}! 😸', show_alert=True)
+            render_pharmacy_view(chat_id, user_id, user_name, message_id=call.message.message_id)
             return
 
         # ХЕЛЛОУИН BATTLE PASS: КНОПКИ
         elif action_data == 'claim_bp_rewards':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            bp_exp = econ.get('bp_exp', 0)
-            lvl, _, _, _ = get_user_bp_level(bp_exp)
-            is_prem = econ.get('bp_premium', False)
-            claimed_free = econ.setdefault('bp_claimed_free', [])
-            claimed_prem = econ.setdefault('bp_claimed_prem', [])
-
-            free_gains = 0
-            for l in range(1, lvl + 1):
-                if l not in claimed_free:
-                    claimed_free.append(l)
-                    free_gains += 100 * l
-                    milestone_free = {5: '🎃 Маленький фонарь', 10: '🕸 Паутинка', 25: '🦇 Летучая мышь'}
-                    if l in milestone_free:
-                        econ.setdefault('inventory', [])
-                        if milestone_free[l] not in econ['inventory']:
-                            econ['inventory'].append(milestone_free[l])
-                    if l == 15 and '🎃' not in econ.get('inventory', []):
-                        econ.setdefault('inventory', []).append('🎃')
-                    if l == 30 and 'pumpkin_lord' not in econ.get('titles', []):
-                        econ.setdefault('titles', []).append('pumpkin_lord')
-                        econ['active_title'] = 'pumpkin_lord'
-
-            prem_gains = 0
-            if is_prem:
-                for l in range(1, lvl + 1):
-                    if l not in claimed_prem:
-                        claimed_prem.append(l)
-                        prem_gains += 350 * l
-                        if l == 10:
-                            econ.setdefault('inventory', [])
-                            if '🎃 Премиум-тыква' not in econ['inventory']:
-                                econ['inventory'].append('🎃 Премиум-тыква')
-                        if l == 20:
-                            p_info = PETS_DATA['pumpkin_cat']
-                            activate_pet(econ, 'pumpkin_cat')
-                        if l == 30:
-                            p_th = econ.setdefault('purchased_themes', ['default'])
-                            if 'halloween' not in p_th: p_th.append('halloween')
-                            econ['profile_theme'] = 'halloween'
-
-            tot_coins = free_gains + prem_gains
-            _adjust_balance(econ, tot_coins)
-            mark_dirty()
-            if tot_coins > 0:
-                _answer_callback_query(call.id, f"🎉 Награды получены: +{tot_coins:,} 🪙 и трофеи сезона! 😻", show_alert=True)
-            else:
+            bp_fields = [
+                'bp_claimed_free', 'bp_claimed_prem', 'inventory', 'titles',
+                'active_title', 'purchased_themes', 'profile_theme', 'pet', 'pet_inventory',
+            ]
+            ok, result = _durable_profile_transaction(
+                econ, 'battle pass reward claim', bp_fields,
+                lambda: _apply_halloween_bp_rewards(econ), cost=0,
+            )
+            if not ok:
+                print(f'[BATTLE PASS CLAIM ERROR] user={user_id}: {result}')
+                _answer_callback_query(call.id, '❌ Не удалось сохранить награды в Neon. Награды и баланс восстановлены; попробуйте ещё раз.', show_alert=True)
+                render_halloween_bp_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+                return
+            receipt = result
+            if receipt['granted'] <= 0:
                 _answer_callback_query(call.id, "Все доступные награды уже получены! Повышайте уровень BP. 😸", show_alert=True)
+                render_halloween_bp_view(chat_id, user_id, user_name, message_id=call.message.message_id)
+                return
+
+            _answer_callback_query(
+                call.id,
+                f"🎉 Получено наград: {receipt['granted']} · +{receipt['total_coins']:,} 🪙" if receipt['total_coins'] else f"🎉 Получено наград: {receipt['granted']}! 😻",
+                show_alert=True,
+            )
             render_halloween_bp_view(chat_id, user_id, user_name, message_id=call.message.message_id)
             return
 
@@ -1539,7 +2215,7 @@ def callback_inline(call):
             effective_mult = (win_amt / game['bet']) if game['bet'] > 0 else 0.0
 
             add_coins(user_id, user_name, win_amt, username=user_username)
-            add_account_exp(user_id, user_name, 20, username=user_username)
+            add_account_exp(user_id, user_name, 20, username=user_username, source='crash_cashout')
             econ = get_user_econ(user_id, user_name, username=user_username)
             econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amt - game['bet'])
             econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amt - game['bet'])
@@ -1647,21 +2323,59 @@ def callback_inline(call):
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_studio_'):
-            equip_key = action_data.replace('buy_studio_', '')
+            equip_key = action_data.replace('buy_studio_', '', 1)
+            if equip_key not in STREAM_EQUIP:
+                _answer_callback_query(call.id, '❌ Улучшение не найдено.', show_alert=True)
+                return
             econ = get_user_econ(user_id, user_name, username=user_username)
-            studio = econ.setdefault('stream_studio', {'mic': 1, 'webcam': 1, 'light': 1})
-            lvl = studio.get(equip_key, 1)
-            if lvl >= 4:
+            current_studio = econ.get('stream_studio')
+            if not isinstance(current_studio, dict):
+                current_studio = {'mic': 1, 'webcam': 1, 'light': 1}
+            try:
+                lvl = max(1, int(current_studio.get(equip_key, 1) or 1))
+            except (TypeError, ValueError, OverflowError):
+                lvl = 1
+            levels = STREAM_EQUIP[equip_key].get('levels', [])
+            if lvl >= 4 or lvl >= len(levels):
                 _answer_callback_query(call.id, "❌ Максимальный уровень! 🙀", show_alert=True)
                 return
-            cost = STREAM_EQUIP[equip_key]['levels'][lvl]
-            if econ['balance'] < cost:
-                _answer_callback_query(call.id, f"❌ Нужно {cost} 🪙! 😿", show_alert=True)
+            cost = int(levels[lvl] or 0)
+            if cost <= 0:
+                _answer_callback_query(call.id, '❌ Это улучшение не продаётся за коины.', show_alert=True)
                 return
-            _adjust_balance(econ, -(cost))
-            studio[equip_key] = lvl + 1
-            mark_dirty()
-            _answer_callback_query(call.id, f"🎉 Вы улучшили {STREAM_EQUIP[equip_key]['name']} до {lvl+1} уровня! 😻")
+            def _validate_studio_upgrade():
+                live = econ.get('stream_studio')
+                try:
+                    live_level = max(1, int(live.get(equip_key, 1) or 1)) if isinstance(live, dict) else 1
+                except (TypeError, ValueError, OverflowError):
+                    live_level = 1
+                if live_level != lvl:
+                    return 'level_changed'
+                if live_level >= 4 or live_level >= len(levels):
+                    return 'max_level'
+                return None
+            def _apply_studio_upgrade():
+                studio = econ.get('stream_studio')
+                if not isinstance(studio, dict):
+                    studio = {'mic': 1, 'webcam': 1, 'light': 1}
+                    econ['stream_studio'] = studio
+                studio[equip_key] = lvl + 1
+                return lvl + 1
+            ok, result = _durable_profile_transaction(
+                econ, f'Улучшение стрим-студии: {equip_key}', ['stream_studio'],
+                _apply_studio_upgrade, cost=cost, validate=_validate_studio_upgrade,
+            )
+            if not ok:
+                if result == 'insufficient':
+                    _answer_callback_query(call.id, f'❌ Нужно {cost} 🪙! 😿', show_alert=True)
+                elif result == 'level_changed':
+                    _answer_callback_query(call.id, 'ℹ️ Уровень уже изменился. Обновите магазин.', show_alert=True)
+                elif result == 'max_level':
+                    _answer_callback_query(call.id, '❌ Максимальный уровень! 🙀', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить улучшение. Коины и уровень восстановлены.', show_alert=True)
+                return
+            _answer_callback_query(call.id, f"🎉 Вы улучшили {STREAM_EQUIP[equip_key]['name']} до {result} уровня! 😻")
             send_shop_menu(chat_id, user_id, user_name, message_id=call.message.message_id)
 
         # СЕМЕНА САДА
@@ -1684,21 +2398,44 @@ def callback_inline(call):
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_seed_'):
-            s_id = action_data.replace('buy_seed_', '')
+            s_id = action_data.replace('buy_seed_', '', 1)
             if s_id in GARDEN_SEEDS:
                 seed = GARDEN_SEEDS[s_id]
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                slots=econ.get('garden') or []
-                if not isinstance(slots,list): slots=[slots]
-                if len(slots)>=get_garden_capacity(econ):
-                    _answer_callback_query(call.id, '❌ Нет свободной грядки!', show_alert=True); return
-                if econ['balance'] < seed['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {seed['price']} 🪙! 😿", show_alert=True)
+                try:
+                    price = int(seed.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
+                    _answer_callback_query(call.id, '❌ Это семя не продаётся за коины.', show_alert=True)
                     return
-                _adjust_balance(econ, -(seed['price']))
-                slots.append({'seed': s_id, 'planted_at': time.time(), 'water_count': 0, 'last_dry_calc': time.time()})
-                econ['garden'] = slots
-                mark_dirty()
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                def _validate_seed_purchase():
+                    garden = econ.get('garden') or []
+                    if not isinstance(garden, list):
+                        garden = [garden]
+                    if len(garden) >= get_garden_capacity(econ):
+                        return 'garden_full'
+                    return None
+                def _plant_seed():
+                    garden = econ.get('garden') or []
+                    if not isinstance(garden, list):
+                        garden = [garden]
+                    now = time.time()
+                    garden.append({'seed': s_id, 'planted_at': now, 'water_count': 0, 'last_dry_calc': now})
+                    econ['garden'] = garden
+                    return len(garden)
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка семени: {s_id}', ['garden'], _plant_seed,
+                    cost=price, validate=_validate_seed_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'garden_full':
+                        _answer_callback_query(call.id, '❌ Нет свободной грядки!', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и сад восстановлены.', show_alert=True)
+                    return
                 _answer_callback_query(call.id, f"🎉 Вы посадили {seed['name']}! Зайдите в /garden 😻", show_alert=True)
                 render_garden_view(chat_id, user_id, user_name, call.message.message_id)
 
@@ -1761,17 +2498,37 @@ def callback_inline(call):
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_buff_'):
-            b_id = action_data.replace('buy_buff_', '')
+            b_id = action_data.replace('buy_buff_', '', 1)
             if b_id in BUFF_ITEMS:
                 item = BUFF_ITEMS[b_id]
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ['balance'] < item['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙! 😿", show_alert=True)
+                try:
+                    price = int(item.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
+                    _answer_callback_query(call.id, '❌ Этот предмет не продаётся за коины.', show_alert=True)
                     return
-                _adjust_balance(econ, -(item['price']))
-                bp = econ.setdefault('backpack', {})
-                bp[b_id] = bp.get(b_id, 0) + 1
-                mark_dirty()
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                def _buy_buff():
+                    backpack = econ.get('backpack')
+                    if not isinstance(backpack, dict):
+                        backpack = {}
+                        econ['backpack'] = backpack
+                    try:
+                        count = max(0, int(backpack.get(b_id, 0) or 0))
+                    except (TypeError, ValueError, OverflowError):
+                        count = 0
+                    backpack[b_id] = count + 1
+                    return backpack[b_id]
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка расходника: {b_id}', ['backpack'], _buy_buff, cost=price,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и рюкзак восстановлены.', show_alert=True)
+                    return
                 _answer_callback_query(call.id, f"🎉 Куплен предмет: {item['short']}! Откройте /backpack 😻", show_alert=True)
 
         elif action_data == 'shop_cat_themes':
@@ -1792,36 +2549,67 @@ def callback_inline(call):
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_theme_'):
-            t_key = action_data.replace('buy_theme_', '')
+            t_key = action_data.replace('buy_theme_', '', 1)
             if t_key in THEMES:
                 if t_key in STARS_ONLY_THEME_IDS:
                     _answer_callback_query(call.id, '⭐️ Эта тема доступна только в /stars. В обычном магазине её купить нельзя.', show_alert=True)
                     return
                 theme = THEMES[t_key]
-                if int(theme.get('price', 0) or 0) <= 0:
+                try:
+                    price = int(theme.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
                     _answer_callback_query(call.id, '❌ Эта тема не продаётся в обычном магазине.', show_alert=True)
                     return
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                purchased = econ.setdefault('purchased_themes', ['default'])
-                if t_key in purchased:
-                    _answer_callback_query(call.id, "❌ Эта тема уже куплена! 😾", show_alert=True)
+                def _validate_theme_purchase():
+                    purchased = econ.get('purchased_themes', ['default'])
+                    if not isinstance(purchased, list):
+                        purchased = ['default']
+                    if t_key in purchased:
+                        return 'already_owned'
+                    return None
+                def _buy_theme():
+                    purchased = econ.get('purchased_themes')
+                    if not isinstance(purchased, list):
+                        purchased = ['default']
+                        econ['purchased_themes'] = purchased
+                    purchased.append(t_key)
+                    econ['profile_theme'] = t_key
+                    return t_key
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка темы: {t_key}', ['purchased_themes', 'profile_theme'],
+                    _buy_theme, cost=price, validate=_validate_theme_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, '❌ Эта тема уже куплена! 😾', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и тема восстановлены.', show_alert=True)
                     return
-                if econ['balance'] < theme['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {theme['price']} 🪙! 😿", show_alert=True)
-                    return
-                _adjust_balance(econ, -(theme['price']))
-                purchased.append(t_key)
-                econ['profile_theme'] = t_key
-                mark_dirty()
                 _answer_callback_query(call.id, f"🎉 Куплена тема {theme['name']}! 😻", show_alert=True)
                 send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
         elif action_data.startswith('set_theme_'):
-            t_key = action_data.replace('set_theme_', '')
+            t_key = action_data.replace('set_theme_', '', 1)
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if t_key in econ.get('purchased_themes', ['default']):
-                econ['profile_theme'] = t_key
-                mark_dirty()
+            if t_key in THEMES:
+                def _validate_set_theme():
+                    purchased = econ.get('purchased_themes', ['default']) or ['default']
+                    if not isinstance(purchased, list) or t_key not in purchased:
+                        return 'not_owned'
+                    return None
+                ok, result = _durable_profile_transaction(
+                    econ, f'Выбор темы профиля: {t_key}', ['profile_theme'],
+                    lambda: econ.__setitem__('profile_theme', t_key), cost=0,
+                    validate=_validate_set_theme,
+                )
+                if not ok:
+                    _answer_callback_query(call.id, '❌ Тема не куплена.' if result == 'not_owned' else '⚠️ Не удалось сохранить тему.', show_alert=True)
+                    return
                 _answer_callback_query(call.id, f"✅ Установлен стиль: {THEMES[t_key]['name']}! 😸")
                 send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
@@ -1933,7 +2721,7 @@ def callback_inline(call):
                     win_amt = process_casino_win(win_amt)
                     effective_mult = (win_amt / game['bet']) if game['bet'] > 0 else 0.0
                     add_coins(user_id, user_name, win_amt, username=user_username)
-                    add_account_exp(user_id, user_name, 50, username=user_username)
+                    add_account_exp(user_id, user_name, 50, username=user_username, source='mines_full_clear')
                     check_achievements(user_id, user_name, 'mines_wins', 1, chat_id, username=user_username)
                     mark_dirty()
 
@@ -1966,7 +2754,7 @@ def callback_inline(call):
             win_amt = process_casino_win(win_amt)
             effective_mult = (win_amt / game['bet']) if game['bet'] > 0 else 0.0
             add_coins(user_id, user_name, win_amt, username=user_username)
-            add_account_exp(user_id, user_name, 15, username=user_username)
+            add_account_exp(user_id, user_name, 15, username=user_username, source='mines_cashout')
             check_achievements(user_id, user_name, 'mines_wins', 1, chat_id, username=user_username)
             mark_dirty()
 
@@ -2106,7 +2894,7 @@ def callback_inline(call):
                 reward = game['reward']
                 exp_gain = game['exp']
                 add_coins(user_id, user_name, reward, username=user_username)
-                add_account_exp(user_id, user_name, exp_gain, username=user_username)
+                add_account_exp(user_id, user_name, exp_gain, username=user_username, source='classic_mines_win')
                 check_achievements(user_id, user_name, 'mines_wins', 1, chat_id, username=user_username)
 
                 text_board, markup = render_classic_mines_board(game_id)
@@ -2168,6 +2956,15 @@ def callback_inline(call):
             _answer_callback_query(call.id)
             return
 
+        elif action_data.startswith('biz_catalog_page:'):
+            raw_page = action_data.split(':', 1)[1]
+            if not raw_page.isdigit():
+                _answer_callback_query(call.id, '❌ Номер страницы некорректен.', show_alert=True)
+                return
+            _render_business_catalog(chat_id, user_id, user_name, message_id=call.message.message_id, page=int(raw_page))
+            _answer_callback_query(call.id)
+            return
+
         elif action_data.startswith('biz_detail_donor:'):
             _,b_id=action_data.split(':',1)
             if b_id not in DONOR_BUSINESSES:
@@ -2191,83 +2988,71 @@ def callback_inline(call):
             return
 
         elif action_data.startswith('biz_detail_buy:'):
-            _,b_id=action_data.split(':',1)
-            info=BUSINESSES.get(b_id)
+            _, b_id = action_data.split(':', 1)
+            info = BUSINESSES.get(b_id)
             if not info:
-                _answer_callback_query(call.id,'❌ Бизнес не найден.',show_alert=True); return
-            econ=get_user_econ(user_id,user_name,username=user_username)
+                _answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
+                return
+            econ = get_user_econ(user_id, user_name, username=user_username)
             _migrate_legacy_businesses(econ)
-            owned=econ.setdefault('businesses',{})
-            if b_id in owned:
-                _answer_callback_query(call.id,'❌ Бизнес уже куплен.',show_alert=True); return
-            price=int(info['price'])
-            if int(econ.get('balance',0) or 0)<price:
-                _answer_callback_query(call.id,f'❌ Нужно {price:,} 🪙.',show_alert=True); return
-            state_before=copy.deepcopy(econ)
-            purchase_now=time.time()
-            _adjust_balance(econ,-price)
-            owned[b_id]=purchase_now
-            econ.setdefault('biz_levels',{})[b_id]=1
-            econ.setdefault('biz_purchase_price',{})[b_id]=price
-            econ.setdefault('biz_last_collect',{})[b_id]=purchase_now
-            econ.setdefault('biz_income_carry',{})[b_id]=0.0
-            _record_business_tx(econ,{'type':'buy','business':b_id,'price':price,'time':purchase_now})
-            mark_dirty()
-            if not critical_save('business purchase', retries=3):
-                econ.clear(); econ.update(state_before); mark_dirty()
-                _answer_callback_query(call.id,'❌ Не удалось сохранить покупку в Neon. Деньги и бизнес возвращены.',show_alert=True)
+            ok, result = _purchase_ordinary_business(econ, b_id)
+            if not ok:
+                if result == 'already_owned':
+                    _answer_callback_query(call.id, '❌ Бизнес уже куплен.', show_alert=True)
+                elif result == 'insufficient':
+                    price = int(info.get('price', 0) or 0)
+                    _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙.', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку в Neon. Коины и бизнес восстановлены.', show_alert=True)
                 return
 
-            # The money/business transaction is durable at this point. Telegram must
-            # receive the success response before non-critical achievement/news/UI work,
-            # so a secondary failure can never turn a successful purchase into an error.
-            _answer_callback_query(call.id,'✅ Бизнес куплен! 😻')
+            # Commit the transaction before best-effort achievements/news work.
+            _answer_callback_query(call.id, '✅ Бизнес куплен! 😻')
             try:
-                econ.setdefault('stats',{})['biz_owned_total'] = len(econ.get('businesses',{}) or {}) + len(econ.get('donor_businesses',{}) or {})
-                check_achievements(user_id,user_name,'biz_bought',1,chat_id,username=user_username)
+                check_achievements(user_id, user_name, 'biz_bought', 1, chat_id, username=user_username)
                 if b_id == 'mars_colony':
-                    econ.setdefault('stats',{})['mars_owned'] = 1
-                    check_achievements(user_id,user_name,'mars_owned',0,chat_id,username=user_username)
+                    check_achievements(user_id, user_name, 'mars_owned', 0, chat_id, username=user_username)
                     publish_bot_news('📰 НОВОЕ ДОСТИЖЕНИЕ МИРА', f'{html.escape(user_name)} стал(а) владельцем {html.escape(info["name"])}.', kind='economy')
                 elif b_id == 'intergalactic_port':
-                    econ.setdefault('stats',{})['port_owned'] = 1
-                    check_achievements(user_id,user_name,'port_owned',0,chat_id,username=user_username)
+                    check_achievements(user_id, user_name, 'port_owned', 0, chat_id, username=user_username)
                     publish_bot_news('📰 НОВОЕ ДОСТИЖЕНИЕ МИРА', f'{html.escape(user_name)} приобрёл(а) {html.escape(info["name"])}.', kind='economy')
-                check_achievements(user_id,user_name,'biz_owned_total',0,chat_id,username=user_username)
+                check_achievements(user_id, user_name, 'biz_owned_total', 0, chat_id, username=user_username)
                 mark_dirty()
             except Exception as side_effect_error:
                 print(f'[BUSINESS PURCHASE SIDE EFFECT ERROR] {side_effect_error}')
 
-            _delete_message_quietly(chat_id,call.message.message_id)
-            detail_row=_business_by_number(next(i for i,b,_,d in _business_catalog() if b==b_id))
-            render_business_detail(chat_id,user_id,user_name,detail_row[0] if detail_row else 1)
+            _delete_message_quietly(chat_id, call.message.message_id)
+            detail = next((row for row in _business_catalog() if row[1] == b_id), None)
+            render_business_detail(chat_id, user_id, user_name, detail[0] if detail else 1)
             return
 
         elif action_data.startswith('biz_detail_up:'):
-            _,b_id=action_data.split(':',1)
-            info=BUSINESSES.get(b_id)
-            econ=get_user_econ(user_id,user_name,username=user_username)
-            if not info or b_id not in econ.get('businesses',{}):
-                _answer_callback_query(call.id,'❌ Сначала приобретите бизнес.',show_alert=True); return
-            lvl=_business_level(econ,b_id)
-            if lvl>=5:
-                _answer_callback_query(call.id,'❌ Максимальный 5-й уровень.',show_alert=True); return
-            cost=int(info.get('upgrade_cost',0) or 0)*lvl
-            if int(econ.get('balance',0) or 0)<cost:
-                _answer_callback_query(call.id,f'❌ Нужно {cost:,} 🪙.',show_alert=True); return
-            state_before=copy.deepcopy(econ)
-            settled_net, settled_tax = _settle_business_net_profit(econ,b_id,time.time())
-            _adjust_balance(econ,-cost)
-            econ.setdefault('biz_levels',{})[b_id]=lvl+1
-            _record_business_tx(econ,{'type':'upgrade','business':b_id,'from_level':lvl,'to_level':lvl+1,'cost':cost,'time':time.time()})
-            mark_dirty()
-            if not critical_save('business upgrade', retries=3):
-                econ.clear(); econ.update(state_before); mark_dirty()
-                _answer_callback_query(call.id,'❌ Не удалось сохранить улучшение в Neon. Изменение отменено.',show_alert=True)
+            _, b_id = action_data.split(':', 1)
+            info = BUSINESSES.get(b_id)
+            if not info:
+                _answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
                 return
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            ok, result = _upgrade_business_durably(econ, b_id, donor=False)
+            if not ok:
+                if result == 'not_owned':
+                    _answer_callback_query(call.id, '❌ Сначала приобретите бизнес.', show_alert=True)
+                elif result == 'max_level':
+                    _answer_callback_query(call.id, '❌ Максимальный 5-й уровень.', show_alert=True)
+                elif result == 'level_changed':
+                    _answer_callback_query(call.id, 'ℹ️ Уровень уже изменился. Обновите карточку.', show_alert=True)
+                elif result == 'insufficient':
+                    lvl = _business_level(econ, b_id)
+                    cost = int(info.get('upgrade_cost', 0) or 0) * lvl
+                    _answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙.', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить улучшение. Деньги, доход и уровень восстановлены.', show_alert=True)
+                return
+            settled_net = result['net']
             settled_note = f' Накопленное после налога: +{settled_net:,} 🪙.' if settled_net else ''
-            _answer_callback_query(call.id,f'⬆️ {info["short"]} улучшен до {lvl+1} уровня! 😻{settled_note}')
-            render_business_detail(chat_id,user_id,user_name,next(i for i,b,_,d in _business_catalog() if b==b_id),message_id=call.message.message_id)
+            _answer_callback_query(call.id, f'⬆️ {info["short"]} улучшен до {result["level"]} уровня! 😻{settled_note}')
+            row = next((row for row in _business_catalog() if row[1] == b_id), None)
+            render_business_detail(chat_id, user_id, user_name, row[0] if row else 1, message_id=call.message.message_id)
             return
 
         elif action_data.startswith('biz_detail_sell:'):
@@ -2277,7 +3062,11 @@ def callback_inline(call):
                 _answer_callback_query(call.id,'❌ Бизнес не найден.',show_alert=True); return
             idx=next(i for i,b,_,d in _business_catalog() if b==b_id)
             detail=BUSINESSES[b_id]
-            price=_business_purchase_price(econ,b_id)
+            prices = econ.get('biz_purchase_price', {})
+            try:
+                price = int((prices.get(b_id, detail.get('price', 0)) if isinstance(prices, dict) else detail.get('price', 0)) or 0)
+            except (TypeError, ValueError, OverflowError):
+                price = int(detail.get('price', 0) or 0)
             value=int(price*BUSINESS_SELL_RATE)
             kb=InlineKeyboardMarkup(row_width=2)
             kb.add(InlineKeyboardButton(f'✅ Продать за {value:,} 🪙',callback_data=f'biz_sell_confirm:{b_id}:{user_id}'),InlineKeyboardButton('❌ Отмена',callback_data=f'biz_detail_open:{idx}:{user_id}'))
@@ -2286,30 +3075,20 @@ def callback_inline(call):
             return
 
         elif action_data.startswith('biz_sell_confirm:'):
-            _,b_id=action_data.split(':',1)
-            econ=get_user_econ(user_id,user_name,username=user_username)
-            if b_id not in econ.get('businesses',{}):
-                _answer_callback_query(call.id,'❌ Бизнес уже продан.',show_alert=True); return
-            state_before=copy.deepcopy(econ)
-            purchase_price=_business_purchase_price(econ,b_id)
-            pending_net, pending_tax = _settle_business_net_profit(econ,b_id,time.time())
-            value=int(purchase_price*BUSINESS_SELL_RATE)
-            _adjust_balance(econ,value)
-            econ.get('businesses',{}).pop(b_id,None)
-            econ.get('biz_levels',{}).pop(b_id,None)
-            econ.get('biz_purchase_price',{}).pop(b_id,None)
-            econ.get('biz_last_collect',{}).pop(b_id,None)
-            econ.get('biz_income_carry',{}).pop(b_id,None)
-            _record_business_tx(econ,{'type':'sell','business':b_id,'refund':value,'pending_profit_gross':int(pending_net + pending_tax),'pending_profit_net':pending_net,'pending_tax':pending_tax,'time':time.time()})
-            mark_dirty()
-            if not critical_save('business sale', retries=3):
-                econ.clear(); econ.update(state_before); mark_dirty()
-                _answer_callback_query(call.id,'❌ Не удалось сохранить продажу в Neon. Изменение отменено.',show_alert=True)
+            _, b_id = action_data.split(':', 1)
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            ok, result = _sell_ordinary_business_durably(econ, b_id)
+            if not ok:
+                if result == 'already_sold':
+                    _answer_callback_query(call.id, '❌ Бизнес уже продан.', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить продажу в Neon. Возврат, доход и бизнес восстановлены.', show_alert=True)
                 return
-            econ.setdefault('stats',{})['biz_owned_total'] = len(econ.get('businesses',{}) or {}) + len(econ.get('donor_businesses',{}) or {})
-            _delete_message_quietly(chat_id,call.message.message_id)
+            value = result['value']
+            pending_net = result['pending_net']
+            _delete_message_quietly(chat_id, call.message.message_id)
             _answer_callback_query(call.id, f'💸 Бизнес продан. Возврат: {value:,} 🪙' + (f' + доход после налога: {pending_net:,} 🪙' if pending_net else ''))
-            render_business_view(chat_id,user_id,user_name)
+            render_business_view(chat_id, user_id, user_name)
             return
 
         elif action_data.startswith('biz_detail_open:'):
@@ -2320,96 +3099,71 @@ def callback_inline(call):
 
         # БИЗНЕС
         elif action_data.startswith('upg_donor_biz_'):
-            b_id = action_data.replace('upg_donor_biz_', '')
+            b_id = action_data.replace('upg_donor_biz_', '', 1)
             if b_id not in DONOR_BUSINESSES:
                 _answer_callback_query(call.id, '❌ Донатный бизнес не найден.', show_alert=True)
                 return
             econ = get_user_econ(user_id, user_name, username=user_username)
-            owned = econ.get('donor_businesses', {})
-            if b_id not in owned:
-                _answer_callback_query(call.id, '❌ Сначала приобретите этот бизнес в донатном магазине.', show_alert=True)
+            ok, result = _upgrade_business_durably(econ, b_id, donor=True)
+            if not ok:
+                if result == 'not_owned':
+                    _answer_callback_query(call.id, '❌ Сначала приобретите этот бизнес в донатном магазине.', show_alert=True)
+                elif result == 'max_level':
+                    _answer_callback_query(call.id, '❌ Максимальный 5-й уровень.', show_alert=True)
+                elif result == 'level_changed':
+                    _answer_callback_query(call.id, 'ℹ️ Уровень уже изменился. Обновите меню.', show_alert=True)
+                elif result == 'insufficient':
+                    level_map = econ.get('biz_levels', {})
+                    lvl = max(1, int(level_map.get(b_id, 1))) if isinstance(level_map, dict) else 1
+                    cost = int(DONOR_BUSINESSES[b_id].get('upgrade_cost', 5000)) * lvl
+                    _answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙.', show_alert=True)
+                else:
+                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить улучшение. Деньги, доход и уровень восстановлены.', show_alert=True)
                 return
-            biz_levels = econ.setdefault('biz_levels', {})
-            cur_lvl = max(1, int(biz_levels.get(b_id, 1)))
-            if cur_lvl >= 5:
-                _answer_callback_query(call.id, '❌ Максимальный 5-й уровень.', show_alert=True)
-                return
-            cost = int(DONOR_BUSINESSES[b_id].get('upgrade_cost', 5000)) * cur_lvl
-            if econ.get('balance', 0) < cost:
-                _answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙.', show_alert=True)
-                return
-            # Сначала фиксируем накопленное по старой ставке. Иначе апгрейд
-            # задним числом применился бы ко всему времени с прошлого сбора.
-            state_before = copy.deepcopy(econ)
-            old_profit, old_tax = _settle_business_net_profit(econ, b_id, time.time())
-            _adjust_balance(econ, -(cost))
-            biz_levels[b_id] = cur_lvl + 1
-            owned[b_id] = cur_lvl + 1
-            mark_dirty()
-            if not critical_save('donor business upgrade', retries=3):
-                econ.clear(); econ.update(state_before); mark_dirty()
-                _answer_callback_query(call.id, '❌ Не удалось сохранить улучшение в Neon. Изменение отменено.', show_alert=True)
-                return
-            settled_note = f' Накопленное после налога: +{old_profit:,} 🪙.' if old_profit else ''
-            _answer_callback_query(call.id, f'🎉 {DONOR_BUSINESSES[b_id]["name"]} улучшен до {cur_lvl+1} уровня!{settled_note}')
-            # Показываем уже новую ставку и новый баланс.
+            settled_note = f' Накопленное после налога: +{result["net"]:,} 🪙.' if result['net'] else ''
+            _answer_callback_query(call.id, f'🎉 {DONOR_BUSINESSES[b_id]["name"]} улучшен до {result["level"]} уровня!{settled_note}')
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
         elif action_data.startswith('upg_biz_'):
-            b_id = action_data.replace('upg_biz_', '')
+            b_id = action_data.replace('upg_biz_', '', 1)
             if b_id in BUSINESSES:
                 b_info = BUSINESSES[b_id]
+                if int(b_info.get('price', 0) or 0) <= 0:
+                    _answer_callback_query(call.id, '❌ Этот бизнес нельзя купить за коины.', show_alert=True)
+                    return
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                biz_levels = econ.setdefault('biz_levels', {})
-                cur_lvl = max(1, min(5, int(biz_levels.get(b_id, 1) or 1)))
-                if cur_lvl >= 5:
-                    _answer_callback_query(call.id, "❌ Достигнут максимальный 5-й уровень! 😸", show_alert=True)
+                ok, result = _upgrade_business_durably(econ, b_id, donor=False)
+                if not ok:
+                    if result == 'not_owned':
+                        _answer_callback_query(call.id, '❌ Сначала приобретите этот бизнес.', show_alert=True)
+                    elif result == 'max_level':
+                        _answer_callback_query(call.id, '❌ Достигнут максимальный 5-й уровень! 😸', show_alert=True)
+                    elif result == 'level_changed':
+                        _answer_callback_query(call.id, 'ℹ️ Уровень уже изменился. Обновите бизнес.', show_alert=True)
+                    elif result == 'insufficient':
+                        lvl = _business_level(econ, b_id)
+                        cost = int(b_info.get('upgrade_cost', 0) or 0) * lvl
+                        _answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙! 😿', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить улучшение. Деньги, доход и уровень восстановлены.', show_alert=True)
                     return
-                cost = b_info['upgrade_cost'] * cur_lvl
-                if econ['balance'] < cost:
-                    _answer_callback_query(call.id, f"❌ Нужно {cost:,} 🪙! 😿", show_alert=True)
-                    return
-                # Зафиксировать старую ставку до повышения уровня и применить налог.
-                state_before = copy.deepcopy(econ)
-                settled_net, settled_tax = _settle_business_net_profit(econ, b_id, time.time())
-                _adjust_balance(econ, -(cost))
-                biz_levels[b_id] = cur_lvl + 1
-                _record_business_tx(econ, {'type':'upgrade','business':b_id,'from_level':cur_lvl,'to_level':cur_lvl+1,'cost':cost,'time':time.time()})
-                mark_dirty()
-                if not critical_save('business upgrade (legacy button)', retries=3):
-                    econ.clear(); econ.update(state_before); mark_dirty()
-                    _answer_callback_query(call.id, '❌ Не удалось сохранить улучшение в Neon. Изменение отменено.', show_alert=True)
-                    return
-                settled_note = f" Накопленное после налога: +{settled_net:,} 🪙." if settled_net else ''
-                _answer_callback_query(call.id, f"🎉 {b_info['short']} улучшен(а) до {cur_lvl+1} уровня! 😻{settled_note}")
+                settled_note = f' Накопленное после налога: +{result["net"]:,} 🪙.' if result['net'] else ''
+                _answer_callback_query(call.id, f'🎉 {b_info["short"]} улучшен(а) до {result["level"]} уровня! 😻{settled_note}')
                 render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
         elif action_data.startswith('buy_biz_'):
-            b_id = action_data.replace('buy_biz_', '')
+            b_id = action_data.replace('buy_biz_', '', 1)
             if b_id in BUSINESSES:
                 b_info = BUSINESSES[b_id]
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                user_biz = econ.setdefault('businesses', {})
-                biz_levels = econ.setdefault('biz_levels', {})
-                if b_id in user_biz:
-                    _answer_callback_query(call.id, "❌ Этот бизнес уже куплен! 😾", show_alert=True)
-                    return
-                if econ['balance'] < b_info['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
-                    return
-                state_before = copy.deepcopy(econ)
-                purchase_now = time.time()
-                _adjust_balance(econ, -(b_info['price']))
-                user_biz[b_id] = purchase_now
-                econ.setdefault('biz_last_collect', {})[b_id] = purchase_now
-                econ.setdefault('biz_income_carry', {})[b_id] = 0.0
-                biz_levels[b_id] = 1
-                econ.setdefault('biz_purchase_price', {})[b_id] = int(b_info['price'])
-                _record_business_tx(econ, {'type':'buy','business':b_id,'price':int(b_info['price']),'time':purchase_now})
-                mark_dirty()
-                if not critical_save('business purchase (legacy button)', retries=3):
-                    econ.clear(); econ.update(state_before); mark_dirty()
-                    _answer_callback_query(call.id, '❌ Не удалось сохранить покупку в Neon. Деньги и бизнес возвращены.', show_alert=True)
+                ok, result = _purchase_ordinary_business(econ, b_id)
+                if not ok:
+                    if result == 'already_owned':
+                        _answer_callback_query(call.id, '❌ Этот бизнес уже куплен! 😾', show_alert=True)
+                    elif result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {int(b_info.get("price", 0) or 0):,} 🪙! 😿', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку в Neon. Деньги и бизнес восстановлены.', show_alert=True)
                     return
                 _answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}! 😻")
                 try:
@@ -2425,95 +3179,169 @@ def callback_inline(call):
                 _answer_callback_query(call.id, '❌ Сначала купите обычный бизнес через /business или донатный через /stars.', show_alert=True)
                 return
             now = time.time()
+            # Keep the snapshot before settlement so a failed Neon write cannot
+            # consume the user's accumulated business time.
+            state_before = copy.deepcopy(econ)
+            period_text = _business_collection_period_text(econ, now)
             base_profit = collect_business_base_profit(econ, now)
             if base_profit <= 0:
-                _answer_callback_query(call.id, "⏳ Пока накопилось меньше 1 🪙. Подождите немного! 😿", show_alert=True)
+                _answer_callback_query(call.id, "⏳ Пока меньше 1 🪙. Дробный доход сохранён — попробуйте позже! 😿", show_alert=True)
                 return
-            state_before = copy.deepcopy(econ)
             total_profit, event_text = _apply_business_payout_modifiers(econ, base_profit, chat_id, user_id, user_name)
             _adjust_balance(econ, total_profit)
             mark_dirty()
             if not critical_save('business profit collection', retries=3):
                 econ.clear(); econ.update(state_before); mark_dirty()
-                _answer_callback_query(call.id, '❌ Не удалось сохранить прибыль в Neon. Начисление отменено.', show_alert=True)
+                _answer_callback_query(call.id, '❌ Neon не сохранил сбор. Прибыль и таймеры возвращены.', show_alert=True)
                 return
-            _answer_callback_query(call.id, f"💰 Собрано: +{total_profit:,} 🪙! 😻")
+            receipt = (
+                "🏢 <b>Сбор прибыли бизнесов</b>\n"
+                f"⏱ Период накопления: {period_text}\n"
+                f"{event_text.lstrip()}\n\n"
+                f"✅ <b>Начислено: +{total_profit:,} 🪙</b>\n"
+                f"💳 Баланс: <b>{int(econ.get('balance', 0) or 0):,} 🪙</b> 😸"
+            )
+            _answer_callback_query(call.id, f"✅ Начислено: +{total_profit:,} 🪙")
+            try:
+                bot.send_message(chat_id, receipt, parse_mode='HTML')
+            except Exception as receipt_error:
+                print(f'[BUSINESS COLLECTION RECEIPT ERROR] {receipt_error}')
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
         elif action_data.startswith('equip_veh_'):
-            v_id = action_data.replace('equip_veh_', '')
+            v_id = action_data.replace('equip_veh_', '', 1)
             econ = get_user_econ(user_id, user_name, username=user_username)
-            owned = econ.setdefault('vehicle_inventory', [])
-            if v_id not in owned or (v_id not in VEHICLES and v_id not in DONOR_VEHICLES):
-                _answer_callback_query(call.id, "❌ Эта машина не находится в вашем гараже.", show_alert=True)
+            if v_id not in VEHICLES and v_id not in DONOR_VEHICLES:
+                _answer_callback_query(call.id, '❌ Неизвестный транспорт.', show_alert=True)
                 return
-            econ['equipped_vehicle'] = v_id
-            econ['vehicle'] = v_id
-            mark_dirty()
+            def _validate_equip_vehicle():
+                owned = econ.get('vehicle_inventory', [])
+                if not isinstance(owned, list) or v_id not in owned:
+                    return 'not_owned'
+                return None
+            def _equip_vehicle():
+                econ['equipped_vehicle'] = v_id
+                econ['vehicle'] = v_id
+                return v_id
+            ok, result = _durable_profile_transaction(
+                econ, f'Выбор машины: {v_id}', ['equipped_vehicle', 'vehicle'],
+                _equip_vehicle, cost=0, validate=_validate_equip_vehicle,
+            )
+            if not ok:
+                _answer_callback_query(call.id, '❌ Эта машина не находится в вашем гараже.' if result == 'not_owned' else '⚠️ Не удалось сохранить выбор машины.', show_alert=True)
+                return
             info = DONOR_VEHICLES.get(v_id) or VEHICLES.get(v_id)
             _answer_callback_query(call.id, f"🚘 Надета: {info['name']}")
             render_garage_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data.startswith('buy_veh_'):
-            v_id = action_data.replace('buy_veh_', '')
-            if v_id in VEHICLES:
-                v_info = VEHICLES[v_id]
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                owned = econ.setdefault('vehicle_inventory', [])
-                if v_id in owned:
-                    _answer_callback_query(call.id, "❌ Этот транспорт уже куплен. Надеть его можно из гаража! 😸", show_alert=True)
-                    return
-                if econ['balance'] < v_info['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {v_info['price']} 🪙! 😿", show_alert=True)
-                    return
-
-                _adjust_balance(econ, -(v_info['price']))
-                owned.append(v_id)
-                # Новая машина автоматически надевается только если ничего не надето.
-                if not econ.get('equipped_vehicle') and not econ.get('vehicle'):
-                    econ['equipped_vehicle'] = v_id
-                    econ['vehicle'] = v_id
-                mark_dirty()
-                _answer_callback_query(call.id, f"🎉 Вы приобрели {v_info['name']}! Машина сохранена в гараже. 😻")
-                render_garage_view(chat_id, user_id, user_name, call.message.message_id)
+            v_id = action_data.replace('buy_veh_', '', 1)
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            purchased, purchase_message = _purchase_coin_vehicle(econ, v_id)
+            if not purchased:
+                _answer_callback_query(call.id, purchase_message, show_alert=True)
+                return
+            _answer_callback_query(call.id, purchase_message)
+            render_garage_view(chat_id, user_id, user_name, call.message.message_id)
+            return
 
         elif action_data.startswith('buy_rod_'):
-            r_id = action_data.replace('buy_rod_', '')
+            r_id = action_data.replace('buy_rod_', '', 1)
             if r_id in RODS:
                 r_info = RODS[r_id]
+                try:
+                    price = int(r_info.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
+                    _answer_callback_query(call.id, '❌ Эта удочка не продаётся за коины.', show_alert=True)
+                    return
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                owned = econ.setdefault('rod_inventory', [])
-                if r_id not in owned:
-                    if econ['balance'] < r_info['price']:
-                        _answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙! 😿", show_alert=True)
-                        return
-                    _adjust_balance(econ, -(r_info['price']))
-                    owned.append(r_id)
-                    action_text = f"🎉 Куплена и надета {r_info['name']}! 😻"
-                else:
-                    action_text = f"✅ Надета {r_info['name']}! 😸"
-                econ['equipped_rod'] = r_id
-                mark_dirty()
+                owned = econ.get('rod_inventory', [])
+                if not isinstance(owned, list):
+                    owned = []
+                already_owned = r_id in owned
+                def _validate_rod_purchase():
+                    live_owned = econ.get('rod_inventory', [])
+                    live_owned = live_owned if isinstance(live_owned, list) else []
+                    if not already_owned and r_id in live_owned:
+                        return 'already_owned'
+                    if already_owned and r_id not in live_owned:
+                        return 'inventory_changed'
+                    return None
+                def _equip_rod():
+                    live_owned = econ.get('rod_inventory')
+                    if not isinstance(live_owned, list):
+                        live_owned = []
+                        econ['rod_inventory'] = live_owned
+                    if r_id not in live_owned:
+                        live_owned.append(r_id)
+                    econ['equipped_rod'] = r_id
+                    return r_id
+                ok, result = _durable_profile_transaction(
+                    econ, f'{"Выбор" if already_owned else "Покупка"} удочки: {r_id}',
+                    ['rod_inventory', 'equipped_rod'], _equip_rod,
+                    cost=0 if already_owned else price, validate=_validate_rod_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, f'ℹ️ {r_info["name"]} уже куплена. Обновите меню.', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить удочку. Деньги и инвентарь восстановлены.', show_alert=True)
+                    return
+                action_text = f"✅ Надета {r_info['name']}! 😸" if already_owned else f"🎉 Куплена и надета {r_info['name']}! 😻"
                 _answer_callback_query(call.id, action_text)
                 return
 
         elif action_data.startswith('buy_bow_'):
-            b_id = action_data.replace('buy_bow_', '')
+            b_id = action_data.replace('buy_bow_', '', 1)
             if b_id in BOWS:
                 b_info = BOWS[b_id]
+                try:
+                    price = int(b_info.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
+                    _answer_callback_query(call.id, '❌ Этот лук не продаётся за коины.', show_alert=True)
+                    return
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                owned = econ.setdefault('bow_inventory', [])
-                if b_id not in owned:
-                    if econ['balance'] < b_info['price']:
-                        _answer_callback_query(call.id, f"❌ Нужно {b_info['price']} 🪙! 😿", show_alert=True)
-                        return
-                    _adjust_balance(econ, -(b_info['price']))
-                    owned.append(b_id)
-                    action_text = f"🎉 Куплен и надет {b_info['name']}! 😻"
-                else:
-                    action_text = f"✅ Надет {b_info['name']}! 😸"
-                econ['equipped_bow'] = b_id
-                mark_dirty()
+                owned = econ.get('bow_inventory', [])
+                if not isinstance(owned, list):
+                    owned = []
+                already_owned = b_id in owned
+                def _validate_bow_purchase():
+                    live_owned = econ.get('bow_inventory', [])
+                    live_owned = live_owned if isinstance(live_owned, list) else []
+                    if not already_owned and b_id in live_owned:
+                        return 'already_owned'
+                    if already_owned and b_id not in live_owned:
+                        return 'inventory_changed'
+                    return None
+                def _equip_bow():
+                    live_owned = econ.get('bow_inventory')
+                    if not isinstance(live_owned, list):
+                        live_owned = []
+                        econ['bow_inventory'] = live_owned
+                    if b_id not in live_owned:
+                        live_owned.append(b_id)
+                    econ['equipped_bow'] = b_id
+                    return b_id
+                ok, result = _durable_profile_transaction(
+                    econ, f'{"Выбор" if already_owned else "Покупка"} лука: {b_id}',
+                    ['bow_inventory', 'equipped_bow'], _equip_bow,
+                    cost=0 if already_owned else price, validate=_validate_bow_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, f'ℹ️ {b_info["name"]} уже куплен. Обновите меню.', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить лук. Деньги и инвентарь восстановлены.', show_alert=True)
+                    return
+                action_text = f"✅ Надет {b_info['name']}! 😸" if already_owned else f"🎉 Куплен и надет {b_info['name']}! 😻"
                 _answer_callback_query(call.id, action_text)
                 return
 
@@ -2523,50 +3351,40 @@ def callback_inline(call):
 
         elif action_data == 'bank_dep_100':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if econ['balance'] < 100:
+            ok, moved, wallet_after, _deposit_after = _bank_deposit(econ, 100, user_id=user_id)
+            if not ok:
                 _answer_callback_query(call.id, "❌ Недостаточно средств на руках! 😿", show_alert=True)
                 return
-            _adjust_balance(econ, -(100))
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + 100
-            check_achievements(user_id, user_name, 'bank_deposit', 100, chat_id, username=user_username)
-            mark_dirty()
+            check_achievements(user_id, user_name, 'bank_deposit', moved, chat_id, username=user_username)
             _answer_callback_query(call.id, "✅ Внесено 100 🪙 на депозит! 😸")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_dep_all':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            b = econ.get('balance', 0)
-            if b <= 0:
+            ok, moved, _wallet_after, _deposit_after = _bank_deposit(econ, user_id=user_id)
+            if not ok:
                 _answer_callback_query(call.id, "❌ У вас нет наличных коинов! 😿", show_alert=True)
                 return
-            _set_balance(econ, 0)
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + b
-            check_achievements(user_id, user_name, 'bank_deposit', b, chat_id, username=user_username)
-            mark_dirty()
-            _answer_callback_query(call.id, f"✅ Внесено {b} 🪙 на депозит! 😻")
+            check_achievements(user_id, user_name, 'bank_deposit', moved, chat_id, username=user_username)
+            _answer_callback_query(call.id, f"✅ Внесено {moved} 🪙 на депозит! 😻")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_wd_100':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            if econ.get('bank_deposit', 0) < 100:
+            ok, moved, _wallet_after, _deposit_after = _bank_withdraw(econ, 100, user_id=user_id)
+            if not ok:
                 _answer_callback_query(call.id, "❌ В банке меньше 100 🪙! 😿", show_alert=True)
                 return
-            econ['bank_deposit'] -= 100
-            _adjust_balance(econ, 100)
-            mark_dirty()
             _answer_callback_query(call.id, "✅ Снято 100 🪙 с депозита! 😸")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         elif action_data == 'bank_wd_all':
             econ = get_user_econ(user_id, user_name, username=user_username)
-            dep = econ.get('bank_deposit', 0)
-            if dep <= 0:
+            ok, moved, _wallet_after, _deposit_after = _bank_withdraw(econ, user_id=user_id)
+            if not ok:
                 _answer_callback_query(call.id, "❌ В банке нет средств! 😿", show_alert=True)
                 return
-            econ['bank_deposit'] = 0
-            _adjust_balance(econ, dep)
-            mark_dirty()
-            _answer_callback_query(call.id, f"✅ Снят весь вклад: {dep} 🪙! 😻")
+            _answer_callback_query(call.id, f"✅ Снят весь вклад: {moved} 🪙! 😻")
             render_bank_view(chat_id, user_id, user_name, call.message.message_id)
 
         # ЛОТЕРЕЯ
@@ -2630,7 +3448,7 @@ def callback_inline(call):
             drop['claimed'] = True
             reward = max(0, int(drop.get('reward', 0) or 0))
             add_coins(user_id, user_name, reward, username=user_username)
-            add_account_exp(user_id, user_name, 15, username=user_username)
+            add_account_exp(user_id, user_name, 15, username=user_username, source='chat_drop_claim')
 
             _answer_callback_query(call.id, f"🎉 Вы забрали +{reward} 🪙! 😻")
             u_link = make_link(chat_id, user_name, user_id, ping=True)
@@ -2641,9 +3459,67 @@ def callback_inline(call):
                 )
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
-        # ТРЕНИРОВКА ОПЫТА
+        # КАТАЛОГ РАБОТ: страницы и карточки с требованиями.
+        elif action_data in ('job_catalog', 'job_back'):
+            render_job_catalog(chat_id, user_id, user_name, message_id=call.message.message_id)
+            _answer_callback_query(call.id)
+            return
+
+        elif action_data.startswith('job_page:'):
+            raw_page = action_data.split(':', 1)[1]
+            try:
+                page = int(raw_page)
+                if page < 0:
+                    raise ValueError
+            except (TypeError, ValueError, OverflowError):
+                _answer_callback_query(call.id, '❌ Номер страницы некорректен.', show_alert=True)
+                return
+            render_job_catalog(chat_id, user_id, user_name,
+                               message_id=call.message.message_id, page=page)
+            _answer_callback_query(call.id)
+            return
+
+        elif action_data.startswith('job_detail:'):
+            raw_number = action_data.split(':', 1)[1]
+            try:
+                number = int(raw_number)
+                if number < 1:
+                    raise ValueError
+            except (TypeError, ValueError, OverflowError):
+                _answer_callback_query(call.id, '❌ Номер вакансии некорректен.', show_alert=True)
+                return
+            render_job_detail(chat_id, user_id, user_name, number,
+                              message_id=call.message.message_id)
+            _answer_callback_query(call.id)
+            return
+
+        elif action_data.startswith('train_job_catalog:'):
+            raw_page = action_data.split(':', 1)[1]
+            try:
+                page = max(0, int(raw_page))
+            except (TypeError, ValueError, OverflowError):
+                page = 0
+            _success, text_resp = train_work_exp(user_id, user_name, username=user_username)
+            _answer_callback_query(call.id, text_resp.replace('<b>', '').replace('</b>', ''), show_alert=True)
+            render_job_catalog(chat_id, user_id, user_name,
+                               message_id=call.message.message_id, page=page)
+            return
+
+        elif action_data.startswith('train_job_exp:'):
+            raw_number = action_data.split(':', 1)[1]
+            try:
+                number = int(raw_number)
+            except (TypeError, ValueError, OverflowError):
+                number = 1
+            _success, text_resp = train_work_exp(user_id, user_name, username=user_username)
+            _answer_callback_query(call.id, text_resp.replace('<b>', '').replace('</b>', ''), show_alert=True)
+            render_job_detail(chat_id, user_id, user_name, number,
+                              message_id=call.message.message_id)
+            return
+
+        # ТРЕНИРОВКА ОПЫТА (старые клавиатуры тоже остаются совместимыми).
         elif action_data == 'train_exp_btn':
-            success, text_resp = train_work_exp(user_id, user_name, username=user_username)
+            _success, text_resp = train_work_exp(user_id, user_name, username=user_username)
             _answer_callback_query(call.id, text_resp.replace('<b>', '').replace('</b>', ''), show_alert=True)
 
         # РАБОТА
@@ -2669,6 +3545,14 @@ def callback_inline(call):
                     )
                 except Exception as exc:
                     print(f'[WORK MESSAGE ERROR] user={user_id} job={job_id!r}: {exc}')
+            # An accepted shift (including a failed roll that grants +2 EXP) updates
+            # the same card into its cooldown/requirements state. A rejected attempt
+            # leaves the card untouched.
+            if job is not None:
+                number = _job_number_for_id(job_id)
+                if number is not None:
+                    render_job_detail(chat_id, user_id, user_name, number,
+                                      message_id=call.message.message_id)
 
         # БРАКИ
         elif raw_data.startswith('m_yes_') or raw_data.startswith('m_no_'):
@@ -2761,7 +3645,7 @@ def callback_inline(call):
                     win = process_casino_win(int(game['bet'] * 1.8))
                     effective_mult = (win / game['bet']) if game['bet'] > 0 else 0.0
                     add_coins(user_id, user_name, win, username=user_username)
-                    add_account_exp(user_id, user_name, 10, username=user_username)
+                    add_account_exp(user_id, user_name, 10, username=user_username, source='blackjack_win')
                     res = f"🎉 <b>Вы выиграли +{win} 🪙 (фактически x{effective_mult:.2f})!</b> 😻"
                 elif p_score == d_score:
                     add_coins(user_id, user_name, game['bet'], username=user_username)
@@ -2908,7 +3792,8 @@ def callback_inline(call):
 
         # НАСТРОЙКИ
         elif action_data == 'set_max_days':
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return
             sett = get_chat_settings(chat_id)
             sett['max_days'] = None
             mark_dirty()
@@ -2916,7 +3801,8 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_rp':
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return
             sett = get_chat_settings(chat_id)
             sett['rp_enabled'] = not sett.get('rp_enabled', True)
             mark_dirty()
@@ -2924,7 +3810,8 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_flood':
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return
             sett = get_chat_settings(chat_id)
             sett['flood_protection'] = not sett.get('flood_protection', False)
             mark_dirty()
@@ -2942,7 +3829,8 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_reactions':
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return
             sett = get_chat_settings(chat_id)
             sett['auto_reactions'] = not sett.get('auto_reactions', True)
             mark_dirty()
@@ -2950,7 +3838,8 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'toggle_welcome':
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return
             sett = get_chat_settings(chat_id)
             sett['welcome_enabled'] = not sett.get('welcome_enabled', True)
             mark_dirty()
@@ -2958,7 +3847,8 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
         elif action_data == 'set_remind_time':
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return
             sett = get_chat_settings(chat_id)
             opts = [10, 60, 1440]
             next_opt = opts[(opts.index(sett.get('remind_minutes', 60)) + 1) % len(opts)]
@@ -2982,7 +3872,8 @@ def callback_inline(call):
             render_private_settings(chat_id, user_id, call.message.message_id)
 
         elif action_data.startswith('set_chat_lang_'):
-            if not is_admin(chat_id, user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Недостаточно прав для настройки языка.', show_alert=True); return
             lang = action_data.rsplit('_', 1)[-1]
             if lang not in MOD_LANGS: return
             get_chat_settings(chat_id)['language'] = lang
@@ -2993,7 +3884,9 @@ def callback_inline(call):
             render_settings_view(chat_id, user_id, call.message.message_id)
 
         elif action_data == 'set_warn_limit':
-            if not is_admin(chat_id,user_id): return
+            if not can_admin_action(chat_id, user_id, 'settings'):
+                _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True)
+                return
             sett=get_chat_settings(chat_id)
             vals=[1,2,3,4,5,7,10]
             cur=int(sett.get('warn_limit',3) or 3); nxt=vals[(vals.index(cur)+1)%len(vals)] if cur in vals else 3
@@ -3141,91 +4034,209 @@ def callback_inline(call):
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
 
         elif action_data.startswith('buy_ring_'):
-            r_id = action_data.replace('buy_ring_', '')
+            r_id = action_data.replace('buy_ring_', '', 1)
             if r_id in RINGS:
                 r_info = RINGS[r_id]
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ['balance'] < r_info['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {r_info['price']} 🪙! 😿", show_alert=True)
+                try:
+                    price = int(r_info.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
+                    _answer_callback_query(call.id, '❌ Это кольцо не продаётся за коины.', show_alert=True)
                     return
-                _adjust_balance(econ, -(r_info['price']))
-                econ.setdefault('rings', []).append(r_id)
-                mark_dirty()
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                def _validate_ring_purchase():
+                    rings = econ.get('rings', [])
+                    if not isinstance(rings, list):
+                        rings = []
+                    if r_id in rings:
+                        return 'already_owned'
+                    return None
+                def _buy_ring():
+                    rings = econ.get('rings')
+                    if not isinstance(rings, list):
+                        rings = []
+                        econ['rings'] = rings
+                    rings.append(r_id)
+                    return r_id
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка кольца: {r_id}', ['rings'], _buy_ring,
+                    cost=price, validate=_validate_ring_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, '❌ Это кольцо уже куплено.', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и кольцо восстановлены.', show_alert=True)
+                    return
                 _answer_callback_query(call.id, f"🎉 Вы приобрели {r_info['name']}! 😻", show_alert=True)
 
         elif action_data.startswith('buy_title_'):
-            title_key = action_data.replace('buy_title_', '')
+            title_key = action_data.replace('buy_title_', '', 1)
             if title_key in TITLES:
                 item = TITLES[title_key]
                 if item.get('donor_only'):
                     _answer_callback_query(call.id, '💎 Этот титул доступен только за Telegram Stars в /stars.', show_alert=True)
                     return
-                if int(item.get('price', 0) or 0) <= 0:
+                try:
+                    price = int(item.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
                     _answer_callback_query(call.id, '❌ Этот титул нельзя купить в обычном магазине.', show_alert=True)
                     return
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                if title_key in econ.get('titles', []):
-                    _answer_callback_query(call.id, '❌ Титул уже куплен! 😾', show_alert=True)
+                def _validate_title_purchase():
+                    titles = econ.get('titles', [])
+                    if not isinstance(titles, list):
+                        titles = []
+                    if title_key in titles:
+                        return 'already_owned'
+                    return None
+                def _buy_title():
+                    titles = econ.get('titles')
+                    if not isinstance(titles, list):
+                        titles = []
+                        econ['titles'] = titles
+                    titles.append(title_key)
+                    econ['active_title'] = title_key
+                    econ['custom_title'] = None
+                    return title_key
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка титула: {title_key}', ['titles', 'active_title', 'custom_title'],
+                    _buy_title, cost=price, validate=_validate_title_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, '❌ Титул уже куплен! 😾', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и титул восстановлены.', show_alert=True)
                     return
-                if econ['balance'] < item['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙! 😿", show_alert=True)
-                    return
-                _adjust_balance(econ, -(item['price']))
-                econ.setdefault('titles', []).append(title_key)
-                econ['active_title'] = title_key
-                econ['custom_title'] = None
-                mark_dirty()
                 _answer_callback_query(call.id, f"🎉 Куплен титул {item['text']}! 😻", show_alert=True)
                 send_user_profile(chat_id, user_name, user_id, message_id_to_edit=call.message.message_id, username=user_username)
 
         elif action_data.startswith('buy_badge_'):
-            badge_key = action_data.replace('buy_badge_', '')
+            badge_key = action_data.replace('buy_badge_', '', 1)
             if badge_key in BADGES:
                 item = BADGES[badge_key]
+                try:
+                    price = int(item.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
+                    _answer_callback_query(call.id, '❌ Этот значок нельзя купить за коины.', show_alert=True)
+                    return
                 econ = get_user_econ(user_id, user_name, username=user_username)
-                if item['emoji'] in econ.get('inventory', []):
-                    _answer_callback_query(call.id, f"Значок {item['emoji']} уже есть! 😾", show_alert=True)
+                def _validate_badge_purchase():
+                    inventory = econ.get('inventory', [])
+                    if not isinstance(inventory, list):
+                        inventory = []
+                    if item['emoji'] in inventory:
+                        return 'already_owned'
+                    return None
+                def _buy_badge():
+                    inventory = econ.get('inventory')
+                    if not isinstance(inventory, list):
+                        inventory = []
+                        econ['inventory'] = inventory
+                    inventory.append(item['emoji'])
+                    econ['badge'] = item['emoji']
+                    return item['emoji']
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка значка: {badge_key}', ['inventory', 'badge'],
+                    _buy_badge, cost=price, validate=_validate_badge_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, f"Значок {item['emoji']} уже есть! 😾", show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и значок восстановлены.', show_alert=True)
                     return
-                if econ['balance'] < item['price']:
-                    _answer_callback_query(call.id, f"❌ Нужно {item['price']} 🪙! 😿", show_alert=True)
-                    return
-                _adjust_balance(econ, -(item['price']))
-                econ.setdefault('inventory', []).append(item['emoji'])
-                econ['badge'] = item['emoji']
-                mark_dirty()
                 _answer_callback_query(call.id, f"🎉 Куплен значок {item['emoji']}! 😻", show_alert=True)
 
         elif action_data.startswith('equip_pet_'):
-            pet_id=action_data.replace('equip_pet_',''); econ=get_user_econ(user_id,user_name,username=user_username)
-            if pet_id not in econ.get('pet_inventory',[]): _answer_callback_query(call.id,'❌ Питомца нет в инвентаре.',show_alert=True); return
-            activate_pet(econ,pet_id); _answer_callback_query(call.id,'🐾 Питомец выбран!'); render_pet_view(chat_id,user_id,user_name,call.message.message_id); return
+            pet_id = action_data.replace('equip_pet_', '', 1)
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            def _validate_equip_pet():
+                inventory = econ.get('pet_inventory', [])
+                if not isinstance(inventory, list) or pet_id not in inventory:
+                    return 'not_owned'
+                return None
+            ok, result = _durable_profile_transaction(
+                econ, f'Выбор питомца: {pet_id}', ['pet', 'pet_inventory'],
+                lambda: bool(activate_pet(econ, pet_id)), cost=0,
+                validate=_validate_equip_pet,
+            )
+            if not ok:
+                message = '❌ Питомца нет в инвентаре.' if result == 'not_owned' else '⚠️ Не удалось сохранить выбор питомца.'
+                _answer_callback_query(call.id, message, show_alert=True)
+                return
+            _answer_callback_query(call.id, '🐾 Питомец выбран!')
+            render_pet_view(chat_id, user_id, user_name, call.message.message_id)
+            return
 
         elif action_data.startswith('buy_pet_'):
-            pet_id = action_data.replace('buy_pet_', '')
+            pet_id = action_data.replace('buy_pet_', '', 1)
             if pet_id in PETS_DATA:
-                if pet_id in STARS_ONLY_PET_IDS:
-                    _answer_callback_query(call.id, '⭐️ Этот питомец доступен только в /stars. В обычном магазине его купить нельзя.', show_alert=True)
-                    return
                 p_data = PETS_DATA[pet_id]
-                if int(p_data.get('price', 0) or 0) <= 0:
+                econ = get_user_econ(user_id, user_name, username=user_username)
+                inventory = econ.get('pet_inventory', [])
+                if not isinstance(inventory, list):
+                    inventory = []
+                if pet_id in inventory:
+                    def _validate_owned_pet_equip():
+                        live = econ.get('pet_inventory', [])
+                        if not isinstance(live, list) or pet_id not in live:
+                            return 'inventory_changed'
+                        return None
+                    ok, result = _durable_profile_transaction(
+                        econ, f'Выбор уже купленного питомца: {pet_id}', ['pet', 'pet_inventory'],
+                        lambda: bool(activate_pet(econ, pet_id)), cost=0,
+                        validate=_validate_owned_pet_equip,
+                    )
+                    if ok:
+                        _answer_callback_query(call.id, '🐾 Питомец уже куплен — он выбран без повторной оплаты!')
+                        render_pet_view(chat_id, user_id, user_name, call.message.message_id)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить выбор питомца.', show_alert=True)
+                    return
+                if pet_id in STARS_ONLY_PET_IDS:
+                    _answer_callback_query(call.id, '⭐️ Этот питомец доступен только после успешной покупки в /stars.', show_alert=True)
+                    return
+                try:
+                    price = int(p_data.get('price', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    price = 0
+                if price <= 0:
                     _answer_callback_query(call.id, '❌ Этот питомец не продаётся в обычном магазине.', show_alert=True)
                     return
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                if econ.get('pet', {}).get('id') == pet_id:
-                    _answer_callback_query(call.id, "❌ Этот питомец уже у вас. 😸", show_alert=True)
+                def _validate_pet_purchase():
+                    live_inventory = econ.get('pet_inventory', [])
+                    if isinstance(live_inventory, list) and pet_id in live_inventory:
+                        return 'already_owned'
+                    return None
+                def _buy_pet():
+                    if not activate_pet(econ, pet_id):
+                        raise RuntimeError('pet activation failed')
+                    return pet_id
+                ok, result = _durable_profile_transaction(
+                    econ, f'Покупка питомца: {pet_id}', ['pet', 'pet_inventory'],
+                    _buy_pet, cost=price, validate=_validate_pet_purchase,
+                )
+                if not ok:
+                    if result == 'insufficient':
+                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
+                    elif result == 'already_owned':
+                        _answer_callback_query(call.id, '🐾 Питомец уже куплен — обновите список и выберите его без оплаты.', show_alert=True)
+                    else:
+                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и питомец восстановлены.', show_alert=True)
                     return
-                if pet_id == 'vip_griffin':
-                    # Грифон — Stars-only. Нулевой price в каталоге никогда не означает бесплатную выдачу.
-                    if 'pet_griffin' not in econ.setdefault('paid_stars_items', []):
-                        _answer_callback_query(call.id, "❌ Королевский Грифон доступен только после успешной оплаты 5 ⭐️ в Stars-магазине.", show_alert=True)
-                        return
-                else:
-                    if econ['balance'] < p_data['price']:
-                        _answer_callback_query(call.id, f"❌ Нужно {p_data['price']} 🪙! 😿", show_alert=True)
-                        return
-                    _adjust_balance(econ, -(p_data['price']))
-                activate_pet(econ, pet_id)
-                mark_dirty()
                 _answer_callback_query(call.id, f"🎉 Вы завели питомца {p_data['name']}! 😻", show_alert=True)
                 render_pet_view(chat_id, user_id, user_name, call.message.message_id)
 
@@ -3302,41 +4313,21 @@ def callback_inline(call):
             render_player_market(chat_id, user_id, user_name, call.message.message_id); _answer_callback_query(call.id); return
         elif action_data.startswith('pmarket_buy_'):
             lid = action_data.replace('pmarket_buy_', '', 1)
-            with PLAYER_MARKET_LOCK:
-                listing = db.get('player_market', {}).get(lid)
-                if not listing:
-                    _answer_callback_query(call.id, '❌ Объявление уже продано или удалено.', show_alert=True); return
-                seller_id = int(listing.get('seller_id', 0) or 0)
-                if seller_id == user_id:
-                    _answer_callback_query(call.id, '❌ Нельзя купить собственное объявление.', show_alert=True); return
-                if seller_id <= 0:
-                    db['player_market'].pop(lid, None); mark_dirty()
-                    _answer_callback_query(call.id, '❌ Повреждённое объявление удалено.', show_alert=True); return
+            status, result_text = _purchase_player_market_listing(
+                user_id, user_name, user_username, lid
+            )
+            if status == 'expired':
+                _expire_player_market_listings(user_id, time.time())
+                _answer_callback_query(call.id, result_text, show_alert=True)
+                render_player_market(chat_id, user_id, user_name, call.message.message_id)
+                return
+            if status != 'success':
+                _answer_callback_query(call.id, result_text, show_alert=True)
+                return
+            _answer_callback_query(call.id, result_text)
+            render_player_market(chat_id, user_id, user_name, call.message.message_id)
+            return
 
-                # Рынок — перевод денег между двумя аккаунтами, поэтому сначала
-                # фиксируем порядок user-locks, затем ещё раз читаем объявление.
-                with serialized_multi_user_action(user_id, seller_id):
-                    listing = db.get('player_market', {}).get(lid)
-                    if not listing:
-                        _answer_callback_query(call.id, '❌ Объявление уже продано или удалено.', show_alert=True); return
-                    seller_id = int(listing.get('seller_id', 0) or 0)
-                    if seller_id == user_id or seller_id <= 0:
-                        _answer_callback_query(call.id, '❌ Некорректное объявление.', show_alert=True); return
-                    econ = get_user_econ(user_id, user_name, username=user_username)
-                    price = int(listing.get('price', 0))
-                    if price <= 0:
-                        db['player_market'].pop(lid, None); mark_dirty()
-                        _answer_callback_query(call.id, '❌ Повреждённое объявление удалено.', show_alert=True); return
-                    if econ.get('balance', 0) < price:
-                        _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙.', show_alert=True); return
-                    seller = get_user_econ(seller_id, listing.get('seller_name', 'Игрок'))
-                    qty = max(1, int(listing.get('qty', 1) or 1))
-                    _adjust_balance(econ, -price)
-                    _adjust_balance(seller, price)
-                    inv = econ.setdefault('fish_inventory', {}) if listing.get('kind') == 'fish' else econ.setdefault('hunt_inventory', {})
-                    inv[listing['item_name']] = int(inv.get(listing['item_name'], 0)) + qty
-                    db['player_market'].pop(lid, None); mark_dirty()
-            _answer_callback_query(call.id, '🛒 Покупка совершена!'); render_player_market(chat_id, user_id, user_name, call.message.message_id); return
         elif action_data == 'raid_view':
             render_raid(chat_id, user_id, user_name, call.message.message_id); _answer_callback_query(call.id); return
         elif action_data == 'raid_start':
@@ -3528,11 +4519,13 @@ def _finalize_stars_success(econ, stars_amount, charge_id, **journal_fields):
         except Exception as exc:
             print(f'[STARS JOURNAL META ERROR] charge={charge_id}: {exc}')
     mark_dirty()
-    mark_stars_charge_processed(charge_id)
+    if charge_id and not mark_stars_charge_processed(charge_id):
+        _STARS_PAYMENT_SAVE_FAILURES.add(str(charge_id))
+        raise RuntimeError(f'Neon did not durably finalize Stars charge {charge_id}')
     return True
 
 
-def process_stars_successful_payment(message):
+def _process_stars_successful_payment_impl(message):
     try:
         sp = message.successful_payment
         payload = str(sp.invoice_payload or '')
@@ -3580,25 +4573,33 @@ def process_stars_successful_payment(message):
                 db.get('tgift_orders', {}).pop(token, None)
                 mark_dirty()
                 return
+            # Only the external Telegram send belongs in this try/except. Once
+            # send_gift succeeds the side effect cannot be rolled back: a later
+            # Neon journal failure must never trigger a refund and a second gift.
             try:
                 target_id = int(order['target_id'])
                 gift_id = str(order['gift_id'])
                 gift_text = str(order.get('text', ''))[:128]
                 if not bot.send_gift(user_id=target_id, gift_id=gift_id, text=gift_text or None):
                     raise RuntimeError('Telegram не подтвердил отправку подарка')
-                db.get('tgift_orders', {}).pop(token, None)
-                _finalize_stars_success(
-                    get_user_econ(message.from_user.id, getattr(message.from_user, 'first_name', None) or getattr(message.from_user, 'username', None) or 'Пользователь', username=getattr(message.from_user, 'username', None)),
-                    stars_amount, charge_id, product='tgift', target_id=target_id, gift_id=gift_id
-                )
-                mark_dirty()
-                bot.send_message(message.chat.id, '🎁 Подарок успешно отправлен! 😻')
             except Exception as gift_error:
                 print(f'[TGIFT SEND ERROR] {gift_error}')
                 _refund_and_mark_stars_payment(message, charge_id, 'tgift send failed')
                 db.get('tgift_orders', {}).pop(token, None)
                 mark_dirty()
                 bot.send_message(message.chat.id, '❌ Не удалось отправить подарок. Оплата возвращена, если Telegram разрешил возврат.')
+                return
+
+            db.get('tgift_orders', {}).pop(token, None)
+            mark_dirty()
+            # Keep finalization outside the send try/except. If Neon rejects it,
+            # the wrapper marks manual recovery and deliberately does not refund
+            # an already-delivered Telegram Gift.
+            _finalize_stars_success(
+                get_user_econ(message.from_user.id, getattr(message.from_user, 'first_name', None) or getattr(message.from_user, 'username', None) or 'Пользователь', username=getattr(message.from_user, 'username', None)),
+                stars_amount, charge_id, product='tgift', target_id=target_id, gift_id=gift_id
+            )
+            bot.send_message(message.chat.id, '🎁 Подарок успешно отправлен! 😻')
             return
 
         ok, reason = validate_stars_payload(
@@ -3954,7 +4955,7 @@ def process_stars_successful_payment(message):
                 pack = STARS_COIN_PACKS[pack_id]
                 coins_to_add = pack['coins']
                 _adjust_balance(econ, coins_to_add)
-                add_account_exp(buyer_id, user_name, int(stars_amount * 50), username=u.username)
+                add_account_exp(buyer_id, user_name, int(stars_amount * 50), username=u.username, source='stars_coin_pack')
                 mark_dirty()
                 _finalize_stars_success(econ, stars_amount, charge_id, product=prod_type_key)
                 
@@ -3989,7 +4990,7 @@ def process_stars_successful_payment(message):
                     exp_date = datetime.fromtimestamp(econ['vip_until'], tz=MSK_TZ).strftime('%d.%m.%Y %H:%M')
                     dur_str = f"на {days} дней (до {exp_date})"
                     
-                add_account_exp(buyer_id, user_name, int(stars_amount * 100), username=u.username)
+                add_account_exp(buyer_id, user_name, int(stars_amount * 100), username=u.username, source='stars_vip_pass')
                 econ.setdefault('paid_stars_items', [])
                 if days == -1 and 'pass_forever' not in econ['paid_stars_items']:
                     econ['paid_stars_items'].append('pass_forever')
@@ -4211,6 +5212,191 @@ def process_stars_successful_payment(message):
 
     except Exception as e:
         print(f"[SUCCESSFUL PAYMENT ERROR] {e}")
+
+
+def _stars_delivery_ids(message, payload):
+    """Resolve buyer/recipient IDs for the account locks used during delivery."""
+    try:
+        sender_id = int(message.from_user.id)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return 0, None, None
+    buyer_id = sender_id
+    target_id = None
+    token = None
+    payload = str(payload or '')
+    if payload.startswith('gift2|'):
+        parts = payload.split('|')
+        if len(parts) == 5:
+            try:
+                target_id = int(parts[3])
+                buyer_id = int(parts[4])
+            except (TypeError, ValueError, OverflowError):
+                target_id = None
+                buyer_id = sender_id
+    elif payload.startswith('gift_'):
+        parts = payload.split(':')
+        if len(parts) >= 3:
+            try:
+                target_id = int(parts[1])
+                buyer_id = int(parts[2])
+            except (TypeError, ValueError, OverflowError):
+                target_id = None
+                buyer_id = sender_id
+    elif payload.startswith('tgift:'):
+        token = payload.split(':', 1)[1].strip()
+        order = db.get('tgift_orders', {}).get(token, {})
+        try:
+            target_id = int(order.get('target_id', 0) or 0) or None
+        except (TypeError, ValueError, OverflowError):
+            target_id = None
+    else:
+        parts = payload.split(':')
+        if len(parts) > 1 and parts[1].isdigit():
+            buyer_id = int(parts[1])
+    return buyer_id, target_id, token
+
+
+def process_stars_successful_payment(message):
+    """Serialize payment recipients and roll back grants that Neon can't commit.
+
+    Telegram Stars payment delivery can be retried. Any in-game grant is now
+    committed before success is reported. If the final journal save fails, user
+    entitlements are restored and the charge becomes ``refund_pending``; replay
+    will retry the refund rather than grant the item again.
+    """
+    sp = getattr(message, 'successful_payment', None)
+    payload = str(getattr(sp, 'invoice_payload', '') or '')
+    charge_id = str(getattr(sp, 'telegram_payment_charge_id', '') or '')
+    if not sp or not charge_id:
+        # Telegram normally provides a charge id. The legacy implementation
+        # validates and rejects a missing id via start_stars_payment_journal.
+        return _process_stars_successful_payment_impl(message)
+
+    old_entry = copy.deepcopy(db.get('stars_payment_log', {}).get(charge_id))
+    if isinstance(old_entry, dict) and old_entry.get('status') == 'refund_pending':
+        refunded = _refund_and_mark_stars_payment(message, charge_id, 'retry pending failed Stars delivery refund')
+        try:
+            bot.reply_to(
+                message,
+                '✅ Неудачная выдача товара отменена, возврат выполнен.' if refunded else
+                '⚠️ Выдача товара заблокирована до возврата. Возврат будет повторен; предмет повторно не выдаётся.'
+            )
+        except Exception:
+            pass
+        return
+
+    buyer_id, target_id, tgift_token = _stars_delivery_ids(message, payload)
+    sender_id = int(getattr(getattr(message, 'from_user', None), 'id', 0) or 0)
+    lock_context = (
+        serialized_multi_user_action(sender_id, target_id)
+        if target_id and sender_id and target_id != sender_id
+        else nullcontext()
+    )
+
+    with lock_context:
+        # Resolve migrations before taking the snapshot so a rollback preserves
+        # all legacy-to-ID account migrations already required by this user.
+        user_ids = {value for value in (buyer_id, target_id) if value and value > 0}
+        snapshots = {}
+        sender = getattr(message, 'from_user', None)
+        buyer_name = (f"{getattr(sender, 'first_name', '') or ''} {getattr(sender, 'last_name', '') or ''}").strip() or getattr(sender, 'username', None) or 'Пользователь'
+        for uid in sorted(user_ids):
+            if uid == sender_id:
+                econ = get_user_econ(uid, buyer_name, username=getattr(sender, 'username', None))
+            else:
+                econ = get_user_econ(user_id=uid, user_tag=f'ID:{uid}')
+            snapshots[uid] = (econ, copy.deepcopy(econ))
+        processed_before = list(db.get('processed_stars_charges', []) or [])
+        stock_had_key = 'stars_hard_limited_stock' in db
+        stock_before = copy.deepcopy(db.get('stars_hard_limited_stock', {}))
+        order_before = None
+        order_had_key = False
+        if tgift_token:
+            orders = db.get('tgift_orders', {}) or {}
+            order_had_key = tgift_token in orders
+            order_before = copy.deepcopy(orders.get(tgift_token))
+        _STARS_PAYMENT_SAVE_FAILURES.discard(charge_id)
+
+        _process_stars_successful_payment_impl(message)
+
+        if charge_id not in _STARS_PAYMENT_SAVE_FAILURES:
+            return
+        _STARS_PAYMENT_SAVE_FAILURES.discard(charge_id)
+
+        # Telegram Gift delivery is an external, irreversible side effect. If
+        # sendGift already succeeded but the local final journal write failed,
+        # never refund a delivered gift or resend it. Record a manual-recovery
+        # terminal marker and attempt to persist it again.
+        if (isinstance(old_entry, dict) and old_entry.get('status') == 'processing' and
+                old_entry.get('grant_status') == 'granted'):
+            with db_lock:
+                entry = db.setdefault('stars_payment_log', {}).setdefault(charge_id, {})
+                entry.update({'status': 'completed', 'grant_status': 'granted', 'finished_at': time.time()})
+                processed = db.setdefault('processed_stars_charges', [])
+                if charge_id not in processed:
+                    processed.append(charge_id)
+                mark_dirty()
+            if not critical_save('recover already-granted Stars entitlement', retries=3):
+                print(f'[STARS MANUAL RECOVERY REQUIRED] charge={charge_id} was already marked granted.')
+            return
+
+        if payload.startswith('tgift:'):
+            with db_lock:
+                entry = db.setdefault('stars_payment_log', {}).setdefault(charge_id, {})
+                entry.update({
+                    'status': 'completed',
+                    'grant_status': 'granted',
+                    'manual_recovery_note': 'Telegram gift sent; final Neon commit failed; do not replay delivery',
+                    'finished_at': time.time(),
+                })
+                processed = db.setdefault('processed_stars_charges', [])
+                if charge_id not in processed:
+                    processed.append(charge_id)
+                mark_dirty()
+            if not critical_save('recover already-sent Telegram Gift journal', retries=3):
+                print(f'[STARS MANUAL RECOVERY REQUIRED] gift charge={charge_id}; Telegram delivery may already have succeeded.')
+            return
+
+        # Roll back all local entitlements before exposing a refund-pending row.
+        with db_lock:
+            for _uid, (econ, snapshot) in snapshots.items():
+                econ.clear()
+                econ.update(snapshot)
+            if stock_had_key:
+                db['stars_hard_limited_stock'] = stock_before
+            else:
+                db.pop('stars_hard_limited_stock', None)
+            if tgift_token:
+                orders = db.setdefault('tgift_orders', {})
+                if order_had_key:
+                    orders[tgift_token] = order_before
+                else:
+                    orders.pop(tgift_token, None)
+            db['processed_stars_charges'] = processed_before
+            buyer_for_log = int(buyer_id or sender_id or 0)
+            db.setdefault('stars_payment_log', {})[charge_id] = {
+                'status': 'refund_pending',
+                'grant_status': 'failed',
+                'payload': payload,
+                'amount': int(getattr(sp, 'total_amount', 0) or 0),
+                'buyer_id': buyer_for_log,
+                'started_at': float((old_entry or {}).get('started_at', 0) or time.time()),
+                'failure_reason': 'Neon refused final Stars grant save',
+                'updated_at': time.time(),
+            }
+            mark_dirty()
+
+        if not critical_save('persist Stars refund-pending state', retries=3):
+            print(f'[STARS MANUAL RECOVERY REQUIRED] Could not persist refund-pending state for charge={charge_id}.')
+        refunded = _refund_and_mark_stars_payment(message, charge_id, 'Stars entitlement persistence failed')
+        try:
+            bot.reply_to(
+                message,
+                '⚠️ Не удалось сохранить покупку в Neon. Выдача отменена; возврат выполнен.' if refunded else
+                '⚠️ Neon не подтвердила выдачу. Предмет не выдан повторно, платёж помечен для возврата; бот повторит попытку при следующем уведомлении.'
+            )
+        except Exception:
+            pass
 
 def register(ctx, only=None):
     """Register selected handlers from this feature module."""

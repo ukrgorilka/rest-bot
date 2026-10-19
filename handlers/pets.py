@@ -127,7 +127,7 @@ def cmd_catch(message):
                 t_econ['jail_until'] = now + 900
                 reward = 250
                 _adjust_balance(econ, reward)
-                add_account_exp(user_id, user_name, 35, username=message.from_user.username)
+                add_account_exp(user_id, user_name, 35, username=message.from_user.username, source='sheriff_arrest')
                 change_karma(user_id, user_name, 3)
                 mark_dirty()
         except Exception:

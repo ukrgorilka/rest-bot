@@ -7,6 +7,10 @@ unchanged.
 
 from __future__ import annotations
 
+import copy
+import html
+import math
+
 
 def _inject(ctx):
     for _name, _value in ctx.items():
@@ -41,9 +45,9 @@ def cmd_public_salary(message):
         profit=max(1,int(salary*0.25))
         if owner.get('balance',0)<salary:
             bot.reply_to(message,'⏳ У владельца пока недостаточно средств для выплаты зарплаты.'); return
-        _adjust_balance(owner, -(salary))
-        _adjust_balance(econ, salary)
-        _adjust_balance(owner, profit)
+        _adjust_balance(owner, -(salary), reason='Выплата зарплаты сотрудникам')
+        _adjust_balance(econ, salary, reason='Зарплата за работу')
+        _adjust_balance(owner, profit, reason='Прибыль бизнеса от сотрудников')
         es['next_due']=time.time()+3*86400; econ['employer_salary']=es; mark_dirty()
     bot.reply_to(message,f'💵 <b>Зарплата получена!</b> +{salary:,} 🪙\n🏢 Владелец получил прибыль +{profit:,} 🪙.',parse_mode='HTML')
 
@@ -137,8 +141,9 @@ def _perform_job_shift(user_id, user_name, user_username, job_id, chat_id):
     """Execute one work shift atomically and return a UI result tuple.
 
     The job table is validated before use, all state mutation happens under the
-    per-user callback lock plus the shared DB lock, and no Telegram network call
-    happens while the DB lock is held. A malformed job therefore becomes a safe
+    per-user action lock plus the canonical BALANCE_TX_LOCK -> db_lock order,
+    and no Telegram network call happens while the DB lock is held. A malformed
+    job therefore becomes a safe
     user-facing error instead of an exception escaping a work callback.
     """
     job = JOBS.get(job_id)
@@ -156,33 +161,227 @@ def _perform_job_shift(user_id, user_name, user_username, job_id, chat_id):
         print(f'[WORK DATA ERROR] Invalid job definition: {job_id!r} {job!r}')
         return False, '❌ Эта вакансия временно недоступна из-за ошибки данных. 😿', None, None
 
-    with db_lock:
-        econ = get_user_econ(user_id, user_name, username=user_username)
-        if int(econ.get('work_exp', 0) or 0) < req_exp:
-            return False, f'❌ Нужно минимум {req_exp} EXP опыта! 😿', None, None
-        now = time.time()
-        left = cooldown_text(econ.get('last_work_time', 0), 1800, econ)
-        if left:
-            return False, f'⏳ Отдохните еще: {left} 😿', None, None
-
-        success = random.randint(1, 100) <= chance
-        econ['last_work_time'] = now
-        if success:
-            pay = random.randint(min_pay, max_pay)
-            pay = int(pay * (1 + pet_bonus(econ, 'work_bonus') + get_vehicle_work_bonus(econ) + get_title_work_bonus(econ) + get_vip_work_bonus(econ)))
-            _adjust_balance(econ, pay)
-            econ['work_exp'] = int(econ.get('work_exp', 0) or 0) + exp_gain
-            gained_exp = exp_gain
-            result_text = f'✅ Зарплата: +{pay} 🪙 (+{exp_gain} EXP)! 😻'
-        else:
-            econ['work_exp'] = int(econ.get('work_exp', 0) or 0) + 2
-            gained_exp = 2
-            pay = 0
-            result_text = '❌ Вы ошиблись на смене! Получено +2 EXP. 😿'
-        add_account_exp(user_id, user_name, gained_exp, username=user_username)
-        mark_dirty()
+    # Monetary operations must always acquire BALANCE_TX_LOCK before db_lock.
+    # Otherwise this handler can deadlock against a payout that holds the balance
+    # lock while waiting for db_lock. add_account_exp() may enter both as well.
+    with BALANCE_TX_LOCK:
+        with db_lock:
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            if int(econ.get('work_exp', 0) or 0) < req_exp:
+                return False, f'❌ Нужно минимум {req_exp} EXP опыта! 😿', None, None
+            now = time.time()
+            left = cooldown_text(econ.get('last_work_time', 0), 1800, econ)
+            if left:
+                return False, f'⏳ Отдохните еще: {left} 😿', None, None
+            success = random.randint(1, 100) <= chance
+            econ['last_work_time'] = now
+            if success:
+                pay = random.randint(min_pay, max_pay)
+                pay = int(pay * (1 + pet_bonus(econ, 'work_bonus') + get_vehicle_work_bonus(econ) + get_title_work_bonus(econ) + get_vip_work_bonus(econ)))
+                _adjust_balance(econ, pay, reason='Оплата за работу')
+                econ['work_exp'] = int(econ.get('work_exp', 0) or 0) + exp_gain
+                gained_exp = exp_gain
+                result_text = f'✅ Зарплата: +{pay} 🪙 (+{exp_gain} EXP)! 😻'
+            else:
+                econ['work_exp'] = int(econ.get('work_exp', 0) or 0) + 2
+                gained_exp = 2
+                pay = 0
+                result_text = '❌ Вы ошиблись на смене! Получено +2 EXP. 😿'
+            add_account_exp(user_id, user_name, gained_exp, username=user_username, source=f'job:{job_id}')
+            mark_dirty()
     check_achievements(user_id, user_name, 'work_shifts', 1, chat_id, username=user_username) if success else None
     return success, result_text, pay, job
+
+
+def _job_catalog_entries():
+    """Return stable, one-based job numbers in the order shown to players."""
+    return [(number, job_id, job) for number, (job_id, job) in enumerate(JOBS.items(), 1)]
+
+
+def _job_number_for_id(job_id):
+    for number, current_id, _job in _job_catalog_entries():
+        if current_id == job_id:
+            return number
+    return None
+
+
+def _parse_work_number(text):
+    """Parse `работа 1`, `/work 1`, and common #/№ variants."""
+    parts = str(text or '').strip().split()
+    if len(parts) != 2:
+        return None
+    raw_number = parts[1].strip().lstrip('#№')
+    if not raw_number.isdigit():
+        return None
+    try:
+        number = int(raw_number)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number > 0 else None
+
+
+def render_job_catalog(chat_id, user_id, user_name, message_id=None, page=0):
+    """Render a compact, paginated work catalogue; numeric commands open cards."""
+    econ = get_user_econ(user_id, user_name)
+    try:
+        work_exp = max(0, int(econ.get('work_exp', 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        work_exp = 0
+
+    entries = _job_catalog_entries()
+    page_size = 6
+    page_count = max(1, (len(entries) + page_size - 1) // page_size)
+    try:
+        page = max(0, int(page))
+    except (TypeError, ValueError, OverflowError):
+        page = 0
+    page = min(page, page_count - 1)
+    current = entries[page * page_size:(page + 1) * page_size]
+
+    lines = [
+        '💼 <b>БИРЖА ТРУДА NYABOT</b> 😺',
+        f'📄 Страница <b>{page + 1}/{page_count}</b> · Всего профессий: <b>{len(entries)}</b>',
+        f'👤 Ваш опыт работы: <b>{work_exp:,} EXP</b>',
+        '━━━━━━━━━━━━━━━━━━━━',
+    ]
+    for number, _job_id, job in current:
+        try:
+            req_exp = max(0, int(job.get('req_exp', 0) or 0))
+            min_pay = max(0, int(job.get('min_pay', 0) or 0))
+            max_pay = max(min_pay, int(job.get('max_pay', min_pay) or min_pay))
+            chance = min(100, max(0, int(job.get('chance', 0) or 0)))
+        except (TypeError, ValueError, OverflowError):
+            req_exp, min_pay, max_pay, chance = 0, 0, 0, 0
+        expected_pay = int(round(((min_pay + max_pay) / 2) * chance / 100))
+        status = '✅ доступна' if work_exp >= req_exp else f'🔒 нужно ещё {req_exp - work_exp:,} EXP'
+        lines.append(
+            f"<b>{number}. {html.escape(str(job.get('name', 'Профессия')))}</b> — {status}\n"
+            f'   💵 {min_pay:,}–{max_pay:,} 🪙 при успехе · шанс {chance}% · в среднем ≈{expected_pay:,} 🪙/смену'
+        )
+    lines.extend([
+        '━━━━━━━━━━━━━━━━━━━━',
+        'Нажмите профессию или напишите <code>работа 1</code> (можно <code>робота 1</code>).',
+        '<i>Средний заработок рассчитан без бонусов питомца, транспорта, титула и VIP.</i>',
+    ])
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for number, _job_id, job in current:
+        name = str(job.get('name', 'Профессия'))
+        buttons.append(InlineKeyboardButton(
+            f'{number}. {name[:24]}', callback_data=f'job_detail:{number}:{user_id}'
+        ))
+    for index in range(0, len(buttons), 2):
+        markup.add(*buttons[index:index + 2])
+    if page_count > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton('⬅️ Назад', callback_data=f'job_page:{page - 1}:{user_id}'))
+        nav.append(InlineKeyboardButton(f'{page + 1}/{page_count}', callback_data='noop'))
+        if page + 1 < page_count:
+            nav.append(InlineKeyboardButton('Далее ➡️', callback_data=f'job_page:{page + 1}:{user_id}'))
+        markup.add(*nav)
+    markup.add(InlineKeyboardButton('🎓 Тренировка (+EXP)', callback_data=f'train_job_catalog:{page}:{user_id}'))
+
+    text = '\n'.join(lines)
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id,
+                                  reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+
+def render_job_detail(chat_id, user_id, user_name, number, message_id=None):
+    """Show one job's requirements, approximate pay, and gated work action."""
+    try:
+        number = int(number)
+    except (TypeError, ValueError, OverflowError):
+        number = 0
+    entries = _job_catalog_entries()
+    target = next((entry for entry in entries if entry[0] == number), None)
+    if target is None:
+        text = '❌ Такой вакансии нет. Откройте каталог работ: <code>работа</code>.'
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton('⬅️ Все работы', callback_data=f'job_catalog:{user_id}'))
+        if message_id:
+            try:
+                bot.edit_message_text(text, chat_id=chat_id, message_id=message_id,
+                                      reply_markup=markup, parse_mode='HTML')
+                return
+            except Exception:
+                pass
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        return
+
+    _number, job_id, job = target
+    econ = get_user_econ(user_id, user_name)
+    try:
+        work_exp = max(0, int(econ.get('work_exp', 0) or 0))
+        req_exp = max(0, int(job.get('req_exp', 0) or 0))
+        chance = min(100, max(0, int(job.get('chance', 0) or 0)))
+        min_pay = max(0, int(job.get('min_pay', 0) or 0))
+        max_pay = max(min_pay, int(job.get('max_pay', min_pay) or min_pay))
+        exp_gain = max(0, int(job.get('exp_gain', 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        text = '❌ Данные этой вакансии временно недоступны.'
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton('⬅️ Все работы', callback_data=f'job_catalog:{user_id}'))
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        return
+
+    expected_pay = int(round(((min_pay + max_pay) / 2) * chance / 100))
+    eligible = work_exp >= req_exp
+    try:
+        left = cooldown_text(econ.get('last_work_time', 0), 1800, econ)
+    except Exception:
+        left = 'не удалось проверить кулдаун'
+    available_now = eligible and not left
+
+    lines = [
+        f'💼 <b>РАБОТА #{number}: {html.escape(str(job.get("name", "Профессия")))}</b>',
+        '━━━━━━━━━━━━━━━━━━━━',
+        f'⭐ Требуемый опыт: <b>{req_exp:,} EXP</b>',
+        f'📈 Ваш опыт работы: <b>{work_exp:,} EXP</b>',
+        f'🎲 Шанс успешной смены: <b>{chance}%</b>',
+        f'💵 При успехе: <b>{min_pay:,}–{max_pay:,} 🪙</b>',
+        f'🧮 Приблизительно в среднем: <b>≈{expected_pay:,} 🪙 за смену</b> без бонусов',
+        f'🎓 Опыт за смену: <b>+{exp_gain} EXP</b> при успехе; при неудаче +2 EXP',
+        '⏱ Одна смена доступна раз в 30 минут.',
+        '━━━━━━━━━━━━━━━━━━━━',
+    ]
+    if not eligible:
+        lines.append(f'🔒 <b>Пока недоступна.</b> Не хватает <b>{req_exp - work_exp:,} EXP</b> опыта работы.')
+    elif left:
+        lines.append(f'⏳ <b>Сейчас работать нельзя.</b> Повторная смена будет доступна через {html.escape(str(left))}.')
+    else:
+        lines.append('✅ <b>Вы подходите и можете выйти на смену сейчас.</b>')
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    if available_now:
+        markup.add(InlineKeyboardButton('💼 Работать', callback_data=f'do_job_{job_id}:{user_id}'))
+    elif not eligible:
+        markup.add(InlineKeyboardButton('🎓 Получить опыт', callback_data=f'train_job_exp:{number}:{user_id}'))
+    markup.add(InlineKeyboardButton('📋 Все работы', callback_data=f'job_page:{(number - 1) // 6}:{user_id}'))
+    nav = []
+    if number > 1:
+        nav.append(InlineKeyboardButton('⬅️ Предыдущая', callback_data=f'job_detail:{number - 1}:{user_id}'))
+    if number < len(entries):
+        nav.append(InlineKeyboardButton('Следующая ➡️', callback_data=f'job_detail:{number + 1}:{user_id}'))
+    if nav:
+        markup.add(*nav)
+
+    text = '\n'.join(lines)
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id,
+                                  reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 
 def cmd_work(message):
@@ -190,25 +389,11 @@ def cmd_work(message):
         return
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     user_id = message.from_user.id
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-
-    lines = [
-        "💼 <b>БИРЖА ТРУДА И ВАКАНСИЙ</b> 😺",
-        "━━━━━━━━━━━━━━━━━━━━",
-        f"👤 Ваш опыт работы: <b>{econ.get('work_exp', 0)} EXP</b>\n",
-        "<b>Доступные вакансии:</b> 😸"
-    ]
-    for j_id, j in JOBS.items():
-        lines.append(f"• <b>{j['name']}</b>: от <code>{j['req_exp']} EXP</code> (З/П: {j['min_pay']}-{j['max_pay']} 🪙)")
-    lines.append("━━━━━━━━━━━━━━━━━━━━")
-
-    markup = InlineKeyboardMarkup()
-    for job_id, job in JOBS.items():
-        btn_text = f"{job['name']} ({job['req_exp']} EXP)"
-        markup.add(InlineKeyboardButton(btn_text, callback_data=f"do_job_{job_id}:{user_id}"))
-
-    markup.add(InlineKeyboardButton("🎓 Пройти тренировку (+EXP)", callback_data=f"train_exp_btn:{user_id}"))
-    bot.reply_to(message, "\n".join(lines), reply_markup=markup, parse_mode='HTML')
+    number = _parse_work_number(getattr(message, 'text', ''))
+    if number is not None:
+        render_job_detail(message.chat.id, user_id, user_name, number)
+    else:
+        render_job_catalog(message.chat.id, user_id, user_name)
 
 def cmd_train(message):
     if not can_process_user_message(message):
@@ -219,43 +404,117 @@ def cmd_train(message):
     bot.reply_to(message, text_resp, parse_mode='HTML')
 
 def cmd_sell(message):
+    """Sell only known fish/hunt items as one durable inventory transaction."""
     if not can_process_user_message(message):
         return
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     user_id = message.from_user.id
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
 
     total_earned = 0
     items_sold = 0
+    sold_fish = {}
+    sold_hunt = {}
     price_multiplier = 2.0 if gold_rush_event.get('active') else 1.0
     econ_event = get_economic_event() if 'get_economic_event' in globals() else None
-    fish_mult = float(econ_event.get('fish_sell', 1.0)) if econ_event else 1.0
-    hunt_mult = float(econ_event.get('hunt_sell', 1.0)) if econ_event else 1.0
 
-    for fish_name, count in list(econ.get('fish_inventory', {}).items()):
-        price = 20
-        for f_item in FISH_TYPES:
-            if f_item[0] == fish_name: price = int(f_item[2] * price_multiplier * fish_mult); break
-        total_earned += price * count
-        items_sold += count
-    econ['fish_inventory'] = {}
+    def _safe_multiplier(value):
+        try:
+            number = float(value)
+            return number if math.isfinite(number) and 0 < number <= 10 else 1.0
+        except (TypeError, ValueError, OverflowError):
+            return 1.0
 
-    for hunt_name, count in list(econ.get('hunt_inventory', {}).items()):
-        price = 25
-        for h_item in HUNT_TYPES:
-            if h_item[0] == hunt_name: price = int(h_item[2] * price_multiplier * hunt_mult); break
-        total_earned += price * count
-        items_sold += count
-    econ['hunt_inventory'] = {}
+    fish_mult = _safe_multiplier(econ_event.get('fish_sell', 1.0)) if econ_event else 1.0
+    hunt_mult = _safe_multiplier(econ_event.get('hunt_sell', 1.0)) if econ_event else 1.0
+    fish_prices = {}
+    hunt_prices = {}
+    for item in FISH_TYPES:
+        try:
+            fish_prices[str(item[0])] = max(1, int(item[2]))
+        except (TypeError, ValueError, IndexError, OverflowError):
+            continue
+    for item in HUNT_TYPES:
+        try:
+            hunt_prices[str(item[0])] = max(1, int(item[2]))
+        except (TypeError, ValueError, IndexError, OverflowError):
+            continue
+
+    with BALANCE_TX_LOCK:
+        with db_lock:
+            econ = get_user_econ(user_id, user_name, username=message.from_user.username)
+            fish_inventory = econ.get('fish_inventory', {})
+            hunt_inventory = econ.get('hunt_inventory', {})
+
+            # Unknown/legacy inventory keys are left untouched instead of being
+            # silently sold at a fallback price or erased by a catalog mismatch.
+            if isinstance(fish_inventory, dict):
+                for item_name, raw_count in list(fish_inventory.items()):
+                    if item_name not in fish_prices:
+                        continue
+                    try:
+                        count = int(raw_count or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if count <= 0:
+                        continue
+                    unit_price = max(1, int(fish_prices[item_name] * price_multiplier * fish_mult))
+                    total_earned += unit_price * count
+                    items_sold += count
+                    sold_fish[item_name] = count
+                for item_name in sold_fish:
+                    fish_inventory.pop(item_name, None)
+
+            if isinstance(hunt_inventory, dict):
+                for item_name, raw_count in list(hunt_inventory.items()):
+                    if item_name not in hunt_prices:
+                        continue
+                    try:
+                        count = int(raw_count or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if count <= 0:
+                        continue
+                    unit_price = max(1, int(hunt_prices[item_name] * price_multiplier * hunt_mult))
+                    total_earned += unit_price * count
+                    items_sold += count
+                    sold_hunt[item_name] = count
+                for item_name in sold_hunt:
+                    hunt_inventory.pop(item_name, None)
+
+            if items_sold > 0:
+                _adjust_balance(econ, total_earned, reason='Продажа рыбы и охотничьих трофеев')
+                mark_dirty()
 
     if items_sold == 0:
-        bot.reply_to(message, "🎒 У вас нет рыбы или охотничьих трофеев для продажи! 😿")
+        bot.reply_to(message, "🎒 У вас нет рыбы или охотничьих трофеев из каталога для продажи! 😿")
         return
 
-    _adjust_balance(econ, total_earned)
-    mark_dirty()
+    if not critical_save('fish and hunt inventory sale', retries=3):
+        # Reverse only this transaction's fields. A full-profile snapshot would
+        # overwrite unrelated profile changes that occurred during disk/network IO.
+        with BALANCE_TX_LOCK:
+            with db_lock:
+                for inv_key, sold in (('fish_inventory', sold_fish), ('hunt_inventory', sold_hunt)):
+                    if not sold:
+                        continue
+                    current = econ.get(inv_key)
+                    if not isinstance(current, dict):
+                        current = {}
+                        econ[inv_key] = current
+                    for item_name, count in sold.items():
+                        try:
+                            existing = max(0, int(current.get(item_name, 0) or 0))
+                        except (TypeError, ValueError, OverflowError):
+                            existing = 0
+                        current[item_name] = existing + count
+                _adjust_balance(econ, -total_earned, reason='Откат не сохранённой продажи добычи')
+                mark_dirty()
+        critical_save('rollback fish and hunt inventory sale', retries=2)
+        bot.reply_to(message, '⚠️ Не удалось сохранить продажу в Neon. Добыча и баланс восстановлены, попробуйте позже.')
+        return
+
     rush_note = " (🌟 Золотая лихорадка x2.0!)" if gold_rush_event.get('active') else ""
-    bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned} Ня-коинов 🪙</b>{rush_note}! 😻\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+    bot.reply_to(message, f"💰 Вы успешно продали добычу на сумму <b>+{total_earned:,} Ня-коинов 🪙</b>{rush_note}! 😻\nБаланс: <b>{econ['balance']:,} 🪙</b>", parse_mode='HTML')
 
 def cmd_iq(message):
     if not can_process_user_message(message):

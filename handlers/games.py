@@ -23,7 +23,7 @@ def cmd_mini_games(message):
         bot.reply_to(message, '❌ MINIAPP_URL не настроен в Render. Укажи URL Mini App в переменной окружения.')
         return
     kb=InlineKeyboardMarkup(); kb.add(InlineKeyboardButton('🎮 Открыть Nya Mini Games', web_app=WebAppInfo(url=MINIAPP_URL + '/minigames')))
-    bot.reply_to(message, '🎮 <b>Nya Mini Games · v0.3</b>\nСапёр • Змейка • 2048 • Реакция • Тир\n\n👤 Профиль, 🏆 рейтинг, 🎁 бонусы и ⚙️ настройки внутри Mini App.', reply_markup=kb, parse_mode='HTML')
+    bot.reply_to(message, '🎮 <b>Nya Mini Games · v0.7</b>\nСапёр • Змейка • 2048 • Реакция • Тир\n\n👤 Профиль, 🏆 рейтинг, 🎁 бонусы и ⚙️ настройки внутри Mini App.', reply_markup=kb, parse_mode='HTML')
 
 def cmd_fact_vd(message):
     if not can_process_user_message(message):
@@ -75,7 +75,7 @@ def cmd_trash(message):
         trophy = random.choice(FISH_TYPES)[0]
         add_inventory_item(econ['fish_inventory'], trophy)
 
-    add_account_exp(user_id, user_name, 5, username=message.from_user.username)
+    add_account_exp(user_id, user_name, 5, username=message.from_user.username, source='trash_loot')
     mark_dirty()
     msg_text += f"\n━━━━━━━━━━━━━━━━━━━━\n💰 Баланс: <b>{econ['balance']} 🪙</b> 😸"
     bot.reply_to(message, msg_text, parse_mode='HTML')
@@ -112,7 +112,7 @@ def cmd_promo(message):
 
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
     _adjust_balance(econ, reward)
-    add_account_exp(user_id, user_name, exp_bonus, username=message.from_user.username)
+    add_account_exp(user_id, user_name, exp_bonus, username=message.from_user.username, source='promo_code')
     claimed_list.append(user_id)
     mark_dirty()
 
@@ -500,7 +500,7 @@ def cmd_wheel(message):
         add_inventory_item(econ['hunt_inventory'], trophy)
         prize_text = f"🏹 Вы добыли: <b>{trophy}</b>! 😺"
     elif win_key == 'exp':
-        add_account_exp(user_id, user_name, 80, username=message.from_user.username)
+        add_account_exp(user_id, user_name, 80, username=message.from_user.username, source='wheel_exp_prize')
         prize_text = "⭐ Вы получили <b>+80 EXP опыта профиля</b>! 😸"
     elif win_key == 'karma':
         change_karma(user_id, user_name, 5)
@@ -756,16 +756,14 @@ def cmd_coinflip(message):
                 balance=int(econ.get('balance',0) or 0)
                 if balance < bet:
                     bot.reply_to(message,f'❌ Недостаточно средств. Баланс: {balance:,} 🪙'); return
-                econ['balance']=balance-bet
-                mark_dirty()
+                _adjust_balance(econ, -bet, reason='Ставка в орлянке')
         process_casino_bet(bet,message.chat.id)
         result=random.choice(('орёл','решка'))
         if result==side:
             win=process_casino_win(int(bet*1.9))
             with BALANCE_TX_LOCK:
                 with db_lock:
-                    econ['balance']=int(econ.get('balance',0) or 0)+win
-                    mark_dirty()
+                    _adjust_balance(econ, win, reason='Выигрыш в орлянке')
             bot.reply_to(message,f'🪙 <b>МОНЕТКА</b>\nВаша ставка: <b>{bet} 🪙</b> на <b>{side}</b>\nВыпало: <b>{result}</b> 🪙\n🎉 Вы получили <b>+{win} 🪙</b>!',parse_mode='HTML')
         else:
             bot.reply_to(message,f'🪙 <b>МОНЕТКА</b>\nВаша ставка: <b>{bet} 🪙</b> на <b>{side}</b>\nВыпало: <b>{result}</b>\n😿 Ставка проиграна.',parse_mode='HTML')
@@ -926,7 +924,7 @@ def cmd_story(message):
     template = random.choice(STORY_TEMPLATES)
     story_text = template.format(u1=u1_link, u2=u2_link)
 
-    add_account_exp(user_id, user_name, 10, username=message.from_user.username)
+    add_account_exp(user_id, user_name, 10, username=message.from_user.username, source='story_created')
     bot.reply_to(message, story_text, parse_mode='HTML')
 
 def cmd_resources_command(message):
