@@ -39,18 +39,22 @@ def load_data(default_data_factory, normalize_loaded_data):
 
 
 def save_data(db, *, db_lock, db_version, db_version_getter, db_dirty_setter,
-              data_file="rests_data.json", send_backup=False,
-              db_channel_id=0, bot_instance=None):
+              db_dirty_clear_if_version=None, data_file="rests_data.json",
+              send_backup=False, db_channel_id=0, bot_instance=None):
     with _save_lock:
         with db_lock:
             snapshot = copy.deepcopy(db)
             snapshot["_meta"] = {"saved_at": time.time()}
-            snapshot_version = db_version
+            # Capture the version beside the snapshot while mutations are
+            # excluded by db_lock. The caller's db_version argument may have
+            # been evaluated before this function waited for _save_lock.
+            snapshot_version = db_version_getter() if db_version_getter else db_version
         return save_snapshot(
             snapshot=snapshot,
             snapshot_version=snapshot_version,
             db_version_getter=db_version_getter,
             db_dirty_setter=db_dirty_setter,
+            db_dirty_clear_if_version=db_dirty_clear_if_version,
             send_backup=send_backup,
             db_channel_id=db_channel_id,
             bot_instance=bot_instance,

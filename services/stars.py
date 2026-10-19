@@ -291,10 +291,14 @@ def grant_hard_limited_stars_item(econ, item_key):
     else:
         raise ValueError(f'Unsupported hard-limited item type: {c_type}')
 
-    snapshot = {}
-    for key in ('paid_stars_items', 'titles', 'purchased_themes', 'active_title', 'custom_title', 'profile_theme', 'pet'):
-        if key in econ:
-            snapshot[key] = copy.deepcopy(econ[key])
+    tracked_keys = (
+        'paid_stars_items', 'titles', 'purchased_themes', 'active_title',
+        'custom_title', 'profile_theme', 'pet', 'pet_inventory',
+    )
+    snapshot = {
+        key: (key in econ, copy.deepcopy(econ.get(key)))
+        for key in tracked_keys
+    }
 
     try:
         paid = econ.setdefault('paid_stars_items', [])
@@ -339,10 +343,12 @@ def grant_hard_limited_stars_item(econ, item_key):
         _mark_dirty()
         return item['name']
     except Exception:
-        for key in ('paid_stars_items', 'titles', 'purchased_themes', 'active_title', 'custom_title', 'profile_theme', 'pet'):
-            if key in snapshot:
-                econ[key] = snapshot[key]
-            elif key in econ and key in {'paid_stars_items', 'titles', 'purchased_themes'}:
+        # Roll back every field granted here, including pet_inventory. A failure
+        # after appending the pet must not leave a partially-owned paid item.
+        for key, (existed, value) in snapshot.items():
+            if existed:
+                econ[key] = copy.deepcopy(value)
+            else:
                 econ.pop(key, None)
         raise
 
@@ -491,7 +497,7 @@ def start_stars_payment_journal(charge_id, payload, amount, buyer_id):
     """Durably record a validated payment before granting its entitlement.
 
     Returns one of: ``ok``, ``resume``, ``already_granted``,
-    ``already_finalized`` or ``persist_failed``.
+    ``already_finalized``, ``refund_pending`` or ``persist_failed``.
     """
     if not charge_id:
         return 'persist_failed'
@@ -501,6 +507,8 @@ def start_stars_payment_journal(charge_id, payload, amount, buyer_id):
         status = str(entry.get('status', '') or '')
         if status in {'completed', 'refunded'}:
             return 'already_finalized'
+        if status == 'refund_pending':
+            return 'refund_pending'
         if status == 'processing' and str(entry.get('grant_status', '') or '') == 'granted':
             return 'already_granted'
         entry.update({
@@ -540,24 +548,46 @@ def update_stars_payment_journal(charge_id, **fields):
     return True
 
 def _finish_stars_payment_journal(charge_id, status):
+    """Finish a Stars journal transition only when its durable save succeeds.
+
+    If persistence fails, restore the prior in-memory journal state as well. The
+    payment handler can then roll the entitlement back and mark the charge for
+    refund instead of claiming success while Neon still says ``processing``.
+    """
     if not charge_id:
         return False
+    charge_key = str(charge_id)
     with _db_lock:
-        entry = _payment_log_entry(charge_id)
+        log = _db.setdefault('stars_payment_log', {})
+        had_entry = charge_key in log
+        old_entry = copy.deepcopy(log.get(charge_key))
+        processed_ref = _db.setdefault('processed_stars_charges', [])
+        old_processed = list(processed_ref)
+        entry = _payment_log_entry(charge_key)
         entry['status'] = str(status)
         entry['finished_at'] = time.time()
         _mark_dirty()
-        processed = _db.setdefault('processed_stars_charges', [])
-        if charge_id not in processed:
-            processed.append(charge_id)
-            if len(processed) > 10000:
-                del processed[:-10000]
-    # Save only after releasing _db_lock. save_data() acquires the monetary
-    # lock before db_lock, and saving while holding db_lock would invert order.
+        if charge_key not in processed_ref:
+            processed_ref.append(charge_key)
+            if len(processed_ref) > 10000:
+                del processed_ref[:-10000]
+
     try:
-        _save_now()
+        saved = _save_now()
+        if saved is False:
+            raise RuntimeError('persistence returned false')
     except Exception as exc:
-        print(f'[STARS SAVE ERROR] {charge_id}: {exc}')
+        print(f'[STARS SAVE ERROR] {charge_key}: {exc}')
+        with _db_lock:
+            log = _db.setdefault('stars_payment_log', {})
+            if had_entry:
+                log[charge_key] = old_entry
+            else:
+                log.pop(charge_key, None)
+            processed = _db.setdefault('processed_stars_charges', [])
+            processed[:] = old_processed
+            _mark_dirty()
+        return False
     return True
 
 def mark_stars_charge_processed(charge_id):
