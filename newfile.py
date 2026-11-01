@@ -84,7 +84,7 @@ from services import (
     saving as saving_service,
 )
 from handlers import register_all as register_handlers
-from data.jobs import JOBS
+# JOBS import removed: data.jobs is not part of v0.14 and JOBS is unused.
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
