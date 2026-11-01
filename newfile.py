@@ -1,10 +1,12 @@
 import ast
 import csv
 import copy
+import contextlib
 import functools
 from datetime import datetime, timedelta, timezone
 import html
 import json
+import math
 
 import os
 import random
@@ -29,7 +31,11 @@ from config import (
     AUTOSAVE_DEBOUNCE,
     AUTOSAVE_INTERVAL,
     BACKUP_INTERVAL,
+    BOT_HANDLER_BACKLOG_GRACE,
+    BOT_HANDLER_BACKLOG_LIMIT,
+    BOT_HANDLER_THREADS,
     BOT_TOKEN,
+    POLLING_TIMEOUT,
     DATA_FILE,
     DATABASE_URL,
     DB_CHANNEL_ID,
@@ -84,7 +90,7 @@ from services import (
     saving as saving_service,
 )
 from handlers import register_all as register_handlers
-# JOBS import removed: data.jobs is not part of v0.14 and JOBS is unused.
+from data.jobs import JOBS
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
@@ -96,6 +102,20 @@ def now_msk():
 # ВЕБ-СЕРВЕР ДЛЯ KEEP-ALIVE (RENDER / REPLIT / VPS)
 # ---------------------------------------------------------
 app = Flask('')
+# Mini App endpoints only exchange compact JSON payloads. Bound request size so
+# a malformed/hostile initData payload cannot consume unbounded memory in Flask.
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+
+
+@app.before_request
+def _validate_miniapp_json_object():
+    """Fail closed on malformed/non-object JSON before Mini App routes use .get()."""
+    if not request.path.startswith('/api/mini/') or request.method != 'POST':
+        return None
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'ok': False, 'error': 'invalid_payload'}), 400
+    return None
 
 # ---------------------------------------------------------
 # NYABOT v0.3 — MINI APP
@@ -110,20 +130,33 @@ BOT_VERSION_TEXT = f"NyaBot v{BOT_VERSION}"
 
 
 def _miniapp_user(init_data):
-    if not init_data or not TOKEN:
+    if not init_data or not TOKEN or not isinstance(init_data, str):
         return None
     try:
-        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        # Telegram signs a unique set of query fields. Reject duplicate or
+        # malformed keys instead of silently letting dict() choose one value.
+        parsed = parse_qsl(
+            init_data,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=32,
+        )
+        if not parsed or len({key for key, _value in parsed}) != len(parsed):
+            return None
+        pairs = dict(parsed)
         received_hash = pairs.pop('hash', None)
-        if not received_hash:
+        if not received_hash or not re.fullmatch(r'[0-9a-fA-F]{64}', received_hash):
             return None
         check = '\n'.join(f'{k}={pairs[k]}' for k in sorted(pairs))
         secret_key = hmac.new(b'WebAppData', TOKEN.encode(), hashlib.sha256).digest()
         calc = hmac.new(secret_key, check.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(calc, received_hash):
+        if not hmac.compare_digest(calc, received_hash.lower()):
             return None
         user = json.loads(pairs.get('user', '{}'))
-        if not user.get('id'):
+        if not isinstance(user, dict):
+            return None
+        user_id = int(user.get('id', 0) or 0)
+        if user_id <= 0:
             return None
         auth_date = int(pairs.get('auth_date', '0') or 0)
         if auth_date <= 0:
@@ -131,8 +164,14 @@ def _miniapp_user(init_data):
         age = time.time() - auth_date
         if age < -60 or age > 86400:
             return None
+        # Normalize the signed identifier once; endpoints should not need to
+        # repeat validation of a Telegram-supplied ID.
+        user['id'] = user_id
         return user
+    except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
+        return None
     except Exception:
+        # Authentication failure is deliberately closed without exposing details.
         return None
 
 def _miniapp_auth(payload):
@@ -157,6 +196,34 @@ def _mini_add_notification(econ, text):
     del rows[:-50]
 
 
+def _mini_snapshot_fields(econ, fields):
+    """Snapshot only fields owned by this transaction."""
+    return {key: (key in econ, copy.deepcopy(econ.get(key))) for key in fields}
+
+
+def _mini_restore_fields(econ, snapshot, reason):
+    """Restore selected non-balance fields without overwriting unrelated concurrent edits."""
+    with db_lock:
+        for key, (existed, value) in snapshot.items():
+            if existed:
+                econ[key] = copy.deepcopy(value)
+            else:
+                econ.pop(key, None)
+    mark_dirty()
+    # Replace a pending local snapshot too; Neon remains the canonical source.
+    try:
+        save_data(send_backup=False)
+    except Exception as exc:
+        print(f'[MINI APP ROLLBACK SNAPSHOT ERROR] {reason}: {exc}')
+    print(f'[MINI APP ROLLBACK] {reason}: Neon persistence failed; transaction reverted.')
+
+
+def _mini_rollback_reward(econ, amount, reason):
+    amount = max(0, int(amount or 0))
+    if amount:
+        _adjust_balance(econ, -amount, reason=f'Отмена: {reason} (ошибка сохранения)')
+
+
 @app.route('/api/mini/profile', methods=['POST'])
 def mini_profile_api():
     user = _miniapp_auth(request.get_json(silent=True) or {})
@@ -167,7 +234,7 @@ def mini_profile_api():
     econ = get_user_econ(uid, name, username=user.get('username'))
     lvl, exp, nxt, bar = get_account_level(econ.get('account_exp', 0))
     st = econ.get('msg_stats', {}) or {}
-    return jsonify({'ok': True, 'version': BOT_VERSION, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_records',{}) or {}, 'language': econ.get('language','ru')})
+    return jsonify({'ok': True, 'version': BOT_VERSION, 'user': {'id': uid, 'name': name, 'username': user.get('username')}, 'balance': int(econ.get('balance',0) or 0), 'stars': int(econ.get('stars_donated',0) or 0), 'level': lvl, 'exp': int(exp), 'next_exp': int(nxt), 'bar': bar, 'activity': {'day': int(st.get('day_count',0) or 0), 'week': int(st.get('week_count',0) or 0), 'month': int(st.get('month_count',0) or 0), 'all': int(st.get('total_count',0) or 0)}, 'achievements': len(econ.get('achievements',[]) or []), 'streak': int(econ.get('bonus_streak',0) or 0), 'games_played': int(econ.get('mini_games_played',0) or 0), 'game_wins': int(econ.get('mini_games_wins',0) or 0), 'records': econ.get('mini_reported_records', econ.get('mini_records',{})) or {}, 'language': econ.get('language','ru')})
 
 
 @app.route('/api/mini/empire', methods=['POST'])
@@ -178,58 +245,291 @@ def mini_empire_api():
         return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
     uid = int(user['id'])
     name = user.get('first_name') or user.get('username') or 'Игрок'
-    econ = get_user_econ(uid, name, username=user.get('username'))
-    _migrate_legacy_businesses(econ)
 
-    rows = []
-    gross_hourly = 0
-    owned = econ.get('businesses', {}) if isinstance(econ.get('businesses'), dict) else {}
-    donor_owned = econ.get('donor_businesses', {}) if isinstance(econ.get('donor_businesses'), dict) else {}
-    for number, b_id, info, is_donor in _business_catalog():
-        source = donor_owned if is_donor else owned
-        if b_id not in source:
-            continue
-        level = _business_level(econ, b_id)
-        hourly = _business_hourly_income(b_id, level)
-        gross_hourly += hourly
-        purchase_price = _business_purchase_price(econ, b_id) if not is_donor else 0
-        rows.append({
-            'number': number,
-            'id': b_id,
-            'name': info.get('name', b_id),
-            'short': info.get('short', info.get('name', b_id)),
-            'world': info.get('world', 'earth'),
-            'level': level,
-            'max_level': 5,
-            'hourly_gross': hourly,
-            'hourly_net_estimate': int(hourly * (1.0 - BUSINESS_TAX_RATE)),
-            'purchase_price': purchase_price,
-            'legacy': any(
-                isinstance(x, dict) and x.get('to') == b_id
-                for x in (econ.get('legacy_assets') or [])
-            ),
-            'donor': bool(is_donor),
+    # The legacy migration can move assets and compensate duplicate purchases,
+    # so serialize it with all other actions for this player and persist it before
+    # returning the migrated portfolio.
+    with _get_user_action_lock(uid):
+        econ = get_user_econ(uid, name, username=user.get('username'))
+        businesses = econ.get('businesses')
+        has_legacy = isinstance(businesses, dict) and any(
+            old_id in businesses for old_id in LEGACY_BUSINESS_REPLACEMENTS
+        )
+        if has_legacy:
+            state_before = copy.deepcopy(econ)
+            migrated = _migrate_legacy_businesses(econ)
+            if migrated and not critical_save(reason='Mini App legacy business migration', retries=3):
+                econ.clear()
+                econ.update(state_before)
+                mark_dirty()
+                try:
+                    save_data(send_backup=False)
+                except Exception as exc:
+                    print(f'[MINI APP BUSINESS MIGRATION ROLLBACK ERROR] {exc}')
+                return jsonify({'ok': False, 'error': 'save_failed'}), 503
+
+        rows = []
+        gross_hourly = 0
+        owned = econ.get('businesses', {}) if isinstance(econ.get('businesses'), dict) else {}
+        donor_owned = econ.get('donor_businesses', {}) if isinstance(econ.get('donor_businesses'), dict) else {}
+        for number, b_id, info, is_donor in _business_catalog():
+            source = donor_owned if is_donor else owned
+            if b_id not in source:
+                continue
+            level = _business_level(econ, b_id)
+            hourly = _business_hourly_income(b_id, level)
+            gross_hourly += hourly
+            purchase_price = _business_purchase_price(econ, b_id) if not is_donor else 0
+            rows.append({
+                'number': number,
+                'id': b_id,
+                'name': info.get('name', b_id),
+                'short': info.get('short', info.get('name', b_id)),
+                'world': info.get('world', 'earth'),
+                'level': level,
+                'max_level': 5,
+                'hourly_gross': hourly,
+                'hourly_net_estimate': int(hourly * (1.0 - BUSINESS_TAX_RATE)),
+                'purchase_price': purchase_price,
+                'legacy': any(
+                    isinstance(x, dict) and x.get('to') == b_id
+                    for x in (econ.get('legacy_assets') or [])
+                ),
+                'donor': bool(is_donor),
+            })
+
+        return jsonify({
+            'ok': True,
+            'version': BOT_VERSION,
+            'business_tax_rate': BUSINESS_TAX_RATE,
+            'sell_rate': BUSINESS_SELL_RATE,
+            'business_count': len(rows),
+            'gross_hourly': int(gross_hourly),
+            'net_hourly_estimate': int(gross_hourly * (1.0 - BUSINESS_TAX_RATE)),
+            'tax_paid': int(econ.get('business_tax_paid', 0) or 0),
+            'legacy_assets': len(econ.get('legacy_assets')) if isinstance(econ.get('legacy_assets'), (list, tuple, dict, set)) else 0,
+            'rows': rows,
         })
 
-    return jsonify({
-        'ok': True,
-        'version': BOT_VERSION,
-        'business_tax_rate': BUSINESS_TAX_RATE,
-        'sell_rate': BUSINESS_SELL_RATE,
-        'business_count': len(rows),
-        'gross_hourly': int(gross_hourly),
-        'net_hourly_estimate': int(gross_hourly * (1.0 - BUSINESS_TAX_RATE)),
-        'tax_paid': int(econ.get('business_tax_paid', 0) or 0),
-        'legacy_assets': len(econ.get('legacy_assets', []) or []),
-        'rows': rows,
-    })
 
+
+# ---------------------------------------------------------
+# MINI APP: TAMAGOTCHI COMPANION
+# This is deliberately separate from econ['pet'] and the Telegram pet inventory.
+# It uses the same player's Neon-backed economy record and never awards coins.
+# ---------------------------------------------------------
+_MINI_TAMAGOTCHI_STAT_DECAY_PER_HOUR = {
+    'hunger': 7.0,
+    'happiness': 4.0,
+    'energy': 5.0,
+    'cleanliness': 3.0,
+}
+_MINI_TAMAGOTCHI_COOLDOWNS = {
+    'feed': 5,
+    'play': 8,
+    'sleep': 10,
+    'clean': 5,
+    'rename': 30,
+}
+
+
+def _mini_finite_float(value, default=0.0):
+    """Parse a persisted numeric field without allowing NaN/Infinity to escape."""
+    try:
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else float(default)
+    except (TypeError, ValueError, OverflowError):
+        return float(default)
+
+
+def _mini_tamagotchi_default(now=None):
+    now = _mini_finite_float(time.time() if now is None else now, time.time())
+    return {
+        'name': 'Ня',
+        'hunger': 78.0,
+        'happiness': 82.0,
+        'energy': 86.0,
+        'cleanliness': 90.0,
+        'created_at': now,
+        'last_update': now,
+        'last_actions': {},
+        'care_count': 0,
+    }
+
+
+def _mini_tamagotchi_tick(pet, now=None):
+    """Apply offline need decay; return True only if persistent state changed."""
+    if not isinstance(pet, dict):
+        return False
+    now = _mini_finite_float(time.time() if now is None else now, time.time())
+    last_update = _mini_finite_float(pet.get('last_update', now) or now, now)
+    if last_update > now + 60 or last_update < 0:
+        last_update = now
+    elapsed = max(0.0, min(now - last_update, 365 * 86400.0))
+    # Avoid needless writes on every page repaint; a minute of drift is irrelevant.
+    if elapsed < 60:
+        return False
+    hours = elapsed / 3600.0
+    changed = False
+    for key, rate in _MINI_TAMAGOTCHI_STAT_DECAY_PER_HOUR.items():
+        value = _mini_finite_float(pet.get(key, 50) or 0, 50.0)
+        value = max(0.0, min(100.0, value))
+        next_value = round(max(0.0, value - rate * hours), 2)
+        if next_value != pet.get(key):
+            changed = True
+        pet[key] = next_value
+    pet['last_update'] = now
+    return True
+
+
+def _mini_tamagotchi_action(pet, action, now=None, name=None):
+    """Mutate a Tamagotchi for a validated action; return a small result dict."""
+    if not isinstance(pet, dict):
+        return {'ok': False, 'error': 'invalid_pet'}
+    now = _mini_finite_float(time.time() if now is None else now, time.time())
+    if action not in {'feed', 'play', 'sleep', 'clean', 'rename'}:
+        return {'ok': False, 'error': 'invalid_action'}
+    last_actions = pet.get('last_actions')
+    if not isinstance(last_actions, dict):
+        last_actions = {}
+        pet['last_actions'] = last_actions
+    last_action_at = _mini_finite_float(last_actions.get(action, 0) or 0, 0.0)
+    remaining = int(max(0, _MINI_TAMAGOTCHI_COOLDOWNS[action] - (now - last_action_at)))
+    if remaining > 0:
+        return {'ok': False, 'error': 'action_cooldown', 'remaining': remaining}
+
+    def add_stat(key, delta):
+        value = _mini_finite_float(pet.get(key, 50) or 0, 50.0)
+        pet[key] = round(max(0.0, min(100.0, value + delta)), 2)
+
+    if action == 'feed':
+        add_stat('hunger', 28)
+        add_stat('happiness', 3)
+    elif action == 'play':
+        add_stat('happiness', 22)
+        add_stat('energy', -14)
+        add_stat('hunger', -7)
+        add_stat('cleanliness', -6)
+    elif action == 'sleep':
+        add_stat('energy', 32)
+        add_stat('hunger', -4)
+        add_stat('happiness', 2)
+    elif action == 'clean':
+        add_stat('cleanliness', 35)
+        add_stat('happiness', 3)
+    elif action == 'rename':
+        clean_name = re.sub(r'[\x00-\x1f\x7f]', '', str(name or ''))
+        clean_name = ' '.join(clean_name.split()).strip()[:20]
+        if not clean_name:
+            return {'ok': False, 'error': 'invalid_name'}
+        pet['name'] = clean_name
+
+    last_actions[action] = now
+    if action != 'rename':
+        try:
+            pet['care_count'] = max(0, int(pet.get('care_count', 0) or 0)) + 1
+        except (TypeError, ValueError, OverflowError):
+            pet['care_count'] = 1
+    return {'ok': True, 'action': action}
+
+
+def _mini_tamagotchi_public(pet, now=None):
+    if not isinstance(pet, dict):
+        pet = _mini_tamagotchi_default(now)
+    now = _mini_finite_float(time.time() if now is None else now, time.time())
+    created_at = _mini_finite_float(pet.get('created_at', now) or now, now)
+    if created_at > now + 60 or created_at < 0:
+        created_at = now
+    stats = {}
+    for key in _MINI_TAMAGOTCHI_STAT_DECAY_PER_HOUR:
+        value = _mini_finite_float(pet.get(key, 50) or 0, 50.0)
+        stats[key] = int(max(0, min(100, round(value))))
+    average = sum(stats.values()) / max(1, len(stats))
+    mood = 'happy' if average >= 72 and stats['happiness'] >= 55 else ('okay' if average >= 42 else 'care')
+    last_actions = pet.get('last_actions')
+    if not isinstance(last_actions, dict):
+        last_actions = {}
+    next_actions = {}
+    for action, cooldown in _MINI_TAMAGOTCHI_COOLDOWNS.items():
+        last_action_at = _mini_finite_float(last_actions.get(action, 0) or 0, 0.0)
+        if last_action_at < 0 or last_action_at > now + 60:
+            last_action_at = 0.0
+        next_actions[action] = max(0, int(cooldown - (now - last_action_at)))
+    try:
+        care_count = max(0, int(pet.get('care_count', 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        care_count = 0
+    return {
+        'name': str(pet.get('name') or 'Ня')[:20],
+        **stats,
+        'mood': mood,
+        'age_days': max(0, int((now - created_at) // 86400)),
+        'care_count': care_count,
+        'next_actions': next_actions,
+    }
+
+
+@app.route('/api/mini/tamagotchi', methods=['POST'])
+def mini_tamagotchi_api():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'ok': False, 'error': 'invalid_payload'}), 400
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    username = user.get('username')
+    action = str(payload.get('action', '') or '').strip().lower()
+    if action and action not in {'feed', 'play', 'sleep', 'clean', 'rename'}:
+        return jsonify({'ok': False, 'error': 'invalid_action'}), 400
+    if action == 'rename':
+        candidate = ' '.join(re.sub(r'[\x00-\x1f\x7f]', '', str(payload.get('name') or '')).split()).strip()
+        if not candidate or len(candidate) > 20:
+            return jsonify({'ok': False, 'error': 'invalid_name'}), 400
+
+    with _get_user_action_lock(uid):
+        econ = get_user_econ(uid, name, username=username)
+        old_exists = isinstance(econ.get('mini_tamagotchi'), dict)
+        old_pet = copy.deepcopy(econ.get('mini_tamagotchi')) if old_exists else None
+        with MINIAPP_LOCK:
+            pet = econ.get('mini_tamagotchi')
+            created = not isinstance(pet, dict)
+            if created:
+                pet = _mini_tamagotchi_default()
+                econ['mini_tamagotchi'] = pet
+            changed = created or _mini_tamagotchi_tick(pet)
+            action_result = {'ok': True}
+            if action:
+                action_result = _mini_tamagotchi_action(pet, action, name=payload.get('name'))
+                changed = changed or action_result.get('ok', False)
+            if changed:
+                mark_dirty()
+                if not critical_save(reason='Mini App Tamagotchi state'):
+                    if old_exists:
+                        econ['mini_tamagotchi'] = old_pet
+                    else:
+                        econ.pop('mini_tamagotchi', None)
+                    mark_dirty()
+                    return jsonify({'ok': False, 'error': 'save_failed'}), 503
+            result = {
+                'ok': bool(action_result.get('ok', True)),
+                'pet': _mini_tamagotchi_public(pet),
+            }
+            if action_result.get('error'):
+                result['error'] = action_result['error']
+            if action_result.get('remaining') is not None:
+                result['remaining'] = int(action_result['remaining'])
+            return jsonify(result), (429 if action_result.get('error') == 'action_cooldown' else (400 if not action_result.get('ok', True) else 200))
 
 def _mini_world_snapshot():
-    """Compute bounded world statistics from the live in-memory state."""
+    """Compute bounded world statistics while tolerating corrupt legacy root values."""
     with db_lock:
-        snapshot = list((db.get('economy') or {}).items())
-        news = list(db.get('bot_news') or [])[-20:]
+        economy_root = db.get('economy')
+        snapshot = list(economy_root.items()) if isinstance(economy_root, dict) else []
+        news_root = db.get('bot_news')
+        news = list(news_root)[-20:] if isinstance(news_root, list) else []
     unique_users = set()
     total_coins = total_bank = 0
     business_counts = {b_id: 0 for b_id in BUSINESSES}
@@ -241,12 +541,18 @@ def _mini_world_snapshot():
         try:
             if int(uid) > 0:
                 unique_users.add(int(uid))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             # Old tag-only records are still useful for economy totals, but are
             # not counted as a unique Telegram account.
             pass
-        total_coins += int(econ.get('balance', 0) or 0)
-        total_bank += int(econ.get('bank_deposit', 0) or 0)
+        try:
+            total_coins += max(0, int(econ.get('balance', 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            pass
+        try:
+            total_bank += max(0, int(econ.get('bank_deposit', 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            pass
         for b_id in business_counts:
             if b_id in (econ.get('businesses') or {}):
                 business_counts[b_id] += 1
@@ -288,35 +594,36 @@ def mini_tasks_api():
     uid = int(user['id'])
     name = user.get('first_name') or user.get('username') or 'Игрок'
     username = user.get('username')
-    daily_defs, econ = get_daily_tasks(uid, name, username=username)
-    weekly_defs, _ = get_weekly_tasks(uid, name, username=username)
+    with _get_user_action_lock(uid):
+        daily_defs, econ = get_daily_tasks(uid, name, username=username)
+        weekly_defs, _ = get_weekly_tasks(uid, name, username=username)
 
-    daily_progress = econ.get('daily_progress', {}) or {}
-    daily_claimed = set(econ.get('daily_claimed', []) or [])
-    weekly_progress = econ.get('weekly_progress', {}) or {}
-    weekly_claimed = set(econ.get('weekly_claimed', []) or [])
+        daily_progress = econ.get('daily_progress', {}) or {}
+        daily_claimed = set(econ.get('daily_claimed', []) or [])
+        weekly_progress = econ.get('weekly_progress', {}) or {}
+        weekly_claimed = set(econ.get('weekly_claimed', []) or [])
 
-    def serialize(defs, progress_map, claimed):
-        rows = []
-        for key, description, target, reward in defs:
-            progress = max(0, int(progress_map.get(key, 0) or 0))
-            rows.append({
-                'id': key,
-                'description': description,
-                'target': int(target),
-                'reward': int(reward),
-                'progress': min(progress, int(target)),
-                'completed': progress >= int(target),
-                'claimed': key in claimed,
-            })
-        return rows
+        def serialize(defs, progress_map, claimed):
+            rows = []
+            for key, description, target, reward in defs:
+                progress = max(0, int(progress_map.get(key, 0) or 0))
+                rows.append({
+                    'id': key,
+                    'description': description,
+                    'target': int(target),
+                    'reward': int(reward),
+                    'progress': min(progress, int(target)),
+                    'completed': progress >= int(target),
+                    'claimed': key in claimed,
+                })
+            return rows
 
-    return jsonify({
-        'ok': True,
-        'streak': int(econ.get('bonus_streak', 0) or 0),
-        'daily': serialize(daily_defs, daily_progress, daily_claimed),
-        'weekly': serialize(weekly_defs, weekly_progress, weekly_claimed),
-    })
+        return jsonify({
+            'ok': True,
+            'streak': int(econ.get('bonus_streak', 0) or 0),
+            'daily': serialize(daily_defs, daily_progress, daily_claimed),
+            'weekly': serialize(weekly_defs, weekly_progress, weekly_claimed),
+        })
 
 @app.route('/api/mini/tasks/claim', methods=['POST'])
 def mini_task_claim_api():
@@ -342,21 +649,35 @@ def mini_task_claim_api():
         progress_key = 'daily_progress' if kind == 'daily' else 'weekly_progress'
         claimed_key = 'daily_claimed' if kind == 'daily' else 'weekly_claimed'
         progress = econ.get(progress_key, {}) or {}
-        claimed = econ.setdefault(claimed_key, [])
-        if task_id in claimed:
+        current_claimed = econ.get(claimed_key, [])
+        if not isinstance(current_claimed, list):
+            current_claimed = []
+        if task_id in current_claimed:
             return jsonify({'ok': False, 'error': 'already_claimed'}), 400
         if int(progress.get(task_id, 0) or 0) < int(target):
             return jsonify({'ok': False, 'error': 'not_completed'}), 400
+
         reward = max(0, int(reward))
-        _set_balance(econ, int(econ.get('balance', 0) or 0) + reward)
-        claimed.append(task_id)
+        state_before = _mini_snapshot_fields(econ, (
+            claimed_key, 'mini_transactions', 'mini_notifications',
+            'account_exp', 'season_points', 'account_exp_history',
+        ))
+        econ[claimed_key] = list(current_claimed)
+        econ[claimed_key].append(task_id)
+        _adjust_balance(econ, reward, reason=f'Награда Mini App за задание {task_id}')
         tx = econ.setdefault('mini_transactions', [])
+        if not isinstance(tx, list):
+            tx = []
+            econ['mini_transactions'] = tx
         tx.append({'text': f'Mini App: задание — {description}', 'amount': reward, 'time': now_msk().strftime('%d.%m.%Y %H:%M')})
         del tx[:-100]
         _mini_add_notification(econ, f'📋 Задание выполнено: +{reward:,} 🪙')
-        add_account_exp(uid, name, 15, username)
+        add_account_exp(uid, name, 15, username, source='mini_app_task')
         mark_dirty()
-        save_data(send_backup=False)
+        if not critical_save(reason='Mini App task reward'):
+            _mini_rollback_reward(econ, reward, f'Награда Mini App за задание {task_id}')
+            _mini_restore_fields(econ, state_before, 'Mini App task reward')
+            return jsonify({'ok': False, 'error': 'save_failed'}), 503
         return jsonify({'ok': True, 'reward': reward, 'task_id': task_id, 'kind': kind})
 
 
@@ -376,7 +697,7 @@ def mini_stats_api():
     user=_miniapp_auth(request.get_json(silent=True) or {})
     if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
     uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    return jsonify({'ok':True,'games_played':int(econ.get('mini_games_played',0) or 0),'wins':int(econ.get('mini_games_wins',0) or 0),'records':econ.get('mini_records',{}) or {}})
+    return jsonify({'ok':True,'games_played':int(econ.get('mini_games_played',0) or 0),'wins':int(econ.get('mini_games_wins',0) or 0),'records':econ.get('mini_reported_records', econ.get('mini_records',{})) or {}})
 
 @app.route('/api/mini/notifications', methods=['POST'])
 def mini_notifications_api():
@@ -399,6 +720,8 @@ def mini_shop_api():
     grouped = {}
     type_names = {'theme': '🎨 Темы', 'title_cert': '🏷 Титулы', 'donor_title': '👑 Донатные титулы', 'badge': '✨ Значки', 'pet': '🐾 Питомцы', 'gif': '🎞 GIF профиля', 'donor_vehicle': '🏎 Машины', 'donor_business': '🏢 Донатные бизнесы', 'limited_effect': '✨ Stars-эффекты'}
     for key,item in {**(STARS_COSMETICS or {}), **(STARS_LIMITED_ITEMS or {})}.items():
+        if key == 'custom_title':  # Legacy one-time certificate; creation is now invoiced per title.
+            continue
         if not isinstance(item,dict): continue
         category = type_names.get(item.get('type'), '⭐ Stars')
         grouped.setdefault(category, []).append({'id': key, 'name': item.get('name') or key, 'desc': item.get('description') or item.get('desc') or '', 'stars': int(item.get('stars',item.get('price',0)) or 0)})
@@ -407,13 +730,43 @@ def mini_shop_api():
 
 @app.route('/api/mini/settings', methods=['POST'])
 def mini_settings_api():
-    payload=request.get_json(silent=True) or {}; user=_miniapp_auth(payload)
-    if not user: return jsonify({'ok':False,'error':'invalid_telegram_auth'}),403
-    lang=str(payload.get('language','ru')).lower()
-    if lang not in {'ru','uk','en'}: return jsonify({'ok':False,'error':'invalid_language'}),400
-    uid=int(user['id']); econ=get_user_econ(uid,user.get('first_name') or user.get('username') or 'Игрок',username=user.get('username'))
-    econ['language']=lang; mark_dirty()
-    return jsonify({'ok':True,'language':lang})
+    payload = request.get_json(silent=True) or {}
+    user = _miniapp_auth(payload)
+    if not user:
+        return jsonify({'ok': False, 'error': 'invalid_telegram_auth'}), 403
+
+    lang = str(payload.get('language', 'ru') or 'ru').lower()
+    if lang not in {'ru', 'uk', 'en'}:
+        return jsonify({'ok': False, 'error': 'invalid_language'}), 400
+
+    uid = int(user['id'])
+    name = user.get('first_name') or user.get('username') or 'Игрок'
+    username = user.get('username')
+    with _get_user_action_lock(uid):
+        # The user record is shared with Telegram handlers and the autosaver.
+        # Serialize preference edits and mutate under the canonical DB lock.
+        with db_lock:
+            econ = get_user_econ(uid, name, username=username)
+            old_had_language = 'language' in econ
+            old_language = econ.get('language')
+            if old_language == lang:
+                return jsonify({'ok': True, 'language': lang})
+            econ['language'] = lang
+            mark_dirty()
+
+        # The UI displays "saved" only after Neon accepts the preference. This
+        # is not monetary state, but a false success here made language changes
+        # disappear after a restart when autosave had not completed yet.
+        if not critical_save(reason='Mini App language setting', retries=2):
+            with db_lock:
+                if old_had_language:
+                    econ['language'] = old_language
+                else:
+                    econ.pop('language', None)
+                mark_dirty()
+            return jsonify({'ok': False, 'error': 'save_failed'}), 503
+
+        return jsonify({'ok': True, 'language': lang})
 
 @app.route('/api/mini/bonus', methods=['POST'])
 def mini_bonus_api():
@@ -442,19 +795,28 @@ def mini_bonus_api():
         # Keep legacy Mini App fields synchronized for older clients, but the
         # canonical streak is now the same bonus_streak used by the bot.
         reward = min(5000, 500 + streak * 100)
-
+        state_before = _mini_snapshot_fields(econ, (
+            'mini_daily_claimed', 'mini_daily_date', 'mini_daily_streak',
+            'bonus_streak', 'last_streak_time', 'mini_transactions', 'mini_notifications',
+        ))
         econ['mini_daily_claimed'] = now
         econ['mini_daily_date'] = now
         econ['mini_daily_streak'] = streak
         econ['bonus_streak'] = streak
         econ['last_streak_time'] = time.time()
-        _set_balance(econ, int(econ.get('balance', 0) or 0) + reward)
+        _adjust_balance(econ, reward, reason='Ежедневный бонус Mini App')
         tx = econ.setdefault('mini_transactions', [])
+        if not isinstance(tx, list):
+            tx = []
+            econ['mini_transactions'] = tx
         tx.append({'text': 'Mini App: ежедневный бонус', 'amount': reward, 'time': now_msk().strftime('%d.%m.%Y %H:%M')})
         del tx[:-100]
         _mini_add_notification(econ, f'🎁 Ежедневный бонус: +{reward:,} 🪙 (серия {streak})')
         mark_dirty()
-        save_data(send_backup=False)
+        if not critical_save(reason='Mini App daily bonus'):
+            _mini_rollback_reward(econ, reward, 'Ежедневный бонус Mini App')
+            _mini_restore_fields(econ, state_before, 'Mini App daily bonus')
+            return jsonify({'ok': False, 'error': 'save_failed'}), 503
         return jsonify({'ok': True, 'reward': reward, 'streak': streak})
 
 @app.route('/api/mini/leaderboard', methods=['POST'])
@@ -470,7 +832,7 @@ def mini_leaderboard_api():
         try:
             exp=int(econ.get('account_exp',0) or 0); balance=int(econ.get('balance',0) or 0)
             if game:
-                records=econ.get('mini_records',{}) or {}; score=int(records.get(game,0) or 0)
+                records=econ.get('mini_verified_records',{}) or {}; score=int(records.get(game,0) or 0)
                 if score <= 0: continue
             else:
                 score=exp
@@ -530,98 +892,78 @@ def mini_game_finish_api():
     now = time.time()
     with _get_user_action_lock(uid):
         with MINIAPP_LOCK:
-            game = MINIAPP_GAMES.pop(gid, None)
-        if not game or game.get('user_id') != uid:
-            return jsonify({'ok': False, 'error': 'invalid_game'}), 400
+            game = MINIAPP_GAMES.get(gid)
+            if not game or game.get('user_id') != uid:
+                return jsonify({'ok': False, 'error': 'invalid_game'}), 400
+            # Consume only a valid session belonging to this authenticated player.
+            MINIAPP_GAMES.pop(gid, None)
 
         elapsed = now - float(game.get('started', now))
-        if elapsed < 0.5:
-            return jsonify({'ok': False, 'error': 'too_fast'}), 400
         if elapsed > MINIAPP_GAME_TTL:
             return jsonify({'ok': False, 'error': 'game_expired'}), 400
 
         game_name = game['game']
         difficulty = str(game.get('difficulty', 'easy')).lower()
-        # Scores are still client-reported, so this endpoint is not a cryptographic
-        # anti-cheat system. We nevertheless enforce per-game plausibility caps and
-        # derive rewards/wins on the server instead of blindly trusting the browser.
-        score_limits = {
-            'mines': {'easy': 71, 'medium': 216, 'hard': 304, 'insane': 450},
-            'snake': max(1, int(elapsed / 0.145) + 2),
-            'flappy': max(1, int(elapsed / 0.95) + 1),
-            # 2048 is browser-controlled, so its accepted score is bounded by
-            # elapsed server time too. This is not a full anti-cheat system, but
-            # prevents an instant fabricated six-figure score from minting coins.
-            '2048': max(128, int(elapsed * 140)),
-            'reaction': 1200,
-            'shooter': 20,
-        }
-        limit = score_limits.get(game_name, 0)
-        if isinstance(limit, dict):
-            limit = limit.get(difficulty, limit.get('easy', 71))
-        score = min(client_score, max(0, int(limit)))
-        if client_score > int(limit):
-            return jsonify({'ok': False, 'error': 'score_out_of_range'}), 400
+        # Scores are reported by client-side JavaScript and therefore cannot be
+        # treated as verified. Reject implausibly short sessions, store scores only
+        # as personal reports, and never use them to mint coins, wins, EXP or ranks.
+        min_elapsed = {
+            'mines': 1.5, 'snake': 3.0, 'flappy': 3.0,
+            '2048': 2.0, 'reaction': 0.75, 'shooter': 2.0,
+        }.get(game_name, 3.0)
+        if elapsed < min_elapsed:
+            return jsonify({'ok': False, 'error': 'too_fast'}), 400
 
+        score = min(client_score, 100000)
         name = user.get('first_name') or user.get('username') or 'Игрок'
         username = user.get('username')
         econ = get_user_econ(uid, name, username=username)
+        state_before = _mini_snapshot_fields(econ, (
+            'mini_games_played', 'mini_reported_records', 'mini_game_reward_date',
+            'mini_game_reward_today', 'mini_transactions',
+        ))
 
         econ['mini_games_played'] = int(econ.get('mini_games_played', 0) or 0) + 1
-        records = econ.setdefault('mini_records', {})
-        old = int(records.get(game_name, 0) or 0)
-        if score > old:
-            records[game_name] = score
+        # Keep reported personal highs separate from trusted/server-calculated
+        # records. The current client games don't send an independently verifiable
+        # move history, so reported scores must not feed the public leaderboard.
+        reported = econ.setdefault('mini_reported_records', {})
+        if not isinstance(reported, dict):
+            reported = {}
+            econ['mini_reported_records'] = reported
+        old_reported = int(reported.get(game_name, 0) or 0)
+        if score > old_reported:
+            reported[game_name] = score
 
-        win_thresholds = {
-            'mines': {'easy': 71, 'medium': 216, 'hard': 304, 'insane': 450},
-            'snake': 10, 'flappy': 5, '2048': 2048, 'reaction': 900, 'shooter': 15,
-        }
-        threshold = win_thresholds.get(game_name)
-        if isinstance(threshold, dict):
-            threshold = threshold.get(difficulty, threshold.get('easy'))
-        if threshold is not None and score >= int(threshold):
-            econ['mini_games_wins'] = int(econ.get('mini_games_wins', 0) or 0) + 1
-
-        reward_caps = {'mines': 2500, 'snake': 2000, 'flappy': 2000, '2048': 2500, 'reaction': 1500, 'shooter': 2500}
-        # Reward is based on the bounded score. It is additionally constrained by
-        # the per-day Mini App cap, so a client cannot drain the whole economy.
-        if game_name == 'mines':
-            safe_cells = {'easy': 71, 'medium': 216, 'hard': 304, 'insane': 450}.get(difficulty, 71)
-            raw_reward = reward_caps['mines'] if score >= safe_cells else min(250, score * 3)
-        elif game_name == 'snake':
-            raw_reward = min(reward_caps['snake'], score * 8)
-        elif game_name == 'flappy':
-            raw_reward = min(reward_caps['flappy'], score * 12)
-        elif game_name == '2048':
-            raw_reward = min(reward_caps['2048'], score // 2)
-        elif game_name == 'reaction':
-            raw_reward = min(reward_caps['reaction'], score)
-        else:
-            raw_reward = min(reward_caps['shooter'], score * 20)
-
+        # A fixed completion reward is independent of the untrusted score. Keep it
+        # modest and capped per day to limit automation abuse until game state is
+        # validated by the server.
         reward_day = now_msk().date().isoformat()
         if econ.get('mini_game_reward_date') != reward_day:
             econ['mini_game_reward_date'] = reward_day
             econ['mini_game_reward_today'] = 0
-        already_paid = int(econ.get('mini_game_reward_today', 0) or 0)
-        remaining = max(0, MINIAPP_DAILY_REWARD_CAP - already_paid)
-        reward = min(raw_reward, remaining)
+        already_paid = max(0, int(econ.get('mini_game_reward_today', 0) or 0))
+        safe_daily_cap = min(int(MINIAPP_DAILY_REWARD_CAP), 500)
+        remaining = max(0, safe_daily_cap - already_paid)
+        reward = min(25, remaining)
         if reward:
-            _set_balance(econ, int(econ.get('balance', 0) or 0) + reward)
+            _adjust_balance(econ, reward, reason=f'Награда Mini App за игру {game_name}')
             econ['mini_game_reward_today'] = already_paid + reward
 
         tx = econ.setdefault('mini_transactions', [])
         tx.append({
-            'text': f'Mini Game: {game_name}',
+            'text': f'Mini Game: {game_name} (completion reward; score unverified)',
             'amount': reward,
             'time': now_msk().strftime('%d.%m.%Y %H:%M'),
         })
         del tx[:-100]
 
         mark_dirty()
-        save_data(send_backup=False)
-        return jsonify({'ok': True, 'reward': reward, 'record': records.get(game_name, 0), 'validated': False})
+        if not critical_save(reason=f'Mini App game completion: {game_name}'):
+            _mini_rollback_reward(econ, reward, f'Награда Mini App за игру {game_name}')
+            _mini_restore_fields(econ, state_before, f'Mini App game completion: {game_name}')
+            return jsonify({'ok': False, 'error': 'save_failed'}), 503
+        return jsonify({'ok': True, 'reward': reward, 'record': reported.get(game_name, 0), 'validated': False, 'score_used_for_economy': False})
 
 MINIAPP_MUSIC = {
     'city': 'CQACAgIAAxkBAAI8KGqycDp6EgnMb6IYmeYcQ30P4lZYAAI5ewAC2r4QSiHiCGMmfw2iPQQ',
@@ -665,7 +1007,13 @@ def keep_alive():
 TOKEN = BOT_TOKEN
 if not TOKEN:
     print("[ВНИМАНИЕ] BOT_TOKEN не задан в переменных окружения (ENV)! Бот ожидает BOT_TOKEN в Render.")
-bot = telebot.TeleBot(TOKEN)
+# Explicitly size the handler pool. Slow synchronous handlers must not starve
+# all normal Telegram traffic; the queue watchdog below restarts a poisoned pool.
+bot = telebot.TeleBot(
+    TOKEN,
+    threaded=True,
+    num_threads=BOT_HANDLER_THREADS,
+)
 
 # ---------------------------------------------------------
 # ЛОКАЛИЗАЦИЯ И PREMIUM EMOJI
@@ -987,7 +1335,7 @@ DONOR_BUSINESSES = {
 
 STARS_COSMETICS = {
     'bp_premium': {'name': '🎃 Премиум Хеллоуинский Pass', 'stars': 4, 'type': 'bp_premium', 'desc': 'Открывает премиум-ветку наград, Тыквокота и Тёмную тему!'},
-    'custom_title': {'name': '🌟 Сертификат Кастомного Титула', 'stars': 4, 'type': 'title_cert', 'desc': 'Возможность поставить любой свой титул в /custom_title'},
+    'custom_title': {'name': '🌟 Создание кастомного титула (1 шт.)', 'stars': 4, 'type': 'title_cert', 'desc': 'Старый товар для совместимости: 4 ⭐ дают право на один титул. Новые титулы оформляются через /create_tittle.'},
     'title_donor_sponsor': {'name': '💎 Титул: Золотой Спонсор', 'stars': 4, 'type': 'donor_title', 'title_id': 'donor_sponsor', 'desc': '+10% к работе, +10% к /bonus, +5% к прибыли бизнесов'},
     'title_donor_diamond': {'name': '💠 Титул: Алмазный Спонсор', 'stars': 6, 'type': 'donor_title', 'title_id': 'donor_diamond', 'desc': '+15% к работе, +15% к /bonus, +10% к прибыли бизнесов'},
     'title_donor_emperor': {'name': '👑 Титул: Император Доната', 'stars': 8, 'type': 'donor_title', 'title_id': 'donor_emperor', 'desc': '+20% к работе, +20% к /bonus, +15% к прибыли бизнесов'},
@@ -1149,9 +1497,9 @@ BUSINESSES = {
     'oil_rig': {'name': '🛢 Нефтяная вышка', 'short': 'Нефтевышка', 'price': 3500000, 'base_income': 24000, 'upgrade_cost': 2200000, 'world': 'earth'},
     'shipyard': {'name': '🚀 Космодромная верфь', 'short': 'Верфь', 'price': 10000000, 'base_income': 66000, 'upgrade_cost': 6500000, 'world': 'space'},
     'mars_colony': {'name': '🪐 Колония на Марсе', 'short': 'Марс', 'price': 80000000, 'base_income': 220000, 'upgrade_cost': 30000000, 'world': 'mars', 'legacy_price': 50000000},
-    'lunar_corporation': {'name': '🌕 Лунная Корпорация', 'short': 'Лунная Корпорация', 'price': 130000000, 'base_income': 245000, 'upgrade_cost': 45000000, 'world': 'moon'},
-    'solar_station': {'name': '☀️ Солнечная Станция', 'short': 'Солнечная Станция', 'price': 220000000, 'base_income': 270000, 'upgrade_cost': 70000000, 'world': 'solar'},
-    'intergalactic_port': {'name': '🌌 Межгалактический Порт', 'short': 'Межгалактический Порт', 'price': 400000000, 'base_income': 300000, 'upgrade_cost': 120000000, 'world': 'galaxy'},
+    'lunar_corporation': {'name': '🌕 Лунная Корпорация', 'short': 'Лунная Корпорация', 'price': 130000000, 'base_income': 70000, 'upgrade_cost': 45000000, 'world': 'moon'},
+    'solar_station': {'name': '☀️ Солнечная Станция', 'short': 'Солнечная Станция', 'price': 220000000, 'base_income': 77000, 'upgrade_cost': 70000000, 'world': 'solar'},
+    'intergalactic_port': {'name': '🌌 Межгалактический Порт', 'short': 'Межгалактический Порт', 'price': 400000000, 'base_income': 107000, 'upgrade_cost': 120000000, 'world': 'galaxy'},
 }
 
 # Старые три стартовых предприятия исчезают из нового каталога, но их ID используются
@@ -1671,9 +2019,12 @@ def mark_dirty():
         last_db_change_at = time.time()
 
 def save_data(send_backup=False):
+    # Never hold BALANCE_TX_LOCK across synchronous Neon/file I/O. One slow save
+    # must not block every money operation behind a global transaction lock.
+    # _save_data_locked()/saving_service take the consistent db_lock snapshot
+    # before doing persistence I/O; DB_SAVE_LOCK still serializes saves.
     with DB_SAVE_LOCK:
-        with BALANCE_TX_LOCK:
-            return _save_data_locked(send_backup)
+        return _save_data_locked(send_backup)
 
 
 def critical_save(reason='critical state change', send_backup=False, retries=2):
@@ -1695,11 +2046,8 @@ def critical_save(reason='critical state change', send_backup=False, retries=2):
 
 
 def _save_data_locked(send_backup=False):
-    with db_lock:
-        snapshot = copy.deepcopy(db)
-        snapshot['_meta'] = {'saved_at': time.time()}
-        snapshot_version = db_version
-
+    # saving_service.save_data() owns the db_lock-protected snapshot. Avoid a
+    # second deep copy here to reduce CPU/memory pressure and lock complexity.
     def _get_version():
         with db_lock:
             return db_version
@@ -1709,12 +2057,21 @@ def _save_data_locked(send_backup=False):
         with db_lock:
             db_dirty = bool(value)
 
+    def _clear_dirty_if_version(expected_version):
+        global db_dirty
+        with db_lock:
+            if db_version != expected_version:
+                return False
+            db_dirty = False
+            return True
+
     return saving_service.save_data(
         db,
         db_lock=db_lock,
         db_version=db_version,
         db_version_getter=_get_version,
         db_dirty_setter=_set_dirty,
+        db_dirty_clear_if_version=_clear_dirty_if_version,
         data_file=DATA_FILE,
         send_backup=send_backup,
         db_channel_id=DB_CHANNEL_ID,
@@ -1733,39 +2090,70 @@ def _chat_type_label(chat_type):
     return {'group': 'Группа', 'supergroup': 'Супергруппа', 'channel': 'Канал', 'private': 'Личка'}.get(chat_type, str(chat_type or 'Неизвестно'))
 
 def track_bot_chat(chat, status='active', touch_activity=True):
-    """Сохраняет актуальную информацию о группах без удаления старых записей."""
+    """Store current group metadata and reactivate it for future broadcasts."""
     if not chat or getattr(chat, 'type', '') not in ('group', 'supergroup'):
         return None
     try:
-        chat_id = str(int(chat.id))
+        chat_id_int = int(chat.id)
+        chat_id = str(chat_id_int)
     except Exception:
         return None
+
     now_ts = time.time()
-    chats = db.setdefault('bot_chats', {})
-    item = chats.setdefault(chat_id, {
-        'chat_id': int(chat.id), 'title': getattr(chat, 'title', None) or 'Без названия',
-        'username': getattr(chat, 'username', None), 'type': getattr(chat, 'type', 'group'),
-        'first_seen': now_ts, 'last_seen': now_ts, 'last_activity': now_ts, 'status': 'active',
-        'join_notified_at': 0
-    })
-    changed = False
-    for field, value in [('title', getattr(chat, 'title', None) or 'Без названия'), ('username', getattr(chat, 'username', None)), ('type', getattr(chat, 'type', 'group')), ('status', status)]:
-        if item.get(field) != value:
-            item[field] = value; changed = True
-    previous_seen = float(item.get('last_seen', 0) or 0)
-    if now_ts - previous_seen >= 60:
-        item['last_seen'] = now_ts
-        changed = True
-    if touch_activity:
-        previous_activity = float(item.get('last_activity', 0) or 0)
-        item['last_activity'] = now_ts
-        last_chat_activity[int(chat.id)] = now_ts
-        # Persist activity at most once per minute; the live cache stays exact.
-        if now_ts - previous_activity >= 60:
+    with db_lock:
+        chats = db.setdefault('bot_chats', {})
+        item = chats.setdefault(chat_id, {
+            'chat_id': chat_id_int,
+            'title': getattr(chat, 'title', None) or 'Без названия',
+            'username': getattr(chat, 'username', None),
+            'type': getattr(chat, 'type', 'group'),
+            'first_seen': now_ts,
+            'last_seen': now_ts,
+            'last_activity': now_ts,
+            'status': 'active',
+            'join_notified_at': 0,
+        })
+        changed = False
+
+        for field, value in (
+            ('title', getattr(chat, 'title', None) or 'Без названия'),
+            ('username', getattr(chat, 'username', None)),
+            ('type', getattr(chat, 'type', 'group')),
+            ('status', status),
+        ):
+            if item.get(field) != value:
+                item[field] = value
+                changed = True
+
+        previous_seen = float(item.get('last_seen', 0) or 0)
+        if now_ts - previous_seen >= 60:
+            item['last_seen'] = now_ts
             changed = True
-    if changed:
-        mark_dirty()
-    return item
+
+        if touch_activity:
+            previous_activity = float(item.get('last_activity', 0) or 0)
+            item['last_activity'] = now_ts
+            last_chat_activity[chat_id_int] = now_ts
+            if now_ts - previous_activity >= 60:
+                changed = True
+
+        if status == 'active':
+            inactive = db.get('broadcast_inactive_ids') or []
+            if chat_id_int in inactive:
+                restored = []
+                for raw in inactive:
+                    try:
+                        if int(raw) != chat_id_int:
+                            restored.append(raw)
+                    except (TypeError, ValueError):
+                        restored.append(raw)
+                db['broadcast_inactive_ids'] = restored
+                item['broadcast_status'] = 'active'
+                changed = True
+
+        if changed:
+            mark_dirty()
+        return item
 
 def group_info_refresh_worker():
     """Периодически обновляет число участников сохранённых активных групп.
@@ -1865,11 +2253,21 @@ def _known_broadcast_chat_ids():
 
 
 def _broadcast_error_means_inactive(exc):
-    msg = str(exc).lower()
+    code = getattr(exc, 'error_code', None)
+    description = getattr(exc, 'description', '') or ''
+    msg = f'{description} {exc}'.lower()
+    # Telegram commonly reports blocked/private-chat and permission failures as
+    # 403. Treat only known inactive/permission messages as permanent failures.
+    if code == 403 and any(marker in msg for marker in (
+        'bot was blocked', 'bot was kicked', 'bot is not a member',
+        'user is deactivated', 'not enough rights', 'have no rights to send',
+        'forbidden',
+    )):
+        return True
     return any(marker in msg for marker in (
         'bot was kicked', 'chat not found', 'user is deactivated',
         'forbidden: bot was blocked', 'forbidden: bot is not a member',
-        'have no rights to send a message', 'not enough rights'
+        'have no rights to send a message', 'not enough rights',
     ))
 
 
@@ -1887,8 +2285,23 @@ def broadcast_system_message(text):
                     item = (db.get('bot_chats') or {}).get(str(chat_id))
                     if isinstance(item, dict):
                         item['status'] = 'inactive'
+                        item['broadcast_status'] = 'inactive'
                         item['broadcast_failed_at'] = time.time()
                         item['broadcast_error'] = str(exc)[:300]
+
+                    economy = db.get('economy') or {}
+                    for econ in economy.values():
+                        if not isinstance(econ, dict):
+                            continue
+                        chat_ids = econ.get('chat_ids') or []
+                        try:
+                            belongs_to_chat = chat_id in {int(raw) for raw in chat_ids}
+                        except (TypeError, ValueError):
+                            belongs_to_chat = False
+                        if belongs_to_chat:
+                            econ['broadcast_status'] = 'inactive'
+                            econ['broadcast_failed_at'] = time.time()
+
                     inactive = db.setdefault('broadcast_inactive_ids', [])
                     if chat_id not in inactive:
                         inactive.append(chat_id)
@@ -1940,10 +2353,19 @@ def _owner_only(message):
 def _global_message_stats():
     with db_lock:
         total = users = 0
-        for econ in list(db.get('economy', {}).values()):
+        economy_rows = db.get('economy')
+        if not isinstance(economy_rows, dict):
+            return 0, 0
+        for econ in list(economy_rows.values()):
             if not isinstance(econ, dict):
                 continue
-            count = int((econ.get('msg_stats') or {}).get('total_count', 0) or 0)
+            stats = econ.get('msg_stats')
+            if not isinstance(stats, dict):
+                continue
+            try:
+                count = max(0, int(stats.get('total_count', 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                count = 0
             if count:
                 users += 1
                 total += count
@@ -1967,9 +2389,12 @@ def setup_bot_commands():
         BotCommand('achievements', '🏆 Достижения'),
         BotCommand('lottery', '🎟 Лотерея'),
         BotCommand('games', '🎮 Игры и мини-игры'),
+        BotCommand('slots', '🎰 Слоты с анимацией'),
+        BotCommand('sticker', '😺 Случайный стикер'),
         BotCommand('coinflip', '🪙 Монетка'),
         BotCommand('garage', '🏎 Гараж'),
         BotCommand('stars', '⭐️ Stars магазин'),
+        BotCommand('create_tittle', '🌟 Создать/надеть кастомный титул'),
         BotCommand('help', '❓ Помощь'),
         BotCommand('settings', '⚙️ Настройки'),
         BotCommand('gifttg', '🎁 Telegram Gifts'),
@@ -1986,38 +2411,48 @@ def clean_tag(user_str):
     return str(user_str).replace('@', '').strip()
 
 def get_chat_settings(chat_id):
+    """Return normalized settings for a chat and persist every migration."""
     str_chat = str(chat_id)
-    if str_chat not in db['settings']:
-        db['settings'][str_chat] = {
-            'max_days': None,  # лимит реста отключён
-            'rp_enabled': True,
-            'flood_protection': False,
-            'flood_admins': False,
-            'auto_reactions': True,
-            'welcome_enabled': True,
-            'timezone_offset': 3,
-            'remind_minutes': 60,
-            'language': 'ru',
-            'warn_limit': 3,
-            'admin_functions_enabled': True
-        }
-    else:
-        # Новые настройки добавляются без сброса старых параметров.
-        sett = db['settings'][str_chat]
-        sett.setdefault('rp_enabled', True)
-        sett.setdefault('flood_protection', False)
-        sett.setdefault('flood_admins', False)
-        sett.setdefault('auto_reactions', True)
-        sett.setdefault('welcome_enabled', True)
-        sett.setdefault('language', 'ru')
-        sett.setdefault('warn_limit', 3)
-        sett.setdefault('admin_functions_enabled', True)
-        # Раньше стоял жёсткий лимит 30/60 дней — теперь ограничения нет.
-        # Не вызываем mark_dirty() при обычном чтении настроек.
-        if sett.get('max_days') is not None:
-            sett['max_days'] = None
+    defaults = {
+        'max_days': None,
+        'rp_enabled': True,
+        'flood_protection': False,
+        'flood_admins': False,
+        'auto_reactions': True,
+        'welcome_enabled': True,
+        'timezone_offset': 3,
+        'remind_minutes': 60,
+        'language': 'ru',
+        'warn_limit': 3,
+        'admin_functions_enabled': True,
+    }
+    changed = False
+    with db_lock:
+        settings = db.get('settings')
+        if not isinstance(settings, dict):
+            settings = {}
+            db['settings'] = settings
+            changed = True
+
+        sett = settings.get(str_chat)
+        if not isinstance(sett, dict):
+            sett = copy.deepcopy(defaults)
+            settings[str_chat] = sett
+            changed = True
+        else:
+            # Add only missing keys: a valid, user-selected value is never overwritten.
+            for key, default in defaults.items():
+                if key not in sett:
+                    sett[key] = copy.deepcopy(default)
+                    changed = True
+            # The former fixed rest limit is intentionally disabled.
+            if sett.get('max_days') is not None:
+                sett['max_days'] = None
+                changed = True
+
+        if changed:
             mark_dirty()
-    return db['settings'][str_chat]
+        return sett
 
 def get_market_data():
     with MARKET_LOCK:
@@ -2191,136 +2626,195 @@ def update_bank_interest(econ):
     return 0
 
 def merge_user_econ_data(dest, src):
-    if not src or not isinstance(src, dict):
+    """Merge a legacy tag profile into an ID profile without crashing on corrupt optional fields."""
+    if not isinstance(dest, dict):
+        return {}
+    if not isinstance(src, dict) or not src:
         return dest
 
-    for num_field in ['balance', 'bank_deposit', 'account_exp', 'work_exp', 'smeh', 'cooked_meals', 'bonus_streak', 'stars_donated', 'bp_exp', 'season_points']:
-        dest[num_field] = dest.get(num_field, 0) + src.get(num_field, 0)
+    def as_int(value, default=0):
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError, OverflowError):
+            return default
 
-    for ts_field in [
-        'last_fish_time', 'last_hunt_time', 'last_work_time', 'last_hourly', 
-        'last_train_time', 'last_iq_time', 'last_fat_time', 'last_foot_time', 
-        'last_chromosomes_time', 'last_dick_time', 'last_wheel_time', 
+    def as_float(value, default=0.0):
+        try:
+            parsed = float(value or 0)
+            return parsed if math.isfinite(parsed) else default
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+    def as_dict(parent, key):
+        value = parent.get(key)
+        if not isinstance(value, dict):
+            value = {}
+            parent[key] = value
+        return value
+
+    def as_list(parent, key):
+        value = parent.get(key)
+        if not isinstance(value, list):
+            value = []
+            parent[key] = value
+        return value
+
+    for field in (
+        'balance', 'bank_deposit', 'account_exp', 'work_exp', 'smeh',
+        'cooked_meals', 'bonus_streak', 'stars_donated', 'bp_exp', 'season_points',
+    ):
+        dest[field] = as_int(dest.get(field)) + as_int(src.get(field))
+
+    for field in (
+        'last_fish_time', 'last_hunt_time', 'last_work_time', 'last_hourly',
+        'last_train_time', 'last_iq_time', 'last_fat_time', 'last_foot_time',
+        'last_chromosomes_time', 'last_dick_time', 'last_wheel_time',
         'last_pet_walk', 'last_case_time', 'last_rob_time', 'last_stream_time',
         'luck_clover_until', 'invis_until', 'last_streak_time', 'last_energy_drink_time',
-        'last_trash_time', 'vip_until', 'jail_until', 'disease_immunity_until', 'last_safe_try'
-    ]:
-        dest[ts_field] = max(dest.get(ts_field, 0), src.get(ts_field, 0))
+        'last_trash_time', 'vip_until', 'jail_until', 'disease_immunity_until', 'last_safe_try',
+    ):
+        dest[field] = max(as_float(dest.get(field)), as_float(src.get(field)))
 
-    if src.get('vip_forever'):
-        dest['vip_forever'] = True
+    for field in ('vip_forever', 'bp_premium', 'has_custom_title_cert'):
+        if src.get(field):
+            dest[field] = True
 
-    # Объединяем полный гараж, а не только одну ранее экипированную машину.
-    dest_vehicles = dest.setdefault('vehicle_inventory', [])
-    src_vehicles = src.get('vehicle_inventory', [])
-    if not isinstance(dest_vehicles, list):
-        dest_vehicles = []
-        dest['vehicle_inventory'] = dest_vehicles
-    for vid in src_vehicles if isinstance(src_vehicles, list) else []:
-        if vid in VEHICLES or vid in DONOR_VEHICLES:
-            if vid not in dest_vehicles:
-                dest_vehicles.append(vid)
+    dest_vehicles = as_list(dest, 'vehicle_inventory')
+    src_vehicles = src.get('vehicle_inventory')
+    if isinstance(src_vehicles, list):
+        for vehicle_id in src_vehicles:
+            if isinstance(vehicle_id, str) and (vehicle_id in VEHICLES or vehicle_id in DONOR_VEHICLES) and vehicle_id not in dest_vehicles:
+                dest_vehicles.append(vehicle_id)
 
     v_dest = dest.get('equipped_vehicle') or dest.get('vehicle')
     v_src = src.get('equipped_vehicle') or src.get('vehicle')
+    if not isinstance(v_dest, str) or (v_dest not in VEHICLES and v_dest not in DONOR_VEHICLES):
+        v_dest = None
+    if not isinstance(v_src, str) or (v_src not in VEHICLES and v_src not in DONOR_VEHICLES):
+        v_src = None
     tier_dest = VEHICLES[v_dest]['tier'] if v_dest in VEHICLES else -1
     tier_src = VEHICLES[v_src]['tier'] if v_src in VEHICLES else -1
-    if v_dest not in dest_vehicles and v_dest in (VEHICLES.keys() | DONOR_VEHICLES.keys()):
-        dest_vehicles.append(v_dest)
-    if v_src not in dest_vehicles and v_src in (VEHICLES.keys() | DONOR_VEHICLES.keys()):
-        dest_vehicles.append(v_src)
+    for vehicle_id in (v_dest, v_src):
+        if vehicle_id and vehicle_id not in dest_vehicles:
+            dest_vehicles.append(vehicle_id)
     if v_src and (not v_dest or tier_src > tier_dest):
-        dest['equipped_vehicle'] = v_src
-        dest['vehicle'] = v_src
+        dest['equipped_vehicle'] = dest['vehicle'] = v_src
     elif v_dest:
-        dest['equipped_vehicle'] = v_dest
-        dest['vehicle'] = v_dest
+        dest['equipped_vehicle'] = dest['vehicle'] = v_dest
 
-    for eq in ['equipped_rod', 'equipped_bow', 'active_title', 'custom_title', 'badge', 'profile_theme', 'pfp_file_id', 'profile_font', 'premium_emoji_theme', 'premium_emoji_enabled']:
-        if not dest.get(eq) and src.get(eq):
-            dest[eq] = src[eq]
+    for field in (
+        'equipped_rod', 'equipped_bow', 'active_title', 'custom_title',
+        'custom_title_text', 'badge', 'profile_theme', 'pfp_file_id',
+        'profile_font', 'premium_emoji_theme', 'premium_emoji_enabled',
+    ):
+        if not dest.get(field) and src.get(field):
+            dest[field] = copy.deepcopy(src[field])
 
-    if src.get('has_custom_title_cert'):
-        dest['has_custom_title_cert'] = True
+    for field in (
+        'inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts',
+        'achievements', 'paid_stars_items', 'pet_inventory',
+    ):
+        target = as_list(dest, field)
+        source = src.get(field)
+        if isinstance(source, list):
+            for item in source:
+                # Equality-based de-duplication also handles historical unhashable values.
+                if item not in target:
+                    target.append(copy.deepcopy(item))
 
-    for list_field in ['inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts', 'achievements', 'paid_stars_items']:
-        combined = list(dict.fromkeys(dest.get(list_field, []) + src.get(list_field, [])))
-        dest[list_field] = combined
+    for field in ('fish_inventory', 'hunt_inventory', 'backpack'):
+        target = as_dict(dest, field)
+        source = src.get(field)
+        if isinstance(source, dict):
+            for item_key, count in source.items():
+                target[item_key] = max(0, as_int(target.get(item_key))) + max(0, as_int(count))
 
-    # Одноразовые Stars-энтитлменты тоже обязаны переживать объединение
-    # старого tag_аккаунта с новым id_аккаунтом.
-    for bool_field in ['bp_premium', 'has_custom_title_cert', 'vip_forever']:
-        if src.get(bool_field):
-            dest[bool_field] = True
+    portfolio = as_dict(dest, 'crypto_portfolio')
+    source_portfolio = src.get('crypto_portfolio')
+    if isinstance(source_portfolio, dict):
+        for ticker, amount in source_portfolio.items():
+            old_amount = max(0.0, as_float(portfolio.get(ticker)))
+            add_amount = max(0.0, as_float(amount))
+            portfolio[ticker] = old_amount + add_amount
 
-    for dict_field in ['fish_inventory', 'hunt_inventory']:
-        dest_dict = dest.setdefault(dict_field, {})
-        for k, v in src.get(dict_field, {}).items():
-            dest_dict[k] = dest_dict.get(k, 0) + v
+    donor_dest = as_dict(dest, 'donor_businesses')
+    donor_src = src.get('donor_businesses')
+    if isinstance(donor_src, dict):
+        for business_id, level in donor_src.items():
+            if business_id in DONOR_BUSINESSES:
+                donor_dest[business_id] = max(1, as_int(donor_dest.get(business_id), 1), as_int(level, 1))
 
-    bp_dest = dest.setdefault('backpack', {})
-    for item_k, cnt in src.get('backpack', {}).items():
-        bp_dest[item_k] = bp_dest.get(item_k, 0) + cnt
+    businesses_dest = as_dict(dest, 'businesses')
+    businesses_src = src.get('businesses')
+    if isinstance(businesses_src, dict):
+        for business_id, value in businesses_src.items():
+            if business_id not in businesses_dest:
+                businesses_dest[business_id] = copy.deepcopy(value)
 
-    cp_dest = dest.setdefault('crypto_portfolio', {})
-    for coin_k, cnt in src.get('crypto_portfolio', {}).items():
-        cp_dest[coin_k] = cp_dest.get(coin_k, 0.0) + cnt
+    levels_dest = as_dict(dest, 'biz_levels')
+    levels_src = src.get('biz_levels')
+    if isinstance(levels_src, dict):
+        for business_id, value in levels_src.items():
+            levels_dest[business_id] = max(1, as_int(levels_dest.get(business_id), 1), as_int(value, 1))
 
-    donor_biz_dest = dest.setdefault('donor_businesses', {})
-    donor_biz_src = src.get('donor_businesses', {})
-    if isinstance(donor_biz_src, dict):
-        for b_k, b_v in donor_biz_src.items():
-            if b_k in DONOR_BUSINESSES:
-                donor_biz_dest[b_k] = max(int(donor_biz_dest.get(b_k, 1) or 1), int(b_v or 1))
+    prices_dest = as_dict(dest, 'biz_purchase_price')
+    prices_src = src.get('biz_purchase_price')
+    if isinstance(prices_src, dict):
+        for business_id, value in prices_src.items():
+            if business_id not in prices_dest:
+                prices_dest[business_id] = max(0, as_int(value))
 
-    biz_dest = dest.setdefault('businesses', {})
-    biz_src = src.get('businesses', {})
-    for b_k, b_v in biz_src.items():
-        if b_k not in biz_dest:
-            biz_dest[b_k] = b_v
+    transactions_dest = as_list(dest, 'business_transactions')
+    transactions_src = src.get('business_transactions')
+    if isinstance(transactions_src, list):
+        transactions_dest.extend(copy.deepcopy(transactions_src[-200:]))
+        del transactions_dest[:-200]
+    dest['business_tax_paid'] = max(0, as_int(dest.get('business_tax_paid'))) + max(0, as_int(src.get('business_tax_paid')))
 
-    bl_dest = dest.setdefault('biz_levels', {})
-    bl_src = src.get('biz_levels', {})
-    for bl_k, bl_v in bl_src.items():
-        bl_dest[bl_k] = max(bl_dest.get(bl_k, 1), bl_v)
-
-    price_dest = dest.setdefault('biz_purchase_price', {})
-    price_src = src.get('biz_purchase_price', {})
-    for price_k, price_v in price_src.items():
-        if price_k not in price_dest:
-            price_dest[price_k] = price_v
-    tx_dest = dest.setdefault('business_transactions', [])
-    tx_src = src.get('business_transactions', [])
-    if isinstance(tx_src, list):
-        tx_dest.extend(tx_src[-200:])
-        del tx_dest[:-200]
-    dest['business_tax_paid'] = int(dest.get('business_tax_paid', 0) or 0) + int(src.get('business_tax_paid', 0) or 0)
-
-    pet_dest=dest.setdefault('pet_inventory',[])
-    for pet_id in src.get('pet_inventory',[]) or []:
-        if pet_id in PETS_DATA and pet_id not in pet_dest: pet_dest.append(pet_id)
-    if not dest.get('pet') and src.get('pet'):
-        dest['pet'] = src['pet']
-
+    pet_list = as_list(dest, 'pet_inventory')
+    pets_src = src.get('pet_inventory')
+    if isinstance(pets_src, list):
+        for pet_id in pets_src:
+            if isinstance(pet_id, str) and pet_id in PETS_DATA and pet_id not in pet_list:
+                pet_list.append(pet_id)
+    if not dest.get('pet') and isinstance(src.get('pet'), dict):
+        dest['pet'] = copy.deepcopy(src['pet'])
     if not dest.get('marriage') and src.get('marriage'):
-        dest['marriage'] = src['marriage']
+        dest['marriage'] = copy.deepcopy(src['marriage'])
 
     return dest
 
 def get_user_econ(user_id=None, user_tag=None, username=None):
-    if 'economy' not in db:
+    if not isinstance(db.get('economy'), dict):
         db['economy'] = {}
+        mark_dirty()
 
     clean_u = clean_tag(username).lower() if username else None
     clean_d = clean_tag(user_tag) if user_tag else None
 
     if not user_id and clean_u:
         for k, v in list(db['economy'].items()):
-            if v.get('username') and v['username'].lower() == clean_u and v.get('user_id'):
+            if not isinstance(v, dict):
+                continue
+            stored_username = v.get('username')
+            if isinstance(stored_username, str) and stored_username.lower() == clean_u and v.get('user_id'):
                 user_id = v['user_id']
                 break
 
     key = get_global_user_key(user_id, user_tag or username)
+
+    # Old JSON/Neon snapshots occasionally contain a non-object profile. Replace
+    # only the malformed row; leave every other player's economy untouched.
+    if key in db['economy'] and not isinstance(db['economy'].get(key), dict):
+        db['economy'][key] = {
+            'display_name': clean_d or 'Пользователь',
+            'username': clean_u,
+            'user_id': user_id,
+            'balance': 50,
+            'karma': 0,
+            'language': 'ru',
+        }
+        mark_dirty()
 
     if user_id:
         # Telegram display names are not unique. Using a display name here can
@@ -2358,7 +2852,9 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         mark_dirty()
 
     u_data = db['economy'][key]
-    u_data.setdefault('language', 'ru')
+    if 'language' not in u_data:
+        u_data['language'] = 'ru'
+        mark_dirty()
 
     # Миграция старых донатных значков: в прошлой версии они имели
     # ключи vip_badge_*. Не удаляем старые права и не заставляем игрока
@@ -2371,10 +2867,14 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         'vip_badge_galaxy': 'badge_galaxy',
         'vip_badge_dragon': 'badge_dragon',
     }
-    _paid = u_data.setdefault('paid_stars_items', [])
+    if 'paid_stars_items' not in u_data:
+        u_data['paid_stars_items'] = []
+        mark_dirty()
+    _paid = u_data.get('paid_stars_items')
     if not isinstance(_paid, list):
         _paid = []
         u_data['paid_stars_items'] = _paid
+        mark_dirty()
     # Durable Stars entitlements: restore convenience flags if an older
     # snapshot lost them but retained the paid entitlement list.
     if 'bp_premium' in _paid and not u_data.get('bp_premium'):
@@ -2383,10 +2883,14 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     if 'pass_forever' in _paid and not u_data.get('vip_forever'):
         u_data['vip_forever'] = True
         mark_dirty()
-    _inv = u_data.setdefault('inventory', [])
+    if 'inventory' not in u_data:
+        u_data['inventory'] = []
+        mark_dirty()
+    _inv = u_data.get('inventory')
     if not isinstance(_inv, list):
         _inv = []
         u_data['inventory'] = _inv
+        mark_dirty()
     for _old_badge, _new_badge in _legacy_badges.items():
         if _old_badge in _paid:
             if _new_badge not in _paid:
@@ -2412,14 +2916,19 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
 
     # Миграция гаража: все купленные машины сохраняются, а vehicle/equipped_vehicle
     # остаётся совместимым алиасом для текущей экипированной машины.
-    vehicle_inventory = u_data.setdefault('vehicle_inventory', [])
+    if 'vehicle_inventory' not in u_data:
+        u_data['vehicle_inventory'] = []
+        mark_dirty()
+    vehicle_inventory = u_data.get('vehicle_inventory')
     if not isinstance(vehicle_inventory, list):
         vehicle_inventory = []
         u_data['vehicle_inventory'] = vehicle_inventory
+        mark_dirty()
     legacy_vehicle = u_data.get('vehicle')
     if legacy_vehicle in VEHICLES or legacy_vehicle in DONOR_VEHICLES:
         if legacy_vehicle not in vehicle_inventory:
             vehicle_inventory.append(legacy_vehicle)
+            mark_dirty()
     equipped = u_data.get('equipped_vehicle')
     if equipped not in vehicle_inventory:
         equipped = legacy_vehicle if legacy_vehicle in vehicle_inventory else (vehicle_inventory[-1] if vehicle_inventory else None)
@@ -2440,20 +2949,25 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
             else:
                 u_data['pet'] = None
                 mark_dirty()
-    if clean_d:
+    if clean_d and u_data.get('display_name') != clean_d:
         u_data['display_name'] = clean_d
-    if clean_u:
+        mark_dirty()
+    if clean_u and u_data.get('username') != clean_u:
         u_data['username'] = clean_u
-    if user_id:
+        mark_dirty()
+    if user_id and u_data.get('user_id') != user_id:
         u_data['user_id'] = user_id
+        mark_dirty()
 
+    defaults_changed = False
     for field, default in [
         ('username', clean_u), ('pfp_file_id', None), ('inventory', []), ('account_exp', 0),
         ('smeh', 0), ('iq', 100), ('fat', 20), ('foot_size', 25), ('dick_size', 15),
         ('last_dick_time', 0), ('fap_count', 0), ('fap_date', ''), ('last_fap_time', 0), ('mog_count', 0),
         ('chromosomes', 46), ('last_chromosomes_time', 0), ('last_wheel_time', 0),
         ('last_pet_walk', 0), ('last_pet_care', 0), ('rest_rewards_count', 0),
-        ('titles', []), ('active_title', None), ('custom_title', None),
+        ('titles', []), ('active_title', None), ('custom_title', None), ('custom_title_text', None),
+        ('custom_titles', []), ('custom_title_id', None), ('custom_title_credit_used', False), ('pending_custom_title_orders', {}),
         ('has_custom_title_cert', False), ('rings', []), ('active_ring', None),
         ('marriage', None), ('businesses', {}), ('biz_levels', {}), ('biz_purchase_price', {}), ('business_transactions', []), ('business_tax_paid', 0),
         ('last_biz_collect', time.time()), ('biz_last_collect', {}), ('biz_income_carry', {}), ('donor_business_purchased_at', {}), ('vehicle', None), ('vehicle_inventory', []), ('equipped_vehicle', None), ('donor_businesses', {}),
@@ -2481,11 +2995,70 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     ]:
         if field not in u_data:
             u_data[field] = default
+            defaults_changed = True
+    if defaults_changed:
+        mark_dirty()
+
+    # Repair malformed collection shapes before later handlers call .get/.items/.append.
+    # Defaults are copied so mutable containers are never shared between profiles.
+    _collection_defaults = {
+        'inventory': (list, []), 'titles': (list, []), 'custom_titles': (list, []),
+        'rings': (list, []), 'achievements': (list, []), 'paid_stars_items': (list, []),
+        'pet_inventory': (list, []), 'vehicle_inventory': (list, []),
+        'rod_inventory': (list, []), 'bow_inventory': (list, []),
+        'purchased_themes': (list, ['default']), 'purchased_fonts': (list, ['default']),
+        'bp_claimed_free': (list, []), 'bp_claimed_prem': (list, []),
+        'businesses': (dict, {}), 'biz_levels': (dict, {}), 'biz_purchase_price': (dict, {}),
+        'biz_last_collect': (dict, {}), 'biz_income_carry': (dict, {}),
+        'donor_businesses': (dict, {}), 'donor_business_purchased_at': (dict, {}),
+        'fish_inventory': (dict, {}), 'hunt_inventory': (dict, {}), 'crypto_portfolio': (dict, {}),
+        'backpack': (dict, {'energy_drink': 0, 'luck_clover': 0, 'alarm_system': 0, 'invis_mask': 0, 'garden_fertilizer': 0}),
+        'daily_progress': (dict, {}), 'weekly_progress': (dict, {}),
+        'daily_claimed': (list, []), 'weekly_claimed': (list, []),
+        'business_transactions': (list, []), 'economy_transactions': (list, []),
+        'account_exp_history': (list, []), 'crypto_trade_history': (list, []),
+        'mini_transactions': (list, []), 'mini_notifications': (list, []),
+        'mini_reported_records': (dict, {}), 'mini_verified_records': (dict, {}),
+        'stats': (dict, {}), 'stream_studio': (dict, {'mic': 1, 'webcam': 1, 'light': 1}),
+        'loan': (dict, {'amount': 0, 'due': 0, 'defaulted': False}),
+    }
+    _collections_changed = False
+    for _field, (_expected_type, _empty_value) in _collection_defaults.items():
+        if not isinstance(u_data.get(_field), _expected_type):
+            u_data[_field] = copy.deepcopy(_empty_value)
+            _collections_changed = True
+    if _collections_changed:
+        mark_dirty()
+
+    # Migrate legacy single-title profiles into the new multi-title collection.
+    # Existing titles remain owned; the old paid certificate can still grant one
+    # title if it was purchased but never used before this update.
+    if not u_data.get('custom_title_text') and u_data.get('custom_title'):
+        u_data['custom_title_text'] = str(u_data['custom_title'])
+        mark_dirty()
+    legacy_text = u_data.get('custom_title_text') or u_data.get('custom_title')
+    custom_titles = u_data.get('custom_titles')
+    if not isinstance(custom_titles, list):
+        custom_titles = []
+        u_data['custom_titles'] = custom_titles
+        mark_dirty()
+    if legacy_text and not any(isinstance(item, dict) and str(item.get('text', '')) == str(legacy_text) for item in custom_titles):
+        legacy_id = str(u_data.get('custom_title_id') or 'ct_legacy')
+        custom_titles.append({'id': legacy_id, 'text': str(legacy_text), 'created_at': 0, 'legacy': True})
+        u_data['custom_title_id'] = legacy_id
+        u_data['custom_title_credit_used'] = True
+        mark_dirty()
+    if not isinstance(u_data.get('pending_custom_title_orders'), dict):
+        u_data['pending_custom_title_orders'] = {}
+        mark_dirty()
 
     # Инвентарь питомцев: старый активный питомец автоматически переносится в коллекцию.
-    pet_inventory = u_data.setdefault('pet_inventory', [])
+    if 'pet_inventory' not in u_data:
+        u_data['pet_inventory'] = []
+        mark_dirty()
+    pet_inventory = u_data.get('pet_inventory')
     if not isinstance(pet_inventory, list):
-        pet_inventory = []; u_data['pet_inventory'] = pet_inventory
+        pet_inventory = []; u_data['pet_inventory'] = pet_inventory; mark_dirty()
     legacy_pet = u_data.get('pet')
     if isinstance(legacy_pet, dict) and legacy_pet.get('id') and legacy_pet.get('id') in PETS_DATA and legacy_pet.get('id') not in pet_inventory:
         pet_inventory.append(legacy_pet.get('id'))
@@ -2495,24 +3068,38 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     # обновления игрок не мог потерять её статус или быть ошибочно списан повторно.
     if u_data.get('equipped_rod') and u_data.get('equipped_rod') in RODS:
         rods = u_data.setdefault('rod_inventory', [])
+        if not isinstance(rods, list):
+            rods = []
+            u_data['rod_inventory'] = rods
+            mark_dirty()
         if u_data['equipped_rod'] not in rods:
             rods.append(u_data['equipped_rod'])
+            mark_dirty()
     for _num_field in ('balance', 'bank_deposit', 'account_exp', 'work_exp', 'stars_donated', 'bp_exp', 'season_points'):
         try:
-            u_data[_num_field] = int(u_data.get(_num_field, 0) or 0)
-        except (TypeError, ValueError):
-            u_data[_num_field] = 0
+            normalized_value = max(0, int(u_data.get(_num_field, 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            normalized_value = 0
+        if u_data.get(_num_field) != normalized_value:
+            u_data[_num_field] = normalized_value
+            mark_dirty()
 
     if u_data.get('equipped_bow') and u_data.get('equipped_bow') in BOWS:
         bows = u_data.setdefault('bow_inventory', [])
+        if not isinstance(bows, list):
+            bows = []
+            u_data['bow_inventory'] = bows
+            mark_dirty()
         if u_data['equipped_bow'] not in bows:
             bows.append(u_data['equipped_bow'])
+            mark_dirty()
 
-    if 'msg_stats' not in u_data:
+    if not isinstance(u_data.get('msg_stats'), dict):
         u_data['msg_stats'] = {
             'day_date': '', 'day_count': 0, 'week_key': '',
             'week_count': 0, 'month_key': '', 'month_count': 0, 'total_count': 0
         }
+        mark_dirty()
 
     today_str = now_msk().strftime('%Y-%m-%d')
     if u_data.get('daily_stats_date') != today_str:
@@ -2555,6 +3142,7 @@ economy_service.configure(
     db_lock=db_lock,
     mark_dirty=mark_dirty,
     get_user_econ=get_user_econ,
+    balance_adjuster=lambda econ, amount, reason='Изменение баланса': _adjust_balance(econ, amount, reason, minimum=0),
     titles=TITLES,
     vehicles=VEHICLES,
     donor_vehicles=DONOR_VEHICLES,
@@ -2583,23 +3171,30 @@ configure_localization(
 install_telegram_localization(bot)
 
 def recover_stars_entitlements_from_journal():
-    """Repair durable Stars Pass entitlements from completed payment journals."""
-    logs = db.get('stars_payment_log', {}) or {}
+    """Repair durable Stars Pass entitlements without trusting old journal shapes."""
+    logs = db.get('stars_payment_log', {})
     if not isinstance(logs, dict):
-        return False
+        db['stars_payment_log'] = {}
+        mark_dirty()
+        return True
     changed = False
     now = time.time()
+    processed = db.get('processed_stars_charges')
+    if not isinstance(processed, list):
+        processed = []
+        db['processed_stars_charges'] = processed
+        changed = True
+
     for charge_id, entry in list(logs.items()):
         if not isinstance(entry, dict):
             continue
         status = str(entry.get('status', '') or '')
         grant_status = str(entry.get('grant_status', '') or '')
-        # If the entitlement was applied and journaled but the final processed
-        # marker was interrupted, complete the journal without granting twice.
+        # The entitlement was applied before grant_status was journaled. Complete
+        # this record, but don't run the grant a second time.
         if status == 'processing' and grant_status == 'granted':
             entry['status'] = 'completed'
-            entry['finished_at'] = time.time()
-            processed = db.setdefault('processed_stars_charges', [])
+            entry['finished_at'] = now
             charge_key = str(charge_id)
             if charge_key not in processed:
                 processed.append(charge_key)
@@ -2610,24 +3205,32 @@ def recover_stars_entitlements_from_journal():
         if status != 'completed':
             continue
         payload = str(entry.get('payload', '') or '')
-        buyer_id = int(entry.get('buyer_id', 0) or 0)
+        try:
+            buyer_id = int(entry.get('buyer_id', 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
         if buyer_id <= 0:
             continue
         try:
             econ = get_user_econ(user_id=buyer_id)
         except Exception:
             continue
+        if not isinstance(econ, dict):
+            continue
         if payload.startswith('vippass_'):
             pass_key = payload.split(':', 1)[0].replace('vippass_', '', 1)
             item = STARS_VIP_PASS.get(pass_key)
             if not item:
                 continue
-            paid = econ.setdefault('paid_stars_items', [])
+            paid = econ.get('paid_stars_items')
             if not isinstance(paid, list):
                 paid = []
                 econ['paid_stars_items'] = paid
                 changed = True
-            days = int(item.get('days', 0) or 0)
+            try:
+                days = int(item.get('days', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
             if days == -1:
                 if 'pass_forever' not in paid:
                     paid.append('pass_forever')
@@ -2636,12 +3239,32 @@ def recover_stars_entitlements_from_journal():
                     econ['vip_forever'] = True
                     changed = True
             else:
-                entitlement_until = float(entry.get('entitlement_until', 0) or 0)
-                if entitlement_until > now and entitlement_until > float(econ.get('vip_until', 0) or 0):
+                try:
+                    entitlement_until = float(entry.get('entitlement_until', 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    entitlement_until = 0.0
+                raw_current_vip_until = econ.get('vip_until', 0)
+                try:
+                    current_vip_until = float(raw_current_vip_until or 0)
+                except (TypeError, ValueError, OverflowError):
+                    current_vip_until = 0.0
+                if not math.isfinite(entitlement_until) or entitlement_until < 0:
+                    entitlement_until = 0.0
+                current_vip_valid = math.isfinite(current_vip_until) and current_vip_until >= 0
+                if not current_vip_valid:
+                    current_vip_until = 0.0
+                raw_vip_valid = (
+                    isinstance(raw_current_vip_until, (int, float))
+                    and current_vip_valid
+                )
+                if not raw_vip_valid:
+                    econ['vip_until'] = current_vip_until
+                    changed = True
+                if entitlement_until > now and entitlement_until > current_vip_until:
                     econ['vip_until'] = entitlement_until
                     changed = True
         elif payload.startswith('bpprem_') or payload == 'cosm_bp_premium':
-            paid = econ.setdefault('paid_stars_items', [])
+            paid = econ.get('paid_stars_items')
             if not isinstance(paid, list):
                 paid = []
                 econ['paid_stars_items'] = paid
@@ -2736,27 +3359,138 @@ def add_message_stat(user_id, user_tag, username=None, chat_id=None):
         mark_dirty()
 
 
-def _adjust_balance(econ, amount):
-    """Change an already-resolved account balance under the DB lock."""
+def _record_economy_transaction(econ, delta, before, after, reason):
+    """Append one bounded balance-change record; caller owns BALANCE_TX_LOCK/db_lock."""
+    delta = int(delta or 0)
+    if not delta:
+        return
+    journal = econ.setdefault('economy_transactions', [])
+    if not isinstance(journal, list):
+        journal = []
+        econ['economy_transactions'] = journal
+    journal.append({
+        'time': time.time(),
+        'delta': delta,
+        'before': int(before),
+        'after': int(after),
+        'reason': str(reason or 'Изменение баланса')[:80],
+    })
+    del journal[:-100]
+
+
+def _adjust_balance(econ, amount, reason='Изменение баланса', minimum=None):
+    """Change balance atomically and keep a short per-account audit trail."""
+    delta = int(amount or 0)
+    default_reason = reason == 'Изменение баланса'
     with BALANCE_TX_LOCK:
         with db_lock:
             current = int(econ.get('balance', 0) or 0)
-            new_balance = current + int(amount or 0)
+            new_balance = current + delta
+            if minimum is not None:
+                new_balance = max(int(minimum), new_balance)
+            actual_delta = new_balance - current
+            if default_reason:
+                reason = 'Начисление коинов' if actual_delta > 0 else 'Списание коинов'
             econ['balance'] = new_balance
+            _record_economy_transaction(econ, actual_delta, current, new_balance, reason)
             mark_dirty()
             return new_balance
 
 
-def _set_balance(econ, value):
-    """Set an already-resolved account balance under the DB lock."""
+def _set_balance(econ, value, reason='Корректировка баланса'):
+    """Set an already-resolved account balance and journal its actual delta."""
     with BALANCE_TX_LOCK:
         with db_lock:
+            current = int(econ.get('balance', 0) or 0)
             new_balance = int(value or 0)
             econ['balance'] = new_balance
+            delta = new_balance - current
+            if reason == 'Корректировка баланса':
+                reason = 'Начисление коинов' if delta > 0 else 'Списание коинов'
+            _record_economy_transaction(econ, delta, current, new_balance, reason)
             mark_dirty()
             return new_balance
 
-def debit_coins(user_id, user_tag=None, amount=0, username=None):
+
+def _debit_balance_up_to(econ, amount, reason='Списание коинов'):
+    """Debit at most the live wallet balance, atomically and with journaling."""
+    try:
+        requested = int(amount)
+    except (TypeError, ValueError, OverflowError):
+        return 0, max(0, int(econ.get('balance', 0) or 0))
+    if requested <= 0:
+        return 0, max(0, int(econ.get('balance', 0) or 0))
+    with BALANCE_TX_LOCK:
+        with db_lock:
+            current = max(0, int(econ.get('balance', 0) or 0))
+            removed = min(current, requested)
+            if removed:
+                _adjust_balance(econ, -removed, reason=reason)
+            return removed, max(0, int(econ.get('balance', 0) or 0))
+
+
+def _bank_deposit(econ, amount=None, user_id=None):
+    """Move wallet coins into the bank as one snapshot-atomic transaction.
+
+    Returns (ok, amount_moved, wallet_after, deposit_after). An omitted amount
+    means all available wallet coins. Handler-level serialization is reinforced
+    here so future callers cannot split the wallet/deposit update across saves.
+    """
+    try:
+        uid = int(user_id) if user_id is not None else None
+        requested = None if amount is None else int(amount)
+    except (TypeError, ValueError, OverflowError):
+        return False, 0, 0, 0
+    if requested is not None and requested <= 0:
+        return False, 0, 0, 0
+    user_lock = _get_user_action_lock(uid) if uid is not None else contextlib.nullcontext()
+    with user_lock:
+        with BALANCE_TX_LOCK:
+            with db_lock:
+                try:
+                    wallet = max(0, int(econ.get('balance', 0) or 0))
+                    deposit = max(0, int(econ.get('bank_deposit', 0) or 0))
+                except (TypeError, ValueError, OverflowError):
+                    return False, 0, 0, 0
+                moved = wallet if requested is None else requested
+                if moved <= 0 or wallet < moved:
+                    return False, 0, wallet, deposit
+                _adjust_balance(econ, -moved, reason='Перевод наличных в банковский вклад')
+                econ['bank_deposit'] = deposit + moved
+                mark_dirty()
+                return True, moved, int(econ.get('balance', 0) or 0), int(econ['bank_deposit'])
+
+
+def _bank_withdraw(econ, amount=None, user_id=None):
+    """Move bank coins into the wallet atomically with the accrual clock."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+        requested = None if amount is None else int(amount)
+    except (TypeError, ValueError, OverflowError):
+        return False, 0, 0, 0
+    if requested is not None and requested <= 0:
+        return False, 0, 0, 0
+    user_lock = _get_user_action_lock(uid) if uid is not None else contextlib.nullcontext()
+    with user_lock:
+        with BALANCE_TX_LOCK:
+            with db_lock:
+                try:
+                    wallet = max(0, int(econ.get('balance', 0) or 0))
+                    deposit = max(0, int(econ.get('bank_deposit', 0) or 0))
+                except (TypeError, ValueError, OverflowError):
+                    return False, 0, 0, 0
+                moved = deposit if requested is None else requested
+                if moved <= 0 or deposit < moved:
+                    return False, 0, wallet, deposit
+                remaining = deposit - moved
+                econ['bank_deposit'] = remaining
+                if remaining == 0:
+                    econ['last_bank_calc'] = time.time()
+                _adjust_balance(econ, moved, reason='Снятие с банковского вклада')
+                mark_dirty()
+                return True, moved, int(econ.get('balance', 0) or 0), remaining
+
+def debit_coins(user_id, user_tag=None, amount=0, username=None, reason='Покупка'):
     """Atomically debit coins if the account has enough money.
 
     The balance check and the subtraction happen under the same per-user and
@@ -2780,6 +3514,7 @@ def debit_coins(user_id, user_tag=None, amount=0, username=None):
                     return None, current
                 new_balance = current - amount
                 econ['balance'] = new_balance
+                _record_economy_transaction(econ, -amount, current, new_balance, reason)
                 mark_dirty()
                 return econ, new_balance
 
@@ -2806,6 +3541,14 @@ def transfer_coins(from_user_id, from_tag, to_user_id, to_tag, amount,
                     return False, sender_balance, receiver_balance
                 sender['balance'] = sender_balance - amount
                 receiver['balance'] = receiver_balance + amount
+                _record_economy_transaction(
+                    sender, -amount, sender_balance, sender['balance'],
+                    f'Перевод игроку {receiver_id}',
+                )
+                _record_economy_transaction(
+                    receiver, amount, receiver_balance, receiver['balance'],
+                    f'Перевод от игрока {sender_id}',
+                )
                 mark_dirty()
                 return True, sender['balance'], receiver['balance']
 
@@ -2913,9 +3656,10 @@ def update_bank_interest(econ):
 def change_karma(user_id, user_tag, amount, username=None):
     return economy_service.change_karma(user_id, user_tag, amount, username=username)
 
-def add_account_exp(user_id, user_tag, exp_amount=1, username=None):
-    economy_service.add_account_exp(user_id, user_tag, exp_amount, username=username)
-    return None
+def add_account_exp(user_id, user_tag, exp_amount=1, username=None, *, source='activity'):
+    return economy_service.add_account_exp(
+        user_id, user_tag, exp_amount, username=username, source=source
+    )
 
 def check_casino_limits(econ, bet, is_multiplayer=False):
     return True
@@ -2984,8 +3728,8 @@ def atomic_safe_attempt(chat_id, econ, code_entered, user_id, user_name, usernam
         econ['last_safe_try'] = now_ts
         if code_entered == safe.get('code'):
             won_pot = pot
-            _adjust_balance(econ, won_pot)
-            add_account_exp(user_id, user_name, 200, username=username)
+            _adjust_balance(econ, won_pot, reason='Выигрыш из сейфа')
+            add_account_exp(user_id, user_name, 200, username=username, source='safe_win')
             change_karma(user_id, user_name, 5)
             safe['code'] = f"{random.randint(0, 9999):04d}"
             safe['pot'] = 15000
@@ -2993,7 +3737,7 @@ def atomic_safe_attempt(chat_id, econ, code_entered, user_id, user_name, usernam
             mark_dirty()
             return ('win', won_pot, pot)
         tried.append(code_entered)
-        add_account_exp(user_id, user_name, 5, username=username)
+        add_account_exp(user_id, user_name, 5, username=username, source='safe_miss')
         mark_dirty()
         return ('miss', None, pot)
 
@@ -3095,9 +3839,11 @@ def process_casino_win(win):
 
 # Все slash-команды и русские алиасы для единого антифлуда.
 REGISTERED_COMMAND_ALIASES = frozenset(['21', 'achievements', 'activity', 'backpack', 'bail', 'balance', 'ball', 'bank', 'basketball', 'battle_pass', 'biz', 'bj', 'blackjack', 'bowling', 'bp', 'brick', 'business', 'case', 'catch', 'chance', 'chest', 'chromosomes', 'collect', 'collection', 'cook', 'crash', 'crypto', 'csaper', 'daily_heroes', 'darts', 'dashboard', 'detector', 'dick', 'divorce', 'donate', 'durak', 'economystats', 'escape', 'fact_vd', 'family', 'fanfic', 'fap', 'fat', 'findgroup', 'foot', 'football', 'gamestats', 'garage', 'garden', 'gear', 'gift', 'gift_stars', 'give', 'give_gif', 'grant', 'groupinfo', 'groups', 'guild', 'help', 'history', 'home', 'house', 'info', 'inventory', 'iq', 'jail', 'jobs', 'loan', 'lottery', 'market', 'marry', 'meme', 'memes', 'menu', 'miner', 'mines', 'minesweeper', 'monopoly', 'pass', 'pet', 'pet_fight', 'petclothes', 'pharmacy', 'pmarket', 'portfolio', 'profile', 'profile_settings', 'promo', 'raid', 'repay', 'resources', 'rps', 'safe', 'salary', 'season', 'sell', 'set_profile', 'settings', 'sheriff', 'shop', 'stars', 'start', 'stats', 'status', 'story', 'stream', 'tasks', 'top', 'top_daily', 'top_weekly', 'train', 'trash', 'user', 'vd_fact', 'vip', 'walk', 'wheel', 'work', 'world', 'активность', 'аптека', 'ачивки', 'баланс', 'банк', 'баскетбол', 'бизнес', 'бизнесы', 'биржа', 'битвы_питомцев', 'блэкджек', 'бой_питомцев', 'больница', 'боулинг', 'брак', 'вакансии', 'выдать', 'выдать_gif', 'гараж', 'герои_дня', 'гильдия', 'группы', 'гулять', 'дартс', 'депозит', 'детектор', 'дом', 'донат', 'дроч', 'дурак', 'жилье', 'жильё', 'задания', 'залог', 'замер', 'зарплата', 'звезды', 'игрыстат', 'инв', 'инвентарь', 'инвентарь_баффов', 'инфогруппы', 'история', 'история_дня', 'карта', 'квесты', 'кейс', 'кирпич', 'клан', 'колесо', 'коллекция', 'кпз', 'краш', 'кредит', 'крипта', 'кулинария', 'лотерея', 'магазин', 'майнер', 'майнинг', 'мем', 'мемы', 'мины', 'мир', 'монополия', 'мусорка', 'найтигруппу', 'настройки', 'настройки_профиля', 'одежда_питомца', 'опыт', 'панель', 'пасс', 'пенальти',
- 'пет', 'писюн', 'питомец', 'побег', 'погасить', 'подарить_звезды', 'подарок', 'подарок_звезды', 'подрочить', 'поймать', 'пользователь', 'помойка', 'портфель', 'правда', 'прибыль', 'приготовить', 'продать', 'промо', 'промокод', 'профиль', 'работа', 'развод', 'ракета', 'рейд', 'рейтинг_сезона', 'ресурсы', 'рулетка', 'рынок_игроков', 'рюкзак', 'сад', 'сапер', 'сапер_классик', 'сапёр_классик', 'сезон', 'сейф', 'семья', 'снасти', 'статистика', 'статус', 'стрим', 'сундук', 'топ', 'топ_день', 'топ_неделя', 'тюрьма', 'ударники', 'ферма', 'футбол', 'хеллоуин', 'хромосома', 'хромосомы', 'цуефа', 'чест', 'шанс', 'шар', 'шериф', 'экономика', 'юзер']) | frozenset({'custom_title', 'кастомный_титул', 'ban', 'bans', 'biometry', 'force_save', 'games', 'give_stars_all', 'kick', 'miniigry', 'minigames', 'mute', 'mutes', 'save_json', 'stars_all', 'unban', 'unmute', 'warn', 'warns', 'анмут', 'бан', 'баны', 'биометрия', 'варн', 'варны', 'выдать_все_звезды', 'замеры', 'игры', 'кик', 'мут', 'муты', 'налаштування_профілю', 'разбан', 'снятьмут', 'сохранить', 'сохранить_json'})
+ 'пет', 'писюн', 'питомец', 'побег', 'погасить', 'подарить_звезды', 'подарок', 'подарок_звезды', 'подрочить', 'поймать', 'пользователь', 'помойка', 'портфель', 'правда', 'прибыль', 'приготовить', 'продать', 'промо', 'промокод', 'профиль', 'работа', 'развод', 'ракета', 'рейд', 'рейтинг_сезона', 'ресурсы', 'рулетка', 'рынок_игроков', 'рюкзак', 'сад', 'сапер', 'сапер_классик', 'сапёр_классик', 'сезон', 'сейф', 'семья', 'снасти', 'статистика', 'статус', 'стрим', 'сундук', 'топ', 'топ_день', 'топ_неделя', 'тюрьма', 'ударники', 'ферма', 'футбол', 'хеллоуин', 'хромосома', 'хромосомы', 'цуефа', 'чест', 'шанс', 'шар', 'шериф', 'экономика', 'юзер']) | frozenset({'custom_title', 'кастомный_титул', 'create_tittle', 'create_title', 'ban', 'bans', 'biometry', 'force_save', 'games', 'give_stars_all', 'kick', 'miniigry', 'minigames', 'mute', 'mutes', 'save_json', 'stars_all', 'unban', 'unmute', 'warn', 'warns', 'анмут', 'бан', 'баны', 'биометрия', 'варн', 'варны', 'выдать_все_звезды', 'замеры', 'игры', 'кик', 'мут', 'муты', 'налаштування_профілю', 'разбан', 'снятьмут', 'сохранить', 'сохранить_json'})
 
 
+
+REGISTERED_COMMAND_ALIASES = REGISTERED_COMMAND_ALIASES | frozenset({'moneyhistory', 'coinhistory', 'история_денег'})
 
 def is_registered_command_text(text):
     text = str(text or '').strip().lower()
@@ -3241,11 +3987,11 @@ def check_achievements(user_id, user_tag, stat_name, amount=1, chat_id=None, use
                 if current_val >= target_val:
                     unlocked.append(ach_id)
                     reward = int(ach_info.get('reward', 0) or 0)
-                    econ['balance'] = int(econ.get('balance', 0) or 0) + reward
+                    _adjust_balance(econ, reward, reason=f'Награда за достижение: {ach_id}')
                     # Keep XP update in the same locked transaction. add_account_exp
                     # is safe here because it now acquires the same lock order and
                     # both are reentrant locks for this thread.
-                    add_account_exp(user_id, user_tag, 50, username)
+                    add_account_exp(user_id, user_tag, 50, username, source='achievement')
                     unlocked_new.append((ach_info['title'], ach_info['desc'], reward))
 
             mark_dirty()
@@ -3306,8 +4052,8 @@ def track_daily_task(user_id, user_tag, task_key, amount=1, chat_id=None, userna
     for key, description, target, reward in tasks:
         if key not in econ.get('daily_claimed', []) and progress.get(key, 0) >= target:
             econ.setdefault('daily_claimed', []).append(key)
-            _adjust_balance(econ, reward)
-            add_account_exp(user_id, user_tag, 25, username)
+            _adjust_balance(econ, reward, reason=f'Награда за ежедневное задание: {description}')
+            add_account_exp(user_id, user_tag, 25, username, source='daily_task')
             completed.append((f"Ежедневное: {description}", reward))
 
     w_tasks, _ = get_weekly_tasks(user_id, user_tag, username)
@@ -3317,8 +4063,8 @@ def track_daily_task(user_id, user_tag, task_key, amount=1, chat_id=None, userna
     for key, description, target, reward in w_tasks:
         if key not in econ.get('weekly_claimed', []) and w_progress.get(key, 0) >= target:
             econ.setdefault('weekly_claimed', []).append(key)
-            _adjust_balance(econ, reward)
-            add_account_exp(user_id, user_tag, 100, username)
+            _adjust_balance(econ, reward, reason=f'Награда за еженедельное задание: {description}')
+            add_account_exp(user_id, user_tag, 100, username, source='weekly_task')
             completed.append((f"Еженедельное: {description}", reward))
 
     if completed:
@@ -3422,6 +4168,14 @@ def get_admin_permission_level(chat_id, action):
         return DEFAULT_ADMIN_PERMISSIONS.get(action, 4)
 
 def can_admin_action(chat_id, user_id, action):
+    """Check chat permissions while keeping the creator's recovery path available.
+
+    Disabling administrator functions must not lock the Telegram chat creator
+    out of settings: the creator needs to be able to turn the feature back on.
+    The exception applies only to the settings surface, not moderation actions.
+    """
+    if action == 'settings' and is_chat_owner(chat_id, user_id):
+        return True
     if not get_chat_settings(chat_id).get('admin_functions_enabled', True):
         return False
     return get_admin_level(chat_id, user_id) >= get_admin_permission_level(chat_id, action)
@@ -4316,11 +5070,11 @@ def memory_and_debt_worker():
                             total_funds = pocket + bank_dep
                             if total_funds >= amount:
                                 from_pocket = min(pocket, amount)
-                                econ['balance'] = pocket - from_pocket
+                                _adjust_balance(econ, -from_pocket, reason='Погашение просроченного кредита')
                                 econ['bank_deposit'] = max(0, bank_dep - (amount - from_pocket))
                                 econ['loan'] = {'amount': 0, 'due': 0, 'defaulted': False}
                             else:
-                                econ['balance'] = 0
+                                _adjust_balance(econ, -pocket, reason='Списание при дефолте по кредиту')
                                 econ['bank_deposit'] = 0
                                 econ['loan']['amount'] = max(0, amount - total_funds)
                                 econ['loan']['defaulted'] = True
@@ -4726,7 +5480,7 @@ def stream_thread(chat_id, user_id, user_name, genre, message_id):
         live_econ['stream_streams'] = live_streams
         live_econ['stream_viewers_total'] = live_viewers_total
         live_econ['stream_donates_total'] = live_donates_total
-        _set_balance(live_econ, max(0, int(live_econ.get('balance', 0) or 0)) + max(0, donates))
+        _adjust_balance(live_econ, max(0, int(donates or 0)), reason='Доход от стрима')
         change_karma(user_id, user_name, karma_diff)
         mark_dirty()
 
@@ -4989,7 +5743,7 @@ def process_sport_dice_game(message, game_type, bet):
         # permanent loss with no game/result.
         with _get_user_action_lock(user_id):
             live_econ = get_user_econ(user_id, user_name, username=user_username)
-            _set_balance(live_econ, max(0, int(live_econ.get('balance', 0) or 0)) + bet)
+            _adjust_balance(live_econ, bet, reason=f'Возврат ставки: ошибка запуска {game_type}')
             reverse_casino_bet(bet, chat_id)
             mark_dirty()
         print(f"[SPORT DICE SEND ERROR] {e}")
@@ -5011,20 +5765,21 @@ def process_sport_dice_game(message, game_type, bet):
                 clover_str = " (🍀 Бонус клевера)" if has_clover else ""
                 result_text = ""
             
-                pool = db.get('casino_pool', 1000000)
+                # Telegram's dice result is authoritative. Never rewrite the
+                # visible roll based on the casino pool: doing so makes the
+                # animation disagree with the outcome shown to the player.
                 actual_val = val
-                if pool < bet * 3:
-                    actual_val = 1
 
                 if game_type == 'football':
                     if actual_val in [3, 4, 5]:
                         mult = 1.35 if not has_clover else 1.45
                         win_amount = int(bet * mult)
                         win_amount = process_casino_win(win_amount)
+                        effective_mult = (win_amount / bet) if bet > 0 else 0.0
                         _adjust_balance(econ, win_amount)
                         econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
                         econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                        result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{mult}){clover_str}!"
+                        result_text = f"⚽️ <b>ГОООООЛ! МЯЧ В СЕТКЕ!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} Ня-коинов 🪙</b> (x{effective_mult:.2f}){clover_str}!"
                     elif actual_val == 2:
                         result_text = f"🧤 <b>ВРАТАРЬ ОТБИЛ УДАР!</b> 🙀\n💸 Штанга и сейф! Ставка <b>{bet} 🪙</b> сгорела."
                     else:
@@ -5035,10 +5790,11 @@ def process_sport_dice_game(message, game_type, bet):
                         mult = 1.65 if not has_clover else 1.75
                         win_amount = int(bet * mult)
                         win_amount = process_casino_win(win_amount)
+                        effective_mult = (win_amount / bet) if bet > 0 else 0.0
                         _adjust_balance(econ, win_amount)
                         econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
                         econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                        result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                        result_text = f"🏀 <b>ТОЧНЫЙ БРОСОК В КОРЗИНУ!</b> 😻\n🎉 Чистый трёхочковый! Выигрыш: <b>+{win_amount} 🪙</b> (x{effective_mult:.2f}){clover_str}!"
                     elif actual_val == 3:
                         result_text = f"🧱 <b>МЯЧ ЗАСТРЯЛ НА ДУЖКЕ!</b> 🙀\n💸 Досадный промах! Ставка <b>{bet} 🪙</b> сгорела."
                     else:
@@ -5049,18 +5805,20 @@ def process_sport_dice_game(message, game_type, bet):
                         mult = 2.5 if not has_clover else 2.8
                         win_amount = int(bet * mult)
                         win_amount = process_casino_win(win_amount)
+                        effective_mult = (win_amount / bet) if bet > 0 else 0.0
                         _adjust_balance(econ, win_amount)
                         econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
                         econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                        result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 Куш: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                        result_text = f"🎯👑 <b>ПРЯМО В ЯБЛОЧКО (BULLSEYE)!</b> 🙀\n🎉 Куш: <b>+{win_amount} 🪙</b> (x{effective_mult:.2f}){clover_str}!"
                     elif actual_val == 5:
                         mult = 1.25
                         win_amount = int(bet * mult)
                         win_amount = process_casino_win(win_amount)
+                        effective_mult = (win_amount / bet) if bet > 0 else 0.0
                         _adjust_balance(econ, win_amount)
                         econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
                         econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                        result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{mult})!"
+                        result_text = f"🎯 <b>ОТЛИЧНОЕ ПОПАДАНИЕ В ЦЕНТР!</b> 😺\n🎉 Выигрыш: <b>+{win_amount} 🪙</b> (x{effective_mult:.2f})!"
                     else:
                         result_text = f"💨 <b>ДРОТИК УЛЕТЕЛ МИМО!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
@@ -5069,19 +5827,21 @@ def process_sport_dice_game(message, game_type, bet):
                         mult = 2.2 if not has_clover else 2.4
                         win_amount = int(bet * mult)
                         win_amount = process_casino_win(win_amount)
+                        effective_mult = (win_amount / bet) if bet > 0 else 0.0
                         _adjust_balance(econ, win_amount)
                         econ['daily_casino_win'] = econ.get('daily_casino_win', 0) + (win_amount - bet)
                         econ['daily_casino_profit'] = econ.get('daily_casino_profit', 0) + (win_amount - bet)
-                        result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Точный бросок: <b>+{win_amount} 🪙</b> (x{mult}){clover_str}!"
+                        result_text = f"🎳👑 <b>СТРАААЙК! ВСЕ КЕГЛИ РАЗБИТЫ!</b> 😹\n🎉 Точный бросок: <b>+{win_amount} 🪙</b> (x{effective_mult:.2f}){clover_str}!"
                     elif actual_val in [4, 5]:
                         win_amount = int(bet * 0.85)
                         win_amount = process_casino_win(win_amount)
+                        effective_mult = (win_amount / bet) if bet > 0 else 0.0
                         _adjust_balance(econ, win_amount)
-                        result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Часть кеглей устояла. 😸\n✅ Кэшбек: <b>+{win_amount} 🪙</b> (x0.85)."
+                        result_text = f"🎳 <b>ХОРОШИЙ СПЛИТ!</b> Часть кеглей устояла. 😸\n✅ Кэшбек: <b>+{win_amount} 🪙</b> (x{effective_mult:.2f})."
                     else:
                         result_text = f"💨 <b>ШАР СКАТИЛСЯ В ЖЁЛОБ!</b> (Значение: {actual_val}) 😿\n💸 Проигрыш <b>{bet} 🪙</b>."
 
-                add_account_exp(user_id, user_name, 5, username=user_username)
+                add_account_exp(user_id, user_name, 5, username=user_username, source='sport_dice')
                 check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
                 mark_dirty()
 
@@ -5795,7 +6555,7 @@ def process_pet_walk(chat_id, user_id, user_name, message_id=None):
     res_str = ""
 
     if ev_type in ['coins', 'gem', 'fun', 'shoe', 'hero']:
-        _adjust_balance(econ, ev_val)
+        _adjust_balance(econ, ev_val, reason=f'Награда за прогулку питомца: {ev_type}')
         res_str = f"💰 Прибыль: <b>+{ev_val} Ня-коинов 🪙</b>! 😸"
     elif ev_type == 'fish':
         add_inventory_item(econ['fish_inventory'], ev_val)
@@ -5835,7 +6595,13 @@ def _migrate_legacy_businesses(econ):
     """
     if not isinstance(econ, dict):
         return False
-    businesses = econ.setdefault('businesses', {})
+    # This helper is also reached from read-only catalog views. Do not create
+    # empty migration fields unless an actual legacy business needs conversion.
+    businesses = econ.get('businesses')
+    if not isinstance(businesses, dict) or not any(
+        old_id in businesses for old_id in LEGACY_BUSINESS_REPLACEMENTS
+    ):
+        return False
     levels = econ.setdefault('biz_levels', {})
     prices = econ.setdefault('biz_purchase_price', {})
     legacy_assets = econ.setdefault('legacy_assets', [])
@@ -5855,7 +6621,7 @@ def _migrate_legacy_businesses(econ):
             tx.append({'type':'migration','business':new_id,'from':old_id,'old_price':old_price,'time':time.time()})
         else:
             refund = int(old_price * BUSINESS_SELL_RATE)
-            econ['balance'] = int(econ.get('balance', 0) or 0) + refund
+            _adjust_balance(econ, refund, reason=f'Компенсация за бизнес {old_id}')
             tx.append({'type':'migration_compensation','business':old_id,'refund':refund,'time':time.time()})
             changed = True
         changed = True
@@ -5915,44 +6681,92 @@ def _business_stars_price(b_id):
     except (TypeError, ValueError, AttributeError):
         return 0
 
-def _render_business_catalog(chat_id, user_id, user_name, message_id=None):
-    econ=get_user_econ(user_id,user_name)
+def _render_business_catalog(chat_id, user_id, user_name, message_id=None, page=0):
+    """Show a compact, paginated catalog; totals are calculated from all businesses."""
+    econ = get_user_econ(user_id, user_name)
     _migrate_legacy_businesses(econ)
-    rows=[]
-    ordinary=[]
-    donor=[]
-    for idx,b_id,info,is_donor in _business_catalog():
+
+    catalog = _business_catalog()
+    owned_count = 0
+    total_hourly_income = 0
+    prepared = []
+    for idx, b_id, info, is_donor in catalog:
         owned = _business_user_owns(econ, b_id, is_donor)
-        status = '✅ Куплен' if owned else '❌ Не куплен'
         if is_donor:
             price_text = f"{_business_stars_price(b_id)} ⭐"
-            line=f"{idx}. {info['name']} — {price_text} — {status}"
-            donor.append(line)
         else:
             price_text = f"{int(info.get('price', 0) or 0):,} 🪙"
-            line=f"{idx}. {info['name']} — {price_text} — {status}"
-            ordinary.append(line)
-    lines=[
+        income_text = ''
+        if owned:
+            owned_count += 1
+            level = _business_level(econ, b_id)
+            hourly_income = _business_hourly_income(b_id, level)
+            total_hourly_income += hourly_income
+            income_text = f" · ур. {level}/5 · {hourly_income:,} 🪙/ч"
+        prepared.append({
+            'number': idx, 'id': b_id, 'info': info, 'donor': is_donor,
+            'owned': owned, 'price': price_text, 'income': income_text,
+        })
+
+    try:
+        page = max(0, int(page))
+    except (TypeError, ValueError, OverflowError):
+        page = 0
+    page_size = 8
+    page_count = max(1, (len(prepared) + page_size - 1) // page_size)
+    page = min(page, page_count - 1)
+    current = prepared[page * page_size:(page + 1) * page_size]
+    ordinary = [html.escape(f"{x['number']}. {x['info']['name']} — {x['price']} — {'✅ Куплен' if x['owned'] else '❌ Не куплен'}{x['income']}") for x in current if not x['donor']]
+    donor = [html.escape(f"{x['number']}. {x['info']['name']} — {x['price']} — {'✅ Куплен' if x['owned'] else '❌ Не куплен'}{x['income']}") for x in current if x['donor']]
+
+    tax_rate = min(1.0, max(0.0, float(BUSINESS_TAX_RATE)))
+    net_hourly_estimate = max(0, int(total_hourly_income * (1 - tax_rate)))
+    lines = [
         '🏢 <b>БИЗНЕСЫ NYABOT</b>',
+        f'📄 Страница <b>{page + 1}/{page_count}</b> · Показано <b>{len(current)}</b> из <b>{len(prepared)}</b>',
+        f'📦 Куплено: <b>{owned_count}/{len(catalog)}</b>',
+        f'📈 Общий базовый доход: <b>{total_hourly_income:,} 🪙/ч</b>',
+        f'📉 После налога {tax_rate:.0%}: <b>≈{net_hourly_estimate:,} 🪙/ч</b>',
+        '<i>Итоговый доход рассчитан по всему портфелю, не только по текущей странице.</i>',
         '',
-        *[f'<blockquote>{html.escape(line)}</blockquote>' for line in ordinary],
+        '<b>ОБЫЧНЫЕ</b>',
+        *(ordinary or ['<i>На этой странице нет обычных бизнесов.</i>']),
         '',
         '💎 <b>ДОНАТНЫЕ</b>',
-        *[f'<blockquote>{html.escape(line)}</blockquote>' for line in donor],
+        *(donor or ['<i>На этой странице нет донатных бизнесов.</i>']),
         '',
         '━━━━━━━━━━━━━━━━━━━━',
-        '💡 Откройте конкретное предприятие сообщением:',
-        '<code>бизнес 1</code>',
-        f'🪙 Ваш баланс: <b>{int(econ.get("balance",0) or 0):,}</b>'
+        'Нажмите кнопку бизнеса, чтобы открыть карточку; номера работают и через команду <code>бизнес N</code>.',
+        f'🪙 Баланс: <b>{int(econ.get("balance", 0) or 0):,}</b>',
     ]
-    text='\n'.join(lines)
+    text = '\n'.join(lines)
+    markup = InlineKeyboardMarkup(row_width=2)
+    business_buttons = []
+    for x in current:
+        info = x['info']
+        short_name = str(info.get('short') or info.get('name') or x['id'])[:24]
+        state_icon = '✅' if x['owned'] else ('⭐' if x['donor'] else '🔒')
+        business_buttons.append(InlineKeyboardButton(
+            f"{x['number']}. {short_name} {state_icon}",
+            callback_data=f"biz_detail_open:{x['number']}:{user_id}",
+        ))
+    for i in range(0, len(business_buttons), 2):
+        markup.add(*business_buttons[i:i + 2])
+    if page_count > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton('⬅️ Предыдущая', callback_data=f'biz_catalog_page:{page - 1}:{user_id}'))
+        nav.append(InlineKeyboardButton(f'{page + 1}/{page_count}', callback_data='noop'))
+        if page + 1 < page_count:
+            nav.append(InlineKeyboardButton('Следующая ➡️', callback_data=f'biz_catalog_page:{page + 1}:{user_id}'))
+        markup.add(*nav)
     if message_id:
         try:
-            bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,parse_mode='HTML')
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
             return
         except Exception:
             pass
-    bot.send_message(chat_id,text,parse_mode='HTML')
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 def render_business_detail(chat_id,user_id,user_name,number,message_id=None):
     target=_business_by_number(number)
@@ -5966,26 +6780,41 @@ def render_business_detail(chat_id,user_id,user_name,number,message_id=None):
     lvl=_business_level(econ,b_id) if owned else 1
     inc=_business_hourly_income(b_id,lvl)
     price=int(info.get('price',0) or 0)
-    if owned:
-        pending=_business_pending_amount(econ,b_id,time.time())
-        purchase_price=_business_purchase_price(econ,b_id)
-        sell_value=int(purchase_price*BUSINESS_SELL_RATE)
-        text=(f"🏢 <b>ВАШ БИЗНЕС #{idx}</b>\n\n"
+    if owned and is_donor:
+        text=(f"🏢 <b>ВАШ ДОНАТНЫЙ БИЗНЕС #{idx}</b>\n\n"
               f'<blockquote>{html.escape(info["name"])}\n'
               f'👤 Владелец: {html.escape(user_name)}\n'
-              f'⭐ Уровень: <b>{lvl}/5</b>\n'
-              f'📈 Доход: <b>{inc:,} 🪙/ч</b>\n'
-              f'💰 Накоплено: <b>{pending:,} 🪙</b></blockquote>\n'
-              f'━━━━━━━━━━━━━━━━━━━━\n'
-              f'💸 При продаже вы получите <b>{sell_value:,} 🪙</b> (80% от цены покупки).')
-        kb=InlineKeyboardMarkup(row_width=2)
-        if lvl<5: kb.add(InlineKeyboardButton('⬆️ Улучшить',callback_data=f'biz_detail_up:{b_id}:{user_id}'))
-        kb.add(InlineKeyboardButton('💸 Продать',callback_data=f'biz_detail_sell:{b_id}:{user_id}'))
+              f'📈 Доход: <b>{inc:,} 🪙/ч</b></blockquote>\n'
+              '💎 Бизнес приобретён за Telegram Stars. Улучшение и продажа для этой категории не предусмотрены; предмет сохранён на аккаунте.')
+        kb=InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton('💎 Донатный магазин',callback_data=f'shop_cat_businesses:{user_id}'))
+    elif owned:
+        pending = _business_pending_amount(econ, b_id, time.time())
+        purchase_price = _business_purchase_price(econ, b_id)
+        sell_value = int(purchase_price * BUSINESS_SELL_RATE)
+        upgrade_cost = int(info.get('upgrade_cost', 0) or 0) * lvl if lvl < 5 else 0
+        upgrade_line = (
+            f'⬆️ Улучшение до уровня {lvl + 1}: <b>{upgrade_cost:,} 🪙</b>\n'
+            if lvl < 5 else '✅ Максимальный уровень — улучшение не требуется.\n'
+        )
+        text = (f"🏢 <b>ВАШ БИЗНЕС #{idx}</b>\n\n"
+                f'<blockquote>{html.escape(info["name"])}\n'
+                f'👤 Владелец: {html.escape(user_name)}\n'
+                f'⭐ Уровень: <b>{lvl}/5</b>\n'
+                f'📈 Доход: <b>{inc:,} 🪙/ч</b>\n'
+                f'💰 Накоплено: <b>{pending:,} 🪙</b></blockquote>\n'
+                f'{upgrade_line}'
+                f'💸 Продажа: <b>{sell_value:,} 🪙</b> (80% от цены покупки).')
+        kb = InlineKeyboardMarkup(row_width=2)
+        if lvl < 5:
+            kb.add(InlineKeyboardButton(f'⬆️ Улучшить · {upgrade_cost:,} 🪙', callback_data=f'biz_detail_up:{b_id}:{user_id}'))
+        kb.add(InlineKeyboardButton('💸 Продать', callback_data=f'biz_detail_sell:{b_id}:{user_id}'))
     else:
+        price_text=f'{_business_stars_price(b_id)} ⭐' if is_donor else f'{price:,} 🪙'
         text=(f"🏢 <b>БИЗНЕС #{idx}</b>\n\n"
               f'<blockquote>{html.escape(info["name"])}\n'
               f'❌ У вас пока нет этого бизнеса.</blockquote>\n'
-              f'💰 Стоимость: <b>{price:,} 🪙</b>\n'
+              f'💰 Стоимость: <b>{price_text}</b>\n'
               f'📈 Доход: <b>{inc:,} 🪙/ч</b>')
         kb=InlineKeyboardMarkup()
         cb=f'biz_detail_buy:{b_id}:{user_id}' if not is_donor else f'biz_detail_donor:{b_id}:{user_id}'
@@ -6111,6 +6940,50 @@ def _business_pending_amount(econ, b_id, now=None):
     return max(0, int(raw))
 
 
+def _business_duration_label(seconds):
+    """Format a duration compactly for Telegram business-income receipts."""
+    try:
+        seconds = max(0.0, float(seconds or 0))
+    except (TypeError, ValueError):
+        seconds = 0.0
+    total_minutes = int(seconds // 60)
+    if total_minutes <= 0:
+        return 'меньше минуты'
+    hours, minutes = divmod(total_minutes, 60)
+    if hours and minutes:
+        return f'{hours} ч {minutes} мин'
+    if hours:
+        return f'{hours} ч'
+    return f'{minutes} мин'
+
+
+def _business_collection_period_text(econ, now=None):
+    """Report the real range of time since each owned business last settled."""
+    now = float(time.time() if now is None else now)
+    clocks, _carries = _ensure_business_clocks(econ, now)
+    ordinary = econ.get('businesses', {})
+    donor = econ.get('donor_businesses', {})
+    ordinary = ordinary if isinstance(ordinary, dict) else {}
+    donor = donor if isinstance(donor, dict) else {}
+    elapsed_values = []
+    for b_id in list(ordinary) + list(donor):
+        if b_id not in BUSINESSES and b_id not in DONOR_BUSINESSES:
+            continue
+        try:
+            last = float(clocks.get(b_id, now))
+        except (TypeError, ValueError):
+            last = now
+        elapsed_values.append(max(0.0, now - last))
+    if not elapsed_values:
+        return 'не определён'
+    shortest = min(elapsed_values)
+    longest = max(elapsed_values)
+    if longest - shortest <= 90:
+        return f'≈ {_business_duration_label((shortest + longest) / 2)}'
+    return (f'{_business_duration_label(shortest)}–{_business_duration_label(longest)} '
+            '<i>(у разных бизнесов)</i>')
+
+
 def _settle_one_business(econ, b_id, now=None, credit=True):
     """Settle one business at its CURRENT level and preserve fractional income."""
     now = float(now or time.time())
@@ -6131,7 +7004,7 @@ def _settle_one_business(econ, b_id, now=None, credit=True):
     clocks[b_id] = now
     carries[b_id] = max(0.0, raw - amount)
     if credit and amount > 0:
-        _set_balance(econ, int(econ.get('balance', 0) or 0) + amount)
+        _adjust_balance(econ, amount, reason=f'Прибыль бизнеса: {b_id}')
     return amount
 
 
@@ -6149,7 +7022,7 @@ def _settle_business_net_profit(econ, b_id, now=None):
     net = max(0, raw - tax)
     econ['business_tax_paid'] = int(econ.get('business_tax_paid', 0) or 0) + tax
     if net:
-        _adjust_balance(econ, net)
+        _adjust_balance(econ, net, reason=f'Чистая прибыль бизнеса: {b_id}')
     mark_dirty()
     return net, tax
 
@@ -6221,9 +7094,9 @@ def _apply_business_payout_modifiers(econ, base_profit, chat_id, user_id, user_n
     tax = int(max(0, profit) * BUSINESS_TAX_RATE)
     net = max(0, profit - tax)
     econ['business_tax_paid'] = int(econ.get('business_tax_paid', 0) or 0) + tax
-    event_text = (f"\n💰 Валовая прибыль: <b>+{profit:,} 🪙</b>"
-                  f"\n📉 Налог бизнеса ({BUSINESS_TAX_RATE:.0%}): <b>-{tax:,} 🪙</b>"
-                  f"\n🪙 <b>К получению: +{net:,} 🪙</b>" + event_text)
+    event_text = (event_text
+                  + f"\n📈 Прибыль до налога: <b>+{profit:,} 🪙</b>"
+                  + f"\n📉 Налог бизнеса ({BUSINESS_TAX_RATE:.0%}): <b>-{tax:,} 🪙</b>")
     return net, event_text
 
 
@@ -6266,7 +7139,8 @@ def render_bank_view(chat_id, user_id, user_name, message_id=None):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💡 <i>Используйте кнопки или команды:</i> 😸\n"
         f"• <code>банк положить 500</code>\n"
-        f"• <code>банк снять 500</code>"
+        f"• <code>банк снять 500</code>\n"
+        f"• <code>/moneyhistory</code> — последние операции с балансом"
     )
 
     if interest_earned > 0: text += f"\n\n✨ <i>Начислены дивиденды: +{interest_earned} 🪙!</i> 😻"
@@ -6377,6 +7251,169 @@ def render_settings_view(chat_id, user_id=None, message_id=None):
         bot.edit_message_text(text,chat_id=chat_id,message_id=message_id,reply_markup=kb,parse_mode='HTML')
     else:
         bot.send_message(chat_id,text,reply_markup=kb,parse_mode='HTML')
+
+
+# ---------------------------------------------------------
+# ИНВЕНТАРЬ: КОЛЛЕКЦИЯ С РАЗДЕЛАМИ И ДЕЙСТВИЯМИ
+# ---------------------------------------------------------
+def render_inventory_view(chat_id, user_id, user_name, category='main', message_id=None):
+    """Render inventory categories; all equipment actions are validated server-side."""
+    econ = get_user_econ(user_id, user_name)
+    owned_titles = [t for t in (econ.get('titles', []) or []) if t in TITLES]
+    custom_titles = [t for t in (econ.get('custom_titles', []) or []) if isinstance(t, dict) and t.get('id') and t.get('text')]
+    inventory_items = econ.get('inventory', []) or []
+    if not isinstance(inventory_items, list):
+        inventory_items = list(inventory_items) if isinstance(inventory_items, dict) else []
+    known_badges = {str(item.get('emoji')) for item in BADGES.values() if item.get('emoji')}
+    known_badges.update(str(item.get('emoji')) for item in VIP_BADGES.values() if item.get('emoji'))
+    known_badges.update(str(item.get('emoji')) for item in STARS_COSMETICS.values() if item.get('type') == 'badge' and item.get('emoji'))
+    known_badges.update({'🎃', '🎃 Премиум-тыква', '🎃 Маленький фонарь', '🕸 Паутинка', '🦇 Летучая мышь'})
+    badges = [item for item in inventory_items if str(item) in known_badges]
+    other_items = [item for item in inventory_items if str(item) not in known_badges]
+    themes = econ.get('purchased_themes', ['default']) or ['default']
+    pets = [p for p in (econ.get('pet_inventory', []) or []) if p in PETS_DATA]
+    vehicles = [v for v in (econ.get('vehicle_inventory', []) or []) if v in VEHICLES or v in DONOR_VEHICLES]
+    category = str(category or 'main')
+    markup = InlineKeyboardMarkup(row_width=2)
+    lines = ['🎒 <b>ИНВЕНТАРЬ И КОЛЛЕКЦИЯ</b>', '━━━━━━━━━━━━━━━━━━━━']
+
+    if category == 'main':
+        counts = {
+            'titles': len(owned_titles) + len(custom_titles),
+            'badges': len(badges),
+            'items': len(other_items),
+            'themes': len([t for t in themes if t in THEMES]),
+            'pets': len(pets),
+            'vehicles': len(vehicles),
+            'stars': len(econ.get('paid_stars_items', []) or []),
+        }
+        markup.add(
+            InlineKeyboardButton(f'👑 Титулы ({counts["titles"]})', callback_data=f'inv_cat_titles:{user_id}'),
+            InlineKeyboardButton(f'🏅 Значки ({counts["badges"]})', callback_data=f'inv_cat_badges:{user_id}'),
+        )
+        markup.add(
+            InlineKeyboardButton(f'🎨 Темы ({counts["themes"]})', callback_data=f'inv_cat_themes:{user_id}'),
+            InlineKeyboardButton(f'🐾 Питомцы ({counts["pets"]})', callback_data=f'inv_cat_pets:{user_id}'),
+        )
+        markup.add(
+            InlineKeyboardButton(f'🚘 Транспорт ({counts["vehicles"]})', callback_data=f'inv_cat_vehicles:{user_id}'),
+            InlineKeyboardButton(f'⭐ Stars-покупки ({counts["stars"]})', callback_data=f'inv_cat_stars:{user_id}'),
+        )
+        markup.add(InlineKeyboardButton(f'🎒 Предметы ({counts["items"]})', callback_data=f'inv_cat_items:{user_id}'))
+        markup.add(InlineKeyboardButton('🎒 Рюкзак расходников', callback_data=f'backpack_view:{user_id}'))
+        lines.extend([
+            f'👤 Игрок: {make_link(chat_id, user_name, user_id, ping=False)}',
+            f'🐾 Активный питомец: <b>{html.escape(str((econ.get("pet") or {}).get("name", "нет")))}</b>',
+            f'👑 Активный титул: <b>{html.escape(str(econ.get("custom_title") or TITLES.get(econ.get("active_title"), {}).get("text", "нет")))}</b>',
+            f'🏅 Активный значок: <b>{html.escape(str(econ.get("badge") or "нет"))}</b>',
+            '', 'Выберите раздел, чтобы посмотреть предметы и надеть нужный.'
+        ])
+    elif category == 'titles':
+        lines += ['👑 <b>ВАШИ ТИТУЛЫ</b>', 'Нажмите «Надеть», чтобы выбрать титул.']
+        active_standard = econ.get('active_title')
+        active_custom = econ.get('custom_title_id')
+        for key in owned_titles:
+            info = TITLES[key]
+            active = active_standard == key and not econ.get('custom_title')
+            label = '✅ ' if active else '👑 '
+            lines.append(f'{label}{html.escape(str(info.get("text", info.get("name", key))))}')
+            if not active:
+                markup.add(InlineKeyboardButton(f'Надеть {str(info.get("name", info.get("text", key)))[:35]}', callback_data=f'inv_equip_t_{key}:{user_id}'))
+        for item in custom_titles:
+            title_id = str(item.get('id'))
+            title_text = str(item.get('text', ''))
+            active = econ.get('custom_title') == title_text and active_custom == title_id
+            lines.append(f'{"✅ " if active else "🌟 "}{html.escape(title_text)}')
+            if not active:
+                markup.add(InlineKeyboardButton(f'Надеть: {title_text[:30]}', callback_data=f'inv_equip_ct_{title_id}:{user_id}'))
+        if not owned_titles and not custom_titles:
+            lines.append('Пока нет купленных титулов. Обычные доступны в магазине, кастомный создаётся за 4 ⭐ командой <code>/create_tittle Ваш титул</code>.')
+        if econ.get('active_title') or econ.get('custom_title'):
+            markup.add(InlineKeyboardButton('❌ Снять титул', callback_data=f'inv_remove_title:{user_id}'))
+        markup.add(InlineKeyboardButton('🌟 Создать кастомный за 4 ⭐', callback_data=f'inv_create_title:{user_id}'))
+    elif category == 'badges':
+        lines += ['🏅 <b>ВАШИ ЗНАЧКИ</b>', f'Сейчас надет: <b>{html.escape(str(econ.get("badge") or "нет"))}</b>']
+        for idx, badge in enumerate(badges):
+            text_badge = str(badge)
+            active = econ.get('badge') == badge
+            lines.append(f'{"✅ " if active else "🏅 "}{html.escape(text_badge)}')
+            if not active:
+                markup.add(InlineKeyboardButton(f'Надеть {text_badge[:30]}', callback_data=f'inv_equip_badge_{idx}:{user_id}'))
+        if not badges:
+            lines.append('Значков пока нет. Загляните в <code>/stars</code> или получайте их за игровые события.')
+        if econ.get('badge'):
+            markup.add(InlineKeyboardButton('❌ Снять значок', callback_data=f'inv_remove_badge:{user_id}'))
+    elif category == 'items':
+        lines += ['🎒 <b>ВАШИ ПРЕДМЕТЫ</b>', 'Здесь находятся предметы из наград и ручных выдач. Расходники для использования собраны в рюкзаке.']
+        for item in other_items:
+            lines.append(f'🎁 {html.escape(str(item))}')
+        if not other_items:
+            lines.append('Обычных предметов пока нет.')
+        markup.add(InlineKeyboardButton('🎒 Открыть рюкзак расходников', callback_data=f'backpack_view:{user_id}'))
+    elif category == 'themes':
+        current_theme = econ.get('profile_theme', 'default')
+        lines += ['🎨 <b>ВАШИ ТЕМЫ</b>', f'Активная тема: <b>{html.escape(str(THEMES.get(current_theme, {}).get("name", current_theme)))}</b>']
+        for key in themes:
+            if key not in THEMES:
+                continue
+            active = key == current_theme
+            lines.append(f'{"✅ " if active else "🎨 "}{html.escape(str(THEMES[key].get("name", key)))}')
+            if not active:
+                markup.add(InlineKeyboardButton(f'Выбрать {str(THEMES[key].get("name", key))[:35]}', callback_data=f'inv_equip_theme_{key}:{user_id}'))
+        if not any(key in THEMES for key in themes):
+            lines.append('Тем пока нет.')
+        markup.add(InlineKeyboardButton('🛒 Купить темы в /stars', callback_data=f'shop_cat_themes:{user_id}'))
+    elif category == 'pets':
+        active_pet = (econ.get('pet') or {}).get('id') if isinstance(econ.get('pet'), dict) else None
+        lines += ['🐾 <b>КОЛЛЕКЦИЯ ПИТОМЦЕВ</b>']
+        for key in pets:
+            info = PETS_DATA[key]
+            active = key == active_pet
+            lines.append(f'{"✅ " if active else "🐾 "}{html.escape(str(info.get("name", key)))}')
+            if not active:
+                markup.add(InlineKeyboardButton(f'Выбрать {str(info.get("short", info.get("name", key)))[:30]}', callback_data=f'inv_equip_pet_{key}:{user_id}'))
+        if not pets:
+            lines.append('Питомцев пока нет.')
+        markup.add(InlineKeyboardButton('🐱 Зоомагазин', callback_data=f'shop_cat_pets:{user_id}'))
+    elif category == 'vehicles':
+        active_vehicle = econ.get('equipped_vehicle') or econ.get('vehicle')
+        lines += ['🚘 <b>ВАШ ТРАНСПОРТ</b>']
+        for key in vehicles:
+            info = VEHICLES.get(key) or DONOR_VEHICLES.get(key) or {}
+            label = str(info.get('name', key))
+            active = key == active_vehicle
+            lines.append(f'{"✅ " if active else "🚘 "}{html.escape(label)}')
+            if not active:
+                markup.add(InlineKeyboardButton(f'Выбрать {label[:32]}', callback_data=f'inv_equip_vehicle_{key}:{user_id}'))
+        if not vehicles:
+            lines.append('Транспорта пока нет.')
+        markup.add(InlineKeyboardButton('🏎 Открыть гараж', callback_data=f'shop_cat_garage:{user_id}'))
+    elif category == 'stars':
+        lines += ['⭐ <b>ПОКУПКИ ЗА TELEGRAM STARS</b>']
+        owned = econ.get('paid_stars_items', []) or []
+        catalogs = {**STARS_COSMETICS, **STARS_LIMITED_ITEMS}
+        seen = set()
+        for key in owned:
+            if key in seen:
+                continue
+            seen.add(key)
+            info = catalogs.get(key, {})
+            lines.append(f'⭐ {html.escape(str(info.get("name", key)))}')
+        if not seen:
+            lines.append('Stars-покупок пока нет.')
+        markup.add(InlineKeyboardButton('⭐ Открыть /stars', callback_data=f'stars_cat_main:{user_id}'))
+    else:
+        return render_inventory_view(chat_id, user_id, user_name, category='main', message_id=message_id)
+
+    markup.add(InlineKeyboardButton('🔙 Назад в инвентарь', callback_data=f'inv_main:{user_id}') if category != 'main' else InlineKeyboardButton('👤 Профиль', callback_data=f'ps_back_profile:{user_id}'))
+    text = '\n'.join(lines)
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 
 # ---------------------------------------------------------
@@ -6802,8 +7839,10 @@ def render_stars_shop(chat_id, user_id, user_name, category='main', message_id=N
             return render_stars_shop(chat_id, user_id, user_name, 'main', message_id)
         title, wanted = type_map[category]
         lines = [title, "━━━━━━━━━━━━━━━━━━━━"]
-        items = [(k, v) for k, v in STARS_COSMETICS.items() if v.get('type') in wanted]
+        items = [(k, v) for k, v in STARS_COSMETICS.items() if v.get('type') in wanted and k != 'custom_title']
         if category == 'limited': items += list(STARS_LIMITED_ITEMS.items())
+        if category == 'titles':
+            lines.append('Кастомный титул создаётся командой <code>/create_tittle Ваш титул</code> — каждый новый титул стоит 4 ⭐.')
         if not items:
             lines.append("Пока товаров нет.")
         for k, v in items:
@@ -7000,7 +8039,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
                         portfolio[ticker] = float(portfolio.get(ticker, 0.0) or 0.0) + amount
                         _record_crypto_transaction(econ, 'buy', ticker, amount, price, charge_cost)
                         check_achievements(user_id, user_tag, 'crypto_trades', 1, chat_id, username=username)
-                        add_account_exp(user_id, user_tag, 10, username=username)
+                        add_account_exp(user_id, user_tag, 10, username=username, source='crypto_buy')
                         mark_dirty()
                         if not critical_save('crypto buy', retries=3):
                             # Internal trade: never report success when the durable
@@ -7035,7 +8074,7 @@ def trade_crypto(chat_id, user_id, user_tag, action, ticker, amount_str, reply_m
                         _adjust_balance(econ, earned)
                         _record_crypto_transaction(econ, 'sell', ticker, amount, price, earned)
                         check_achievements(user_id, user_tag, 'crypto_trades', 1, chat_id, username=username)
-                        add_account_exp(user_id, user_tag, 10, username=username)
+                        add_account_exp(user_id, user_tag, 10, username=username, source='crypto_sell')
                         mark_dirty()
                         if not critical_save('crypto sell', retries=3):
                             # Internal trade: restore both the asset and coins if the
@@ -7086,7 +8125,7 @@ def train_work_exp(user_id, user_tag, username=None):
     gain = random.randint(15, 40)
     econ['work_exp'] = econ.get('work_exp', 0) + gain
     econ['last_train_time'] = now
-    add_account_exp(user_id, user_tag, gain, username=username)
+    add_account_exp(user_id, user_tag, gain, username=username, source='work_training')
     mark_dirty()
     return True, f"🎓 Вы усердно позанимались! 😸\nПолучено: <b>+{gain} EXP</b> опыта работы (Всего: <b>{econ['work_exp']} EXP</b>)."
 
@@ -7616,7 +8655,7 @@ def _admin_grant(message):
     if item in ('coins', 'coin', 'коины', 'монеты'):
         value = positive_int(amount, 'Количество коинов')
         if value is None: return True
-        _set_balance(econ, int(econ.get('balance', 0) or 0) + value)
+        _adjust_balance(econ, value, reason=f'Админская выдача: {item}')
         changed.append(f'+{value:,} 🪙')
 
     elif item in ('bank', 'банк', 'cash', 'касса'):
@@ -7628,21 +8667,33 @@ def _admin_grant(message):
     elif item in ('level', 'lvl', 'уровень'):
         value = positive_int(amount, 'Уровень')
         if value is None: return True
+        old_exp = max(0, int(econ.get('account_exp', 0) or 0))
         econ['account_exp'] = account_exp_for_level(value)
+        economy_service.record_account_exp_adjustment(
+            econ, old_exp, econ['account_exp'], source=f'admin_set_level:{message.from_user.id}'
+        )
         actual_level, _, _, _ = get_account_level(econ['account_exp'])
         changed.append(f'уровень профиля: {actual_level} LVL')
 
     elif item in ('exp', 'xp', 'account_exp', 'опыт'):
         value = positive_int(amount, 'Количество EXP')
         if value is None: return True
-        econ['account_exp'] = int(econ.get('account_exp', 0) or 0) + value
+        old_exp = max(0, int(econ.get('account_exp', 0) or 0))
+        econ['account_exp'] = old_exp + value
+        economy_service.record_account_exp_adjustment(
+            econ, old_exp, econ['account_exp'], source=f'admin_add_exp:{message.from_user.id}'
+        )
         lvl, _, _, _ = get_account_level(econ['account_exp'])
         changed.append(f'+{value:,} EXP профиля → {lvl} LVL')
 
     elif item in ('set_exp', 'setexp'):
         value = positive_int(amount, 'EXP')
         if value is None: return True
+        old_exp = max(0, int(econ.get('account_exp', 0) or 0))
         econ['account_exp'] = value
+        economy_service.record_account_exp_adjustment(
+            econ, old_exp, value, source=f'admin_set_exp:{message.from_user.id}'
+        )
         lvl, _, _, _ = get_account_level(value)
         changed.append(f'установлен EXP: {value:,} → {lvl} LVL')
 
@@ -7814,6 +8865,9 @@ def _admin_grant(message):
             econ['bp_premium'] = True
         elif t == 'title_cert':
             econ['has_custom_title_cert'] = True
+            econ.setdefault('paid_stars_items', [])
+            if item not in econ['paid_stars_items']:
+                econ['paid_stars_items'].append(item)
         elif t == 'theme':
             th = c.get('theme_id'); purchased = econ.setdefault('purchased_themes', ['default'])
             if th and th not in purchased: purchased.append(th)
@@ -8039,7 +9093,7 @@ def season_rollover():
                 uid = row[1]
                 if uid:
                     target = _get_user_econ_unlocked(uid, row[2])
-                    target['balance'] = int(target.get('balance', 0) or 0) + rewards[idx]
+                    _adjust_balance(target, rewards[idx], reason=f'Награда сезона #{old_number}, место {idx + 1}')
             mark_dirty()
 
 def add_season_points(econ, points):
@@ -8258,39 +9312,159 @@ def cmd_guild(message):
         return
     bot.reply_to(message, 'Формат: <code>/guild</code>, <code>/guild создать Название</code> или <code>/guild вступить NYA-1234</code>.', parse_mode='HTML')
 
-def render_player_market(chat_id, user_id, user_name, message_id=None):
-    listings = db.setdefault('player_market', {})
-    now = time.time()
-    # Просроченное объявление возвращает товар продавцу, а не сжигает его.
+def _expire_player_market_listings(viewer_id, now=None):
+    """Return expired fish/hunt listings to sellers only after a durable save.
+
+    Lock order is user action locks -> PLAYER_MARKET_LOCK -> BALANCE_TX_LOCK ->
+    db_lock. A market refresh is allowed to settle expired listings, but a Neon
+    failure restores both listing and seller inventory so resources cannot vanish.
+    """
+    now = time.time() if now is None else float(now)
+    valid_names = {
+        'fish': {item[0] for item in FISH_TYPES},
+        'hunt': {item[0] for item in HUNT_TYPES},
+    }
     with PLAYER_MARKET_LOCK:
-        for lid, item in list(listings.items()):
-            try:
-                expired = now - float(item.get('created_at', now)) > 86400
-            except (TypeError, ValueError):
-                expired = True
-            if not expired:
+        initial = dict(db.get('player_market', {}) or {})
+        seller_ids = set()
+        for item in initial.values():
+            if not isinstance(item, dict):
                 continue
-            seller_id = item.get('seller_id')
+            try:
+                created = float(item.get('created_at', now) or 0)
+                seller_id = int(item.get('seller_id', 0) or 0)
+                qty = int(item.get('qty', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
             kind = item.get('kind')
-            item_name = item.get('item_name')
-            qty = max(1, int(item.get('qty', 1) or 1))
-            if seller_id and item_name and kind in ('fish', 'hunt'):
-                seller = get_user_econ(user_id=int(seller_id), user_tag=item.get('seller_name', 'Игрок'))
-                inv_key = 'fish_inventory' if kind == 'fish' else 'hunt_inventory'
-                inv = seller.setdefault(inv_key, {})
-                inv[item_name] = int(inv.get(item_name, 0) or 0) + qty
-            listings.pop(lid, None)
+            if (now - created > 86400 and seller_id > 0 and
+                    kind in valid_names and item.get('item_name') in valid_names[kind] and
+                    0 < qty <= 1_000_000):
+                seller_ids.add(seller_id)
+
+    if not seller_ids:
+        return True
+
+    # The caller already owns viewer_id's serialized action when called from a
+    # registered command/callback. The helper upgrades it to a deterministic set
+    # of locks before reacquiring the global market lock.
+    with serialized_multi_user_action(viewer_id, *seller_ids):
+        with PLAYER_MARKET_LOCK:
+            with BALANCE_TX_LOCK:
+                with db_lock:
+                    listings = db.setdefault('player_market', {})
+                    if not isinstance(listings, dict):
+                        listings = {}
+                        db['player_market'] = listings
+                    listing_snapshots = {}
+                    seller_item_additions = []
+                    changed = False
+                    for lid, item in list(listings.items()):
+                        if not isinstance(item, dict):
+                            continue
+                        try:
+                            created = float(item.get('created_at', now) or 0)
+                            seller_id = int(item.get('seller_id', 0) or 0)
+                            qty = int(item.get('qty', 0) or 0)
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        kind = item.get('kind')
+                        item_name = item.get('item_name')
+                        if now - created <= 86400 or seller_id not in seller_ids:
+                            continue
+                        if kind not in valid_names or item_name not in valid_names[kind] or not 0 < qty <= 1_000_000:
+                            # Do not discard an entry whose item cannot be safely
+                            # reconstructed; leave it for repair instead.
+                            continue
+                        listing_snapshots[lid] = copy.deepcopy(item)
+                        seller = get_user_econ(user_id=seller_id, user_tag=item.get('seller_name', 'Игрок'))
+                        inv_key = 'fish_inventory' if kind == 'fish' else 'hunt_inventory'
+                        inv = seller.setdefault(inv_key, {})
+                        if not isinstance(inv, dict):
+                            inv = {}
+                            seller[inv_key] = inv
+                        try:
+                            current = max(0, int(inv.get(item_name, 0) or 0))
+                        except (TypeError, ValueError, OverflowError):
+                            current = 0
+                        inv[item_name] = current + qty
+                        seller_item_additions.append((seller, inv_key, item_name, qty))
+                        listings.pop(lid, None)
+                        changed = True
+                    if changed:
+                        mark_dirty()
+                    else:
+                        return True
+
+            if critical_save('expire player market listings', retries=3):
+                return True
+
+            with BALANCE_TX_LOCK:
+                with db_lock:
+                    for seller, inv_key, item_name, qty in reversed(seller_item_additions):
+                        inv = seller.get(inv_key)
+                        if not isinstance(inv, dict):
+                            continue
+                        try:
+                            current = max(0, int(inv.get(item_name, 0) or 0))
+                        except (TypeError, ValueError, OverflowError):
+                            current = 0
+                        restored = max(0, current - qty)
+                        if restored:
+                            inv[item_name] = restored
+                        else:
+                            inv.pop(item_name, None)
+                    listings = db.setdefault('player_market', {})
+                    for lid, snapshot in listing_snapshots.items():
+                        listings[lid] = snapshot
+                    mark_dirty()
+            critical_save('rollback player market expiration', retries=2)
+            print('[PLAYER MARKET] Expiration save failed; listings and seller inventory restored.')
+            return False
+
+
+def render_player_market(chat_id, user_id, user_name, message_id=None):
+    expiry_ok = _expire_player_market_listings(user_id, time.time())
+    now = time.time()
+    valid_names = {
+        'fish': {item[0] for item in FISH_TYPES},
+        'hunt': {item[0] for item in HUNT_TYPES},
+    }
+    with PLAYER_MARKET_LOCK:
+        listings = db.setdefault('player_market', {})
+        if not isinstance(listings, dict):
+            listings = {}
+            db['player_market'] = listings
             mark_dirty()
+        visible_items = []
+        for lid, raw_item in list(listings.items()):
+            if not isinstance(raw_item, dict):
+                continue
+            try:
+                created = float(raw_item.get('created_at', now) or 0)
+                price = int(raw_item.get('price', 0) or 0)
+                qty = int(raw_item.get('qty', 0) or 0)
+                seller_id = int(raw_item.get('seller_id', 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            kind = raw_item.get('kind')
+            item_name = raw_item.get('item_name')
+            if (now - created > 86400 or price <= 0 or not 0 < qty <= 1_000_000 or
+                    seller_id <= 0 or kind not in valid_names or item_name not in valid_names[kind]):
+                continue
+            visible_items.append((str(lid), copy.deepcopy(raw_item)))
+        visible_items = visible_items[:20]
+
     lines = ['🛒 <b>РЫНОК ИГРОКОВ</b>', '━━━━━━━━━━━━━━━━━━━━']
     markup = InlineKeyboardMarkup(row_width=1)
-    visible = 0
-    for lid, item in list(listings.items())[:20]:
-        visible += 1
-        lines.append(f'#{lid} • {html.escape(item["name"])} ×{item["qty"]} — <b>{item["price"]:,} 🪙</b>\n👤 {html.escape(item.get("seller_name", "Игрок"))}')
-        if int(item.get('seller_id', 0)) != user_id:
-            markup.add(InlineKeyboardButton(f'🛒 Купить #{lid} — {item["price"]:,} 🪙', callback_data=f'pmarket_buy_{lid}:{user_id}'))
-    if not visible:
+    for lid, item in visible_items:
+        lines.append(f'#{html.escape(lid)} • {html.escape(str(item.get("name", item.get("item_name", "Ресурс"))))} ×{int(item["qty"])} — <b>{int(item["price"]):,} 🪙</b>\n👤 {html.escape(str(item.get("seller_name", "Игрок")))}')
+        if int(item.get('seller_id', 0)) != int(user_id):
+            markup.add(InlineKeyboardButton(f'🛒 Купить #{lid} — {int(item["price"]):,} 🪙', callback_data=f'pmarket_buy_{lid}:{user_id}'))
+    if not visible_items:
         lines.append('Пока объявлений нет. 😿')
+    if not expiry_ok:
+        lines.append('\n⚠️ Истёкшие объявления пока не очищены из-за ошибки сохранения. Повторите обновление позже.')
     lines += ['', 'Продажа: <code>/pmarket sell fish 1 500</code>', '<i>1 — номер ресурса из списка /resources.</i>']
     markup.add(InlineKeyboardButton('🔄 Обновить', callback_data=f'pmarket_view:{user_id}'))
     text = '\n'.join(lines)
@@ -8299,35 +9473,87 @@ def render_player_market(chat_id, user_id, user_name, message_id=None):
     else:
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
+
 def cmd_player_market(message):
-    if not can_process_user_message(message): return
-    uid = message.from_user.id
+    if not can_process_user_message(message):
+        return
+    uid = int(message.from_user.id)
     name = (f'{message.from_user.first_name or ""} {message.from_user.last_name or ""}').strip() or message.from_user.username or 'Игрок'
-    econ = get_user_econ(uid, name, username=message.from_user.username)
-    args = message.text.split() if message.text else []
+    args = (message.text or '').split()
     if len(args) == 1:
-        render_player_market(message.chat.id, uid, name); return
+        render_player_market(message.chat.id, uid, name)
+        return
     if len(args) >= 5 and args[1].lower() == 'sell':
         kind = args[2].lower()
         try:
             idx = int(args[3]) - 1
             total_price = int(args[4])
-        except ValueError:
-            bot.reply_to(message, '❌ Формат: <code>/pmarket sell fish 1 500</code>', parse_mode='HTML'); return
+        except (TypeError, ValueError, OverflowError):
+            bot.reply_to(message, '❌ Формат: <code>/pmarket sell fish 1 500</code>', parse_mode='HTML')
+            return
         catalog = FISH_TYPES if kind == 'fish' else HUNT_TYPES if kind == 'hunt' else None
-        inv = econ.get('fish_inventory', {}) if kind == 'fish' else econ.get('hunt_inventory', {}) if kind == 'hunt' else None
-        if catalog is None or not (0 <= idx < len(catalog)) or total_price <= 0:
-            bot.reply_to(message, '❌ Укажи fish/hunt, номер ресурса и цену.'); return
+        if catalog is None or not (0 <= idx < len(catalog)) or not (1 <= total_price <= 10**12):
+            bot.reply_to(message, '❌ Укажи fish/hunt, номер ресурса и цену от 1 до 1 000 000 000 000 коинов.')
+            return
         item_name = catalog[idx][0]
+        inv_key = 'fish_inventory' if kind == 'fish' else 'hunt_inventory'
+        lid = None
+        state_before = None
+        listing = None
         with PLAYER_MARKET_LOCK:
-            if int(inv.get(item_name, 0) or 0) <= 0:
-                bot.reply_to(message, '❌ У вас нет этого ресурса. Откройте /resources.'); return
-            lid = str(random.randint(100000, 999999))
-            while lid in db.setdefault('player_market', {}): lid = str(random.randint(100000, 999999))
-            inv[item_name] -= 1
-            if inv[item_name] <= 0: inv.pop(item_name, None)
-            db['player_market'][lid] = {'seller_id': uid, 'seller_name': name, 'kind': kind, 'item_name': item_name, 'name': item_name, 'qty': 1, 'price': total_price, 'created_at': time.time()}
-            mark_dirty()
+            with BALANCE_TX_LOCK:
+                with db_lock:
+                    econ = get_user_econ(uid, name, username=message.from_user.username)
+                    state_before = copy.deepcopy(econ)
+                    inv = econ.get(inv_key, {})
+                    if not isinstance(inv, dict):
+                        inv = {}
+                        econ[inv_key] = inv
+                    try:
+                        count = int(inv.get(item_name, 0) or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        count = 0
+                    if count <= 0:
+                        bot.reply_to(message, '❌ У вас нет этого ресурса. Откройте /resources.')
+                        return
+                    listings = db.setdefault('player_market', {})
+                    if not isinstance(listings, dict):
+                        listings = {}
+                        db['player_market'] = listings
+                    # A collision is exceedingly unlikely, but the check remains
+                    # protected by PLAYER_MARKET_LOCK.
+                    for _ in range(100):
+                        candidate = str(random.randint(100000, 999999))
+                        if candidate not in listings:
+                            lid = candidate
+                            break
+                    if lid is None:
+                        bot.reply_to(message, '⚠️ Не удалось создать номер объявления. Попробуйте ещё раз.')
+                        return
+                    inv[item_name] = count - 1
+                    if inv[item_name] <= 0:
+                        inv.pop(item_name, None)
+                    listing = {'seller_id': uid, 'seller_name': name, 'kind': kind, 'item_name': item_name, 'name': item_name, 'qty': 1, 'price': total_price, 'created_at': time.time()}
+                    listings[lid] = listing
+                    mark_dirty()
+            if not critical_save('create player market listing', retries=3):
+                with BALANCE_TX_LOCK:
+                    with db_lock:
+                        econ = get_user_econ(uid, name, username=message.from_user.username)
+                        inv = econ.get(inv_key)
+                        if not isinstance(inv, dict):
+                            inv = {}
+                            econ[inv_key] = inv
+                        try:
+                            current = max(0, int(inv.get(item_name, 0) or 0))
+                        except (TypeError, ValueError, OverflowError):
+                            current = 0
+                        inv[item_name] = current + 1
+                        db.setdefault('player_market', {}).pop(lid, None)
+                        mark_dirty()
+                critical_save('rollback player market listing creation', retries=2)
+                bot.reply_to(message, '⚠️ Neon не сохранила объявление. Ресурс возвращён в инвентарь; попробуйте позже.')
+                return
         bot.reply_to(message, f'🛒 Объявление <code>#{lid}</code> создано: {html.escape(item_name)} за <b>{total_price:,} 🪙</b>.', parse_mode='HTML')
         return
     bot.reply_to(message, 'Формат: <code>/pmarket</code> или <code>/pmarket sell fish 1 500</code>.', parse_mode='HTML')
@@ -8573,6 +9799,59 @@ def _nyabot_ping_handler(message):
 bot.message_handler(commands=["ping", "пинг"])(_nyabot_ping_handler)
 
 
+def _nyabot_diagnostics_handler(message):
+    """Private owner-only runtime snapshot without tokens or user secrets."""
+    try:
+        uid = int(getattr(getattr(message, 'from_user', None), 'id', 0) or 0)
+        if uid != int(ADMIN_ID or 0):
+            bot.reply_to(message, '⛔ Команда доступна только владельцу бота.')
+            return
+        with db_lock:
+            economy = db.get('economy', {}) or {}
+            account_count = sum(1 for row in economy.values() if isinstance(row, dict))
+            pending_titles = sum(
+                len(row.get('pending_custom_title_orders', {}) or {})
+                for row in economy.values() if isinstance(row, dict)
+                and isinstance(row.get('pending_custom_title_orders', {}), dict)
+            )
+            dirty = bool(db_dirty)
+            version = int(db_version or 0)
+            casino_pool = int(db.get('casino_pool', 0) or 0)
+        game_counts = {
+            'Кирпич': len(globals().get('active_brick', {}) or {}),
+            'Краш': len(globals().get('active_crash', {}) or {}),
+            'Сапёр': len(globals().get('active_mines', {}) or {}),
+            'Blackjack': len(globals().get('active_bj_games', {}) or {}),
+            'Дурак': len(globals().get('active_durak', {}) or {}),
+        }
+        workers, alive, queued = _handler_pool_health()
+        lines = [
+            '🩺 <b>ДИАГНОСТИКА NYABOT</b>',
+            '━━━━━━━━━━━━━━━━━━━━',
+            f'📦 Версия: <code>{html.escape(str(BOT_VERSION_TEXT))}</code>',
+            f'🗄 Neon настроен: <b>{"да" if DATABASE_URL else "нет"}</b>',
+            f'💾 Данные помечены к сохранению: <b>{"да" if dirty else "нет"}</b>',
+            f'🔢 Версия данных в памяти: <b>{version}</b>',
+            f'👥 Записей аккаунтов в памяти: <b>{account_count}</b>',
+            f'⭐ Ожидающих заказов кастомных титулов: <b>{pending_titles}</b>',
+            f'🎰 Пул казино: <b>{casino_pool:,} 🪙</b>',
+            f'🧵 Потоков TeleBot: <b>{alive}/{workers}</b>, очередь: <b>{queued}</b>',
+            '', '<b>Активные игры:</b>',
+            *[f'• {html.escape(name)}: <b>{count}</b>' for name, count in game_counts.items()],
+            '', '⚠️ Проверяются данные процесса; реальные запросы к Telegram/Neon здесь не выполняются.'
+        ]
+        bot.reply_to(message, '\n'.join(lines), parse_mode='HTML')
+    except Exception as exc:
+        print(f'[NYABOT DIAGNOSTICS ERROR] {exc}')
+        try:
+            bot.reply_to(message, '⚠️ Не удалось собрать диагностику. Проверьте логи Railway.')
+        except Exception:
+            pass
+
+
+bot.message_handler(commands=["nyadiag", "диагностика"])(_nyabot_diagnostics_handler)
+
+
 # ---------------------------------------------------------
 # РЕГИСТРАЦИЯ ВЫНЕСЕННЫХ HANDLERS
 # ---------------------------------------------------------
@@ -8584,6 +9863,50 @@ register_handlers(globals())
 class TelegramPollingConflict(RuntimeError):
     """Raised when Telegram reports that another getUpdates consumer exists."""
 
+
+
+def _handler_pool_health():
+    """Return (total_workers, alive_workers, queued_tasks) for TeleBot."""
+    pool = getattr(bot, 'worker_pool', None)
+    if pool is None:
+        return 0, 0, 0
+    workers = list(getattr(pool, 'workers', ()) or ())
+    alive = 0
+    for worker in workers:
+        try:
+            if worker.is_alive():
+                alive += 1
+        except Exception:
+            alive += 1
+    tasks = getattr(pool, 'tasks', None)
+    try:
+        queued = max(0, int(tasks.qsize())) if tasks is not None else 0
+    except Exception:
+        queued = 0
+    return len(workers), alive, queued
+
+
+def _check_handler_pool_health(backlog_since):
+    """Restart the process if workers die or the handler queue stays poisoned."""
+    total, alive, queued = _handler_pool_health()
+    now = time.monotonic()
+    if total and alive < total:
+        raise RuntimeError(f'TeleBot worker pool degraded: {alive}/{total} worker threads are alive.')
+    if queued > BOT_HANDLER_BACKLOG_LIMIT:
+        if backlog_since is None:
+            backlog_since = now
+            print(
+                f'[HANDLER WATCHDOG] Queue backlog reached {queued} tasks; '
+                f'watching for {BOT_HANDLER_BACKLOG_GRACE:.0f}s before restart.'
+            )
+        elif now - backlog_since >= BOT_HANDLER_BACKLOG_GRACE:
+            raise RuntimeError(
+                f'TeleBot handler queue stayed above {BOT_HANDLER_BACKLOG_LIMIT} '
+                f'for {now - backlog_since:.1f}s (current={queued}); restarting process.'
+            )
+    else:
+        backlog_since = None
+    return backlog_since
 
 
 def run_bot(stop_event=None, lock_health_check=None):
@@ -8622,6 +9945,7 @@ def run_bot(stop_event=None, lock_health_check=None):
     offset = None
     health_counter = 0
     last_poll_log = 0.0
+    handler_backlog_since = None
 
     while not stop_event.is_set():
         if lock_health_check and not lock_health_check():
@@ -8631,8 +9955,8 @@ def run_bot(stop_event=None, lock_health_check=None):
             updates = bot.get_updates(
                 offset=offset,
                 limit=100,
-                timeout=30,
-                long_polling_timeout=30,
+                timeout=POLLING_TIMEOUT,
+                long_polling_timeout=POLLING_TIMEOUT,
             )
         except Exception as exc:
             error_code = getattr(exc, 'error_code', None)
@@ -8660,6 +9984,11 @@ def run_bot(stop_event=None, lock_health_check=None):
         elif time.time() - last_poll_log >= 30:
             last_poll_log = time.time()
             print('[POLLING] Telegram long polling is alive; no updates received in the last interval.')
+
+        # Telegram can keep delivering updates even when handler workers are
+        # permanently stuck. Detect that partial outage and let Railway restart
+        # the whole process instead of silently accumulating an infinite queue.
+        handler_backlog_since = _check_handler_pool_health(handler_backlog_since)
 
         health_counter += 1
         if health_counter >= 5:

@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
+import signal
+import threading
 import time
 
 import config
 from core.database import (
     acquire_single_instance_lock,
     release_single_instance_lock,
+    single_instance_lock_is_alive,
 )
 
 
@@ -65,6 +67,21 @@ def _wait_for_single_instance(max_attempts: int = 60, delay: float = 5.0) -> boo
     return False
 
 
+
+
+def _is_telegram_conflict(exc: BaseException) -> bool:
+    """Detect Telegram's 409 polling conflict across API error representations."""
+    code = getattr(exc, "error_code", None)
+    if code == 409:
+        return True
+    result_json = getattr(exc, "result_json", None)
+    if isinstance(result_json, dict) and result_json.get("error_code") == 409:
+        return True
+    message = str(exc or "").lower()
+    return "409" in message and (
+        "getupdates" in message or "conflict" in message or "terminated by other" in message
+    )
+
 def _prepare_polling(newfile) -> None:
     """Make the polling process deterministic after a deployment/restart."""
     bot = getattr(newfile, "bot", None)
@@ -92,50 +109,61 @@ def main() -> None:
         LOG.error("[STARTUP] BOT_TOKEN is missing; bot startup aborted.")
         raise SystemExit(1)
 
+    if not config.DATABASE_URL and not config.ALLOW_JSON_BOOTSTRAP:
+        LOG.error(
+            "[STARTUP] DATABASE_URL is missing and ALLOW_JSON_BOOTSTRAP is disabled; "
+            "refusing to start without the canonical Neon database."
+        )
+        raise SystemExit(1)
+
     if not _wait_for_single_instance():
         raise SystemExit(1)
 
+    stop_event = threading.Event()
+
+    def _request_shutdown(signum, _frame):
+        LOG.info("Shutdown signal %s received; stopping NyaBot cleanly.", signum)
+        stop_event.set()
+
+    for _sig_name in ("SIGTERM", "SIGINT"):
+        _sig = getattr(signal, _sig_name, None)
+        if _sig is not None:
+            signal.signal(_sig, _request_shutdown)
+
     try:
-        # Import only after the singleton lock is acquired. newfile.py loads
-        # the database and registers the entire handler tree during import.
         import newfile
 
         _prepare_polling(newfile)
 
-        # run_bot() owns the actual Telegram polling. The supervisor below
-        # restarts it after an unexpected exception without re-importing the
-        # 450K+ legacy module or registering handlers a second time.
-        restart_delay = 3.0
-
-        while True:
-            try:
-                LOG.info("Starting NyaBot polling.")
-                newfile.run_bot()
-
-                # A normal return is unexpected for a long-polling process.
-                LOG.warning("NyaBot polling returned unexpectedly; restarting.")
-                restart_delay = 3.0
-
-            except KeyboardInterrupt:
-                LOG.info("Shutdown requested.")
-                break
-
-            except SystemExit:
-                raise
-
-            except Exception:
-                LOG.exception(
-                    "NyaBot polling crashed. Restarting in %.1f seconds.",
-                    restart_delay,
+        LOG.info("Starting NyaBot polling with a single supervised getUpdates loop.")
+        try:
+            newfile.run_bot(
+                stop_event=stop_event,
+                lock_health_check=single_instance_lock_is_alive,
+            )
+        except KeyboardInterrupt:
+            LOG.info("Shutdown requested.")
+        except SystemExit:
+            raise
+        except Exception as exc:
+            if _is_telegram_conflict(exc):
+                # Do not create another polling thread. A 409 means Telegram is
+                # already serving getUpdates to another process. Give an older
+                # Railway deployment time to terminate, then let Railway restart
+                # this process and retry the Neon singleton acquisition.
+                LOG.error(
+                    "Telegram returned 409 Conflict. Another instance is consuming "
+                    "getUpdates; stopping this process instead of retrying in parallel."
                 )
-
-            _prepare_polling(newfile)
-            time.sleep(restart_delay)
-            restart_delay = min(restart_delay * 2.0, 60.0)
-
+                stop_event.set()
+                time.sleep(30.0)
+                raise SystemExit(2)
+            LOG.exception("NyaBot polling stopped because of an unexpected error.")
+            raise
     finally:
+        stop_event.set()
         release_single_instance_lock()
-        LOG.info("Neon singleton lock released.")
+        LOG.info("Neon singleton lock released; process shutdown complete.")
 
 
 if __name__ == "__main__":

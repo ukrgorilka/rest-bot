@@ -4,22 +4,22 @@ All environment-backed settings are kept here so the bot launcher and
 application modules use one configuration source during the migration.
 """
 
+import math
 import os
 from datetime import timedelta, timezone
 
 
 def normalize_tg_id(value):
-    """Normalize Telegram chat/channel IDs to int."""
-    if not value:
+    """Parse a Telegram chat/channel ID without inventing a different ID."""
+    if value is None or value == "":
         return 0
     raw = str(value).strip()
     try:
-        number = int(raw)
-        # Convert old-style negative IDs to Telegram's -100... format.
-        if number < 0 and not str(number).startswith("-100") and len(str(abs(number))) >= 9:
-            return int(f"-100{abs(number)}")
-        return number
-    except (TypeError, ValueError):
+        # Basic-group IDs and supergroup/channel IDs are distinct values.
+        # Prefixing -100 to an arbitrary negative ID can silently target a
+        # different chat, so environment values must be preserved exactly.
+        return int(raw)
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -27,9 +27,43 @@ def normalize_tg_id(value):
 # Telegram
 # ---------------------------------------------------------------------------
 
+BOT_VERSION = "0.14"
+
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "6081930693"))
+_CONFIG_PROBLEMS = []
+
+def _env_int(name, default, *, minimum=None):
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        _CONFIG_PROBLEMS.append(f"{name} must be an integer; using safe default {default}")
+        value = int(default)
+    if minimum is not None and value < minimum:
+        _CONFIG_PROBLEMS.append(f"{name} must be >= {minimum}; using safe default {default}")
+        value = int(default)
+    return value
+
+
+def _env_float(name, default, *, minimum=None):
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = float(raw)
+        if not math.isfinite(value):
+            raise ValueError("value must be finite")
+    except (TypeError, ValueError, OverflowError):
+        _CONFIG_PROBLEMS.append(
+            f"{name} must be a finite number; using safe default {default}"
+        )
+        value = float(default)
+    if minimum is not None and value < minimum:
+        _CONFIG_PROBLEMS.append(f"{name} must be >= {minimum}; using safe default {default}")
+        value = float(default)
+    return value
+
+
+ADMIN_ID = _env_int("ADMIN_ID", 6081930693, minimum=1)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "ukrgorilka").strip().lstrip("@")
 
 # ---------------------------------------------------------------------------
@@ -38,25 +72,8 @@ ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "ukrgorilka").strip().lstrip("
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DATA_FILE = os.environ.get("DATA_FILE", "rests_data.json").strip() or "rests_data.json"
- 
-# ---------------------------------------------------------------------------
-# Application settings
-# ---------------------------------------------------------------------------
-
-ALLOW_JSON_BOOTSTRAP = (
-    os.environ.get("ALLOW_JSON_BOOTSTRAP", "0").strip().lower()
-    in {"1", "true", "yes", "on"}
-)
-
-BOT_VERSION = os.environ.get("BOT_VERSION", "0.14").strip()
-
-BUSINESS_TAX_RATE = float(
-    os.environ.get("BUSINESS_TAX_RATE", "0.20")
-)
-
-BUSINESS_SELL_RATE = float(
-    os.environ.get("BUSINESS_SELL_RATE", "0.80")
-)
+# Neon is the live source of truth in production. JSON bootstrap is opt-in only.
+ALLOW_JSON_BOOTSTRAP = os.environ.get("ALLOW_JSON_BOOTSTRAP", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Optional Telegram JSON backup channel.
 DB_CHANNEL_ID = normalize_tg_id(os.environ.get("DB_CHANNEL_ID", "0"))
@@ -81,7 +98,7 @@ MEDIA_TG_CHAT_ID = normalize_tg_id(
 # Mini App
 # ---------------------------------------------------------------------------
 
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = _env_int("PORT", 8080, minimum=1)
 
 MINIAPP_URL = (
     os.environ.get("MINIAPP_URL")
@@ -114,22 +131,33 @@ def now_msk():
 # Saving
 # ---------------------------------------------------------------------------
 
-AUTOSAVE_INTERVAL = float(os.environ.get("AUTOSAVE_INTERVAL", "5"))
-AUTOSAVE_DEBOUNCE = float(os.environ.get("AUTOSAVE_DEBOUNCE", "25"))
-BACKUP_INTERVAL = float(os.environ.get("BACKUP_INTERVAL", "7200"))
+AUTOSAVE_INTERVAL = _env_float("AUTOSAVE_INTERVAL", 5.0, minimum=0.1)
+AUTOSAVE_DEBOUNCE = _env_float("AUTOSAVE_DEBOUNCE", 25.0, minimum=0.0)
+BACKUP_INTERVAL = _env_float("BACKUP_INTERVAL", 7200.0, minimum=0.0)
+
+# Telegram handler/polling resilience. The bot has synchronous handlers that
+# may perform DB/Telegram I/O. Keep enough workers so slow handlers cannot
+# consume the whole pool, and restart the process on a sustained backlog.
+BOT_HANDLER_THREADS = _env_int("BOT_HANDLER_THREADS", 8, minimum=2)
+BOT_HANDLER_BACKLOG_LIMIT = _env_int("BOT_HANDLER_BACKLOG_LIMIT", 200, minimum=10)
+BOT_HANDLER_BACKLOG_GRACE = _env_float("BOT_HANDLER_BACKLOG_GRACE", 120.0, minimum=30.0)
+POLLING_TIMEOUT = _env_int("POLLING_TIMEOUT", 20, minimum=5)
+
+BUSINESS_TAX_RATE = min(0.75, max(0.0, _env_float("BUSINESS_TAX_RATE", 0.20, minimum=0.0)))
+BUSINESS_SELL_RATE = min(1.0, max(0.0, _env_float("BUSINESS_SELL_RATE", 0.80, minimum=0.0)))
 
 
 def validate():
-    """Return a list of configuration problems instead of crashing at import."""
-    problems = []
+    """Return all configuration problems without crashing during import."""
+    problems = list(_CONFIG_PROBLEMS)
 
     if not BOT_TOKEN:
         problems.append("BOT_TOKEN is not set")
 
     if not DATABASE_URL:
         problems.append(
-            "DATABASE_URL is not set; Neon will be unavailable and local JSON "
-            "fallback will be used"
+            "DATABASE_URL is not set; Neon is unavailable. Local JSON fallback "
+            "is disabled by default and must be explicitly enabled for local testing."
         )
 
     return problems
