@@ -7,6 +7,8 @@ unchanged.
 
 from __future__ import annotations
 
+import copy
+
 
 def _inject(ctx):
     for _name, _value in ctx.items():
@@ -22,7 +24,14 @@ def cmd_business(message):
         return
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    render_business_view(message.chat.id, user_id, user_name)
+    parts=(message.text or '').strip().split()
+    number=None
+    if len(parts) >= 2 and parts[1].isdigit():
+        number=int(parts[1])
+    if number is not None:
+        render_business_detail(message.chat.id,user_id,user_name,number)
+    else:
+        render_business_view(message.chat.id, user_id, user_name)
 
 def cmd_miner(message):
     if not can_process_user_message(message):
@@ -84,15 +93,30 @@ def cmd_collect(message):
         return
 
     now = time.time()
+    # Snapshot BEFORE settling clocks/carries. If Neon save fails, every part of
+    # collection (including elapsed time) must roll back, not just the balance.
+    state_before = copy.deepcopy(econ)
+    period_text = _business_collection_period_text(econ, now)
     base_profit = collect_business_base_profit(econ, now)
     if base_profit <= 0:
-        bot.reply_to(message, "⏳ Пока накопилось меньше 1 🪙. Подождите немного! 😿")
+        bot.reply_to(message, "⏳ Пока накопилось меньше 1 🪙. Дробный доход сохранён — попробуйте чуть позже! 😿")
         return
 
     total_profit, event_text = _apply_business_payout_modifiers(econ, base_profit, message.chat.id, user_id, user_name)
-    _adjust_balance(econ, total_profit)
+    _adjust_balance(econ, total_profit, reason='Сбор прибыли бизнесов')
     mark_dirty()
-    bot.reply_to(message, f"💰 Собрана прибыль предприятий: <b>+{total_profit:,} Ня-коинов 🪙</b>!{event_text}\nБаланс: <b>{econ['balance']:,} 🪙</b> 😸", parse_mode='HTML')
+    if not critical_save('business profit collection command', retries=3):
+        econ.clear(); econ.update(state_before); mark_dirty()
+        bot.reply_to(message, "❌ Neon не сохранил сбор. Начисление отменено, прибыль и таймеры возвращены к прежнему состоянию.")
+        return
+    receipt = (
+        "🏢 <b>Сбор прибыли бизнесов</b>\n"
+        f"⏱ Период накопления: {period_text}\n"
+        f"{event_text.lstrip()}\n\n"
+        f"✅ <b>Начислено: +{total_profit:,} 🪙</b>\n"
+        f"💳 Баланс: <b>{int(econ.get('balance', 0) or 0):,} 🪙</b> 😸"
+    )
+    bot.reply_to(message, receipt, parse_mode='HTML')
 
 def register(ctx, only=None):
     """Register selected handlers from this feature module."""

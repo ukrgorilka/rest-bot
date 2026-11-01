@@ -7,6 +7,8 @@ unchanged.
 
 from __future__ import annotations
 
+import re
+
 
 def _inject(ctx):
     for _name, _value in ctx.items():
@@ -243,7 +245,7 @@ def cmd_admin_control(message):
     action=parts[0].lower()
     cid=str(message.chat.id)
     if action in ('функции','функция','админфункции'):
-        if get_admin_level(message.chat.id, message.from_user.id) != 4:
+        if not is_chat_owner(message.chat.id, message.from_user.id):
             bot.reply_to(message, '❌ Включать/выключать функции админов может только владелец чата.')
             return
     elif not can_admin_action(message.chat.id, message.from_user.id, 'admin_manage'):
@@ -285,6 +287,87 @@ def cmd_admin_control(message):
         bot.reply_to(message, f'✅ {html.escape(str(target_name))} назначен: <b>{ADMIN_LEVEL_NAMES[level]}</b> ({level}).', parse_mode='HTML'); return
     bot.reply_to(message, _admin_usage(), parse_mode='HTML')
 
+_WAIFU_STICKER_PACKS = ("NekoWaifu", "NyaChan", "GamerGirL")
+_WAIFU_STICKER_CACHE = {}
+_WAIFU_STICKER_CACHE_AT = {}
+_LAST_AUTO_WAIFU_STICKER = {}
+_WAIFU_STICKER_CACHE_TTL = 1800
+_WAIFU_STICKER_NEGATIVE_CACHE_TTL = 60
+_AUTO_WAIFU_STICKER_CHANCE = 0.0025  # At most one unsolicited sticker per group per 45 minutes.
+_AUTO_WAIFU_STICKER_COOLDOWN = 45 * 60
+
+
+def _get_waifu_pack_file_ids(pack_name):
+    """Resolve Telegram pack sticker file IDs lazily and cache the results."""
+    now = time.time()
+    cached_at = _WAIFU_STICKER_CACHE_AT.get(pack_name, 0.0)
+    if pack_name in _WAIFU_STICKER_CACHE:
+        cached_ids = _WAIFU_STICKER_CACHE[pack_name]
+        cache_ttl = _WAIFU_STICKER_CACHE_TTL if cached_ids else _WAIFU_STICKER_NEGATIVE_CACHE_TTL
+        if now - cached_at < cache_ttl:
+            return cached_ids
+
+    try:
+        sticker_set = bot.get_sticker_set(pack_name)
+        file_ids = tuple(
+            str(sticker.file_id)
+            for sticker in (getattr(sticker_set, 'stickers', None) or [])
+            if getattr(sticker, 'file_id', None)
+        )
+        _WAIFU_STICKER_CACHE[pack_name] = file_ids
+        _WAIFU_STICKER_CACHE_AT[pack_name] = now
+        if not file_ids:
+            print(f'[STICKER PACK] Pack {pack_name} returned no sendable stickers.')
+        return file_ids
+    except Exception as exc:
+        # Cache a brief negative result to avoid hammering Telegram if a pack
+        # was renamed, deleted, or is temporarily unavailable.
+        _WAIFU_STICKER_CACHE[pack_name] = ()
+        _WAIFU_STICKER_CACHE_AT[pack_name] = now
+        print(f'[STICKER PACK] Could not load {pack_name}: {exc}')
+        return ()
+
+
+def _send_random_waifu_sticker(chat_id, reply_to_message_id=None):
+    """Send one sticker from any of the three configured Telegram packs."""
+    names = list(_WAIFU_STICKER_PACKS)
+    random.shuffle(names)
+    for pack_name in names:
+        file_ids = _get_waifu_pack_file_ids(pack_name)
+        if not file_ids:
+            continue
+        try:
+            kwargs = {}
+            if reply_to_message_id:
+                kwargs['reply_to_message_id'] = reply_to_message_id
+            bot.send_sticker(chat_id, random.choice(file_ids), **kwargs)
+            return True
+        except Exception as exc:
+            print(f'[STICKER PACK] Sending from {pack_name} failed: {exc}')
+    return False
+
+
+def _maybe_send_ambient_waifu_sticker(message):
+    """Occasionally send a pack sticker in groups, with a strict cooldown."""
+    if not message or not getattr(message, 'chat', None):
+        return
+    chat_id = int(message.chat.id)
+    if chat_id >= 0 or not getattr(message, 'text', None):
+        return  # No unsolicited sticker DMs; users can request one explicitly.
+    now = time.time()
+    if now - _LAST_AUTO_WAIFU_STICKER.get(chat_id, 0.0) < _AUTO_WAIFU_STICKER_COOLDOWN:
+        return
+    if random.random() >= _AUTO_WAIFU_STICKER_CHANCE:
+        return
+    if _send_random_waifu_sticker(chat_id, getattr(message, 'message_id', None)):
+        _LAST_AUTO_WAIFU_STICKER[chat_id] = now
+        if len(_LAST_AUTO_WAIFU_STICKER) > 2000:
+            cutoff = now - _AUTO_WAIFU_STICKER_COOLDOWN * 2
+            for old_chat, sent_at in list(_LAST_AUTO_WAIFU_STICKER.items()):
+                if sent_at < cutoff:
+                    _LAST_AUTO_WAIFU_STICKER.pop(old_chat, None)
+
+
 def handle_messages(message):
     if not message or not getattr(message, 'from_user', None):
         return
@@ -308,7 +391,7 @@ def handle_messages(message):
         catchall_slash_commands = {
             '/add_promo', '/admin', '/admin_help', '/calc', '/dice', '/fish', '/force_divorce',
             '/give_item', '/hunt', '/inspect', '/pay', '/resume', '/set_karma', '/shutdown',
-            '/slots', '/start_bot', '/stop_bot', '/wipe'
+            '/slots', '/sticker', '/nya_sticker', '/start_bot', '/stop_bot', '/wipe'
         }
         if command_token not in catchall_slash_commands:
             return
@@ -331,10 +414,15 @@ def handle_messages(message):
     if not db.get('bot_active', True):
         if is_super_admin and text_lower in ['/start_bot', '/resume', 'включить бота', 'запустить бота']:
             db['bot_active'] = True
+            db['bot_status_note'] = 'online'
+            db['bot_maintenance_started_at'] = 0
             mark_dirty()
-            critical_save('start bot')
-            log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде ID:{user_id}')
-            bot.reply_to(message, "🟢 <b>Бот успешно включен и возобновил работу!</b> 😻", parse_mode='HTML')
+            saved = critical_save('start bot', send_backup=True, retries=3)
+            publish_bot_news('🟢 NyaBot восстановлен', 'Технические работы завершены. Все основные системы снова работают.', kind='system')
+            sent, failed = broadcast_system_message(RESTORE_MESSAGE)
+            log_event('ВКЛЮЧЕНИЕ', f'Бот возобновил работу по команде ID:{user_id}; уведомлено чатов: {sent}; ошибок: {failed}')
+            status = 'данные сохранены в Neon' if saved else '⚠️ Neon не подтвердил сохранение'
+            bot.reply_to(message, f"{RESTORE_MESSAGE}\n\n📨 Уведомлено чатов: <b>{sent}</b>\n⚠️ Ошибок доставки: <b>{failed}</b>\n💾 {status}", parse_mode='HTML')
         return
 
     last_chat_activity[chat_id] = now_ts
@@ -359,6 +447,12 @@ def handle_messages(message):
             # Очищаем суффикс @имя_бота из текста команды
             text = text.replace(f"@{cmd_part.split('@')[1]}", "", 1).strip()
             text_lower = text.lower()
+
+    command_token = text_lower.split(maxsplit=1)[0].split('@', 1)[0] if text_lower else ''
+    if text_lower in {'стикер', 'нястикер', 'nyaстикер'} or command_token in {'/sticker', '/nya_sticker'}:
+        if not _send_random_waifu_sticker(chat_id, getattr(message, 'message_id', None)):
+            bot.reply_to(message, '😿 Не удалось загрузить стикеры сейчас. Попробуйте чуть позже.')
+        return
 
     econ = get_user_econ(user_id, user_name, username=user_username)
     if text_lower.startswith('/') or any(kw in text_lower for kw in ['рест', 'профиль', 'баланс', 'топ', 'шанс']):
@@ -409,9 +503,14 @@ def handle_messages(message):
     activity_reward_allowed = (now_ts - float(econ.get('last_activity_reward_time', 0) or 0)) >= 5.0
     if activity_reward_allowed:
         econ['last_activity_reward_time'] = now_ts
-        add_account_exp(user_id, user_name, 2, username=user_username)
+        add_account_exp(user_id, user_name, 2, username=user_username, source='message_activity')
         add_bp_exp(user_id, user_name, 2, username=user_username)
         mark_dirty()
+    # A very rare pack sticker can appear organically in active groups.
+    try:
+        _maybe_send_ambient_waifu_sticker(message)
+    except Exception as sticker_error:
+        print(f'[STICKER PACK] Ambient sticker hook failed: {sticker_error}')
     # МЕМНЫЕ БОЛЕЗНИ (СЛУЧАЙНОЕ ЗАРАЖЕНИЕ 2%)
     if random.random() < 0.02:
         d_got = try_infect_user(user_id, user_name, chance=1.0)
@@ -425,6 +524,20 @@ def handle_messages(message):
     if m_say:
         phrase = m_say.group(1).strip()
         bot.send_message(chat_id, phrase)
+        return
+
+    # V0.3 BUSINESS ROUTER: plain "бизнес"/"бизнесы" and "бизнес N" without buttons in the catalog.
+    m_business = re.fullmatch(r'бизнес(?:ы)?(?:\s+(\d{1,3}))?', text_lower)
+    if m_business:
+        number = m_business.group(1)
+        if number:
+            try:
+                render_business_detail(chat_id, user_id, user_name, int(number))
+            except Exception as e:
+                print(f'[BUSINESS ROUTER ERROR] {e}')
+                bot.reply_to(message, '❌ Не удалось открыть карточку бизнеса. Попробуйте ещё раз.')
+        else:
+            render_business_view(chat_id, user_id, user_name)
         return
 
     # РЕАКЦИИ
@@ -477,7 +590,7 @@ def handle_messages(message):
             if reward <= 0:
                 return
             add_coins(user_id, user_name, reward, username=user_username)
-            add_account_exp(user_id, user_name, 20, username=user_username)
+            add_account_exp(user_id, user_name, 20, username=user_username, source='quiz_win')
             mark_dirty()
         u_link = make_link(chat_id, user_name, user_id, ping=True)
         bot.reply_to(message, f"🎉 <b>ПРАВИЛЬНЫЙ ОТВЕТ!</b> 😻\n\nПервым(ой) правильно ответил(а) {u_link} и получает <b>+{reward} Ня-коинов 🪙</b> (+20 EXP)!", parse_mode='HTML')
@@ -525,18 +638,21 @@ def handle_messages(message):
                 return
 
         if text_lower in ['/stop_bot', '/shutdown', 'выключить бота', 'остановить бота']:
-            # Только ADMIN_ID (владелец @ukrgorilka). Остановка не должна
-            # оставлять незаписанную экономику: сначала emergency snapshot,
-            # затем сохраняем сам флаг сна.
+            # Перед выключением делаем аварийный snapshot, затем атомарно
+            # фиксируем режим обслуживания и рассылаем предупреждение.
             before_ok = critical_save('pre-stop snapshot', send_backup=True, retries=3)
             db['bot_active'] = False
+            db['bot_status_note'] = 'maintenance'
+            db['bot_maintenance_started_at'] = time.time()
             mark_dirty()
             after_ok = critical_save('stop flag', send_backup=True, retries=3)
+            publish_bot_news('🔧 Технические работы', 'NyaBot временно приостановил работу для исправлений и обновления систем.', kind='maintenance')
+            sent, failed = broadcast_system_message(MAINTENANCE_MESSAGE)
             state = ('данные сохранены в Neon и локально' if (before_ok and after_ok)
-                     else 'локальная копия сохранена, но Neon не подтвердил сохранение')
-            log_event('ОСТАНОВКА', f'Бот переведён в спящий режим администратором ID:{user_id}')
+                     else '⚠️ Neon не подтвердил одно из сохранений')
+            log_event('ОСТАНОВКА', f'Бот переведён в режим технических работ ID:{user_id}; уведомлено чатов: {sent}; ошибок: {failed}')
             try:
-                bot.reply_to(message, f"🛑 <b>Весь бот остановлен.</b>\n💾 {state}.\n👑 Для запуска: <code>/start_bot</code>", parse_mode='HTML')
+                bot.reply_to(message, f"{MAINTENANCE_MESSAGE}\n\n📨 Уведомлено чатов: <b>{sent}</b>\n⚠️ Ошибок доставки: <b>{failed}</b>\n💾 {state}\n👑 Для запуска: <code>/start_bot</code>", parse_mode='HTML')
             except Exception:
                 pass
             return
@@ -617,10 +733,9 @@ def handle_messages(message):
                 bot.reply_to(message, "❌ Формат: <code>/take_coins @username 500</code>", parse_mode='HTML')
                 return
             t_econ = get_user_econ(t_uid, t_uname)
-            _set_balance(t_econ, max(0, t_econ.get('balance', 0) - t_amt))
-            mark_dirty()
+            removed, balance_after = _debit_balance_up_to(t_econ, t_amt, reason='Админское списание коинов')
             u_link = make_link(chat_id, t_uname, t_uid, ping=True)
-            bot.reply_to(message, f"💸 <b>Списано -{t_amt} 🪙</b> у {u_link}!\nБаланс: <b>{t_econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💸 <b>Списано -{removed} 🪙</b> у {u_link}!\nБаланс: <b>{balance_after} 🪙</b>", parse_mode='HTML')
             return
 
         m_give = re.match(r'^(?:/give_coins|/give|выдать\s+коины|начислить\s+коины)\s*(.*)', text, re.IGNORECASE)
@@ -644,10 +759,9 @@ def handle_messages(message):
                 bot.reply_to(message, "❌ Формат: <code>/give_coins @username 1000</code>", parse_mode='HTML')
                 return
             t_econ = get_user_econ(t_uid, t_uname)
-            _set_balance(t_econ, t_econ.get('balance', 0) + t_amt)
-            mark_dirty()
+            balance_after = _adjust_balance(t_econ, t_amt, reason='Админская выдача коинов')
             u_link = make_link(chat_id, t_uname, t_uid, ping=True)
-            bot.reply_to(message, f"🎁 <b>Начислено +{t_amt} 🪙</b> для {u_link}!\nБаланс: <b>{t_econ['balance']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"🎁 <b>Начислено +{t_amt} 🪙</b> для {u_link}!\nБаланс: <b>{balance_after} 🪙</b>", parse_mode='HTML')
             return
 
     # ТОРГОВЛЯ НА БИРЖЕ ТЕКСТОМ
@@ -709,7 +823,7 @@ def handle_messages(message):
                 with TRANSFER_LOCK:
                     m['vault'] = cur_vault - amt
                     if isinstance(p_econ.get('marriage'), dict): p_econ['marriage']['vault'] = m['vault']
-                    _set_balance(econ, max(0, int(econ.get('balance', 0) or 0)) + amt)
+                    _adjust_balance(econ, amt, reason='Снятие из семейного сейфа')
                     mark_dirty()
             bot.reply_to(message, f"💸 Вы взяли <b>{amt} 🪙</b> из семейного сейфа!\nОстаток: <b>{m['vault']} 🪙</b> 😸", parse_mode='HTML')
             return
@@ -822,27 +936,21 @@ def handle_messages(message):
         m_amt = re.search(r'(\d+)', text)
         if m_amt:
             amt = int(m_amt.group(1))
-            if amt <= 0 or econ['balance'] < amt:
-                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ['balance']} 🪙 😿")
+            ok, moved, wallet_after, deposit_after = _bank_deposit(econ, amt, user_id=user_id)
+            if not ok:
+                bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ.get('balance', 0)} 🪙 😿")
                 return
-            _adjust_balance(econ, -(amt))
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amt
-            check_achievements(user_id, user_name, 'bank_deposit', amt, chat_id, username=user_username)
-            mark_dirty()
-            bot.reply_to(message, f"🏦 Вы внесли <b>{amt} 🪙</b> на депозит в Ня-Банк! 😻\nНа депозите: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
+            check_achievements(user_id, user_name, 'bank_deposit', moved, chat_id, username=user_username)
+            bot.reply_to(message, f"🏦 Вы внесли <b>{moved} 🪙</b> на депозит в Ня-Банк! 😻\nНа депозите: <b>{deposit_after} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять всё'):
         econ = get_user_econ(user_id, user_name, username=user_username)
         update_bank_interest(econ)
-        dep = econ.get('bank_deposit', 0)
-        if dep <= 0:
+        ok, moved, wallet_after, deposit_after = _bank_withdraw(econ, user_id=user_id)
+        if not ok:
             bot.reply_to(message, "❌ Ваш банковский депозит пуст! 😿")
             return
-        _adjust_balance(econ, dep)
-        econ['bank_deposit'] = 0
-        econ['last_bank_calc'] = time.time()
-        mark_dirty()
-        bot.reply_to(message, f"💸 Вы забрали весь вклад из банка: <b>+{dep} 🪙</b>! 😸\nБаланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
+        bot.reply_to(message, f"💸 Вы забрали весь вклад из банка: <b>+{moved} 🪙</b>! 😸\nБаланс: <b>{wallet_after} 🪙</b>", parse_mode='HTML')
         return
     elif text_lower.startswith('банк снять'):
         econ = get_user_econ(user_id, user_name, username=user_username)
@@ -850,16 +958,11 @@ def handle_messages(message):
         m_amt = re.search(r'(\d+)', text)
         if m_amt:
             amt = int(m_amt.group(1))
-            dep = econ.get('bank_deposit', 0)
-            if amt <= 0 or dep < amt:
-                bot.reply_to(message, f"❌ В банке недостаточно средств! На депозите: {dep} 🪙 😿")
+            ok, moved, wallet_after, deposit_after = _bank_withdraw(econ, amt, user_id=user_id)
+            if not ok:
+                bot.reply_to(message, f"❌ В банке недостаточно средств! На депозите: {econ.get('bank_deposit', 0)} 🪙 😿")
                 return
-            econ['bank_deposit'] -= amt
-            _adjust_balance(econ, amt)
-            if econ['bank_deposit'] == 0:
-                econ['last_bank_calc'] = time.time()
-            mark_dirty()
-            bot.reply_to(message, f"💸 Вы сняли <b>{amt} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{econ['bank_deposit']} 🪙</b>", parse_mode='HTML')
+            bot.reply_to(message, f"💸 Вы сняли <b>{moved} 🪙</b> с банковского счёта! 😺\nОстаток в банке: <b>{deposit_after} 🪙</b>", parse_mode='HTML')
         return
 
     # РП-КОМАНДЫ МОЖНО ОТКЛЮЧИТЬ ДЛЯ КОНКРЕТНОГО ЧАТА
@@ -870,7 +973,7 @@ def handle_messages(message):
             if text_lower == solo_cmd or text_lower.startswith(f"{solo_cmd} "):
                 sender_link = make_link(chat_id, user_name, user_id, ping=True)
                 check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
-                add_account_exp(user_id, user_name, 3, username=user_username)
+                add_account_exp(user_id, user_name, 3, username=user_username, source='rp_solo')
                 bot.send_message(chat_id, f"{solo_emoji} {sender_link} {solo_text}", parse_mode='HTML')
                 return
 
@@ -897,7 +1000,7 @@ def handle_messages(message):
                     sender_link = make_link(chat_id, user_name, user_id, ping=True)
                     target_link = make_link(chat_id, target_user, target_user_id, ping=True)
                     check_achievements(user_id, user_name, 'rp_actions', 1, chat_id, username=user_username)
-                    add_account_exp(user_id, user_name, 3, username=user_username)
+                    add_account_exp(user_id, user_name, 3, username=user_username, source='rp_pair')
                     k_val = rp_data.get('karma', 0)
                     if k_val != 0:
                         change_karma(user_id, user_name, k_val)
@@ -999,20 +1102,17 @@ def handle_messages(message):
         econ = get_user_econ(user_id, user_name, username=user_username)
         update_bank_interest(econ)
         if action in ('положить', 'внести', 'пополнить'):
-            if econ.get('balance', 0) < amount:
+            ok, moved, _wallet_after, deposit_after = _bank_deposit(econ, amount, user_id=user_id)
+            if not ok:
                 bot.reply_to(message, f"❌ В кошельке только <b>{econ.get('balance', 0)} 🪙</b>.", parse_mode='HTML')
                 return
-            _adjust_balance(econ, -(amount))
-            econ['bank_deposit'] = econ.get('bank_deposit', 0) + amount
-            action_text = f"📥 На счёт внесено <b>{amount:,} 🪙</b>"
+            action_text = f"📥 На счёт внесено <b>{moved:,} 🪙</b>"
         else:
-            if econ.get('bank_deposit', 0) < amount:
+            ok, moved, _wallet_after, deposit_after = _bank_withdraw(econ, amount, user_id=user_id)
+            if not ok:
                 bot.reply_to(message, f"❌ На депозите только <b>{econ.get('bank_deposit', 0)} 🪙</b>.", parse_mode='HTML')
                 return
-            econ['bank_deposit'] -= amount
-            _adjust_balance(econ, amount)
-            action_text = f"📤 Со счёта снято <b>{amount:,} 🪙</b>"
-        mark_dirty()
+            action_text = f"📤 Со счёта снято <b>{moved:,} 🪙</b>"
         bot.reply_to(message, f"🏦 <b>НЯ-БАНК</b>\n{action_text}\n💳 В банке: <b>{econ.get('bank_deposit', 0):,} 🪙</b>\n💵 В кошельке: <b>{econ.get('balance', 0):,} 🪙</b>", parse_mode='HTML')
         return
 
@@ -1036,6 +1136,12 @@ def handle_messages(message):
         return
 
     # ТЕКСТОВЫЕ КОМАНДЫ
+    # Каталог работ поддерживает числовые карточки так же, как каталог бизнесов:
+    # «работа 1» / «робота 1» / «work 1» открывает конкретную профессию.
+    if re.fullmatch(r'(?:работа|работы|робота|work|job)\s+[#№]?\d+', text_lower): cmd_work(message); return
+    # v0.3: concrete business cards are opened by plain text, e.g. "бизнес 1",
+    # not only by slash commands. Keep the exact "бизнес"/"бизнесы" aliases below.
+    if re.fullmatch(r'бизнес\s+\d+', text_lower): cmd_business(message); return
     if text_lower in ['хромосомы', 'хромосома', 'замер хромосом']: cmd_chromosomes(message); return
     elif text_lower in ['айкью', 'iq', 'iqи', 'айкю']: cmd_iq(message); return
     elif text_lower in ['жир', 'жирок', 'жирность', 'процент жира']: cmd_fat(message); return
@@ -1153,7 +1259,7 @@ def handle_messages(message):
 
             _adjust_balance(econ, final_reward)
             econ['last_hourly'] = now_ts
-            add_account_exp(user_id, user_name, 10, username=user_username)
+            add_account_exp(user_id, user_name, 10, username=user_username, source='hourly_bonus')
             mark_dirty()
             check_achievements(user_id, user_name, 'bonuses', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'bonus', 1, chat_id, username=user_username)
@@ -1192,14 +1298,16 @@ def handle_messages(message):
             if total == 12:
                 win = process_casino_win(int(bet * 3.0))
                 _adjust_balance(econ, win)
-                result += f'\n🎉 Джекпот 12! Вы выиграли <b>+{win} 🪙</b> (3.0x)! 🙀'
+                effective_mult = (win / bet) if bet > 0 else 0.0
+                result += f'\n🎉 Джекпот 12! Вы выиграли <b>+{win} 🪙</b> (фактически x{effective_mult:.2f})! 🙀'
             elif total >= 8:
                 win = process_casino_win(int(bet * 1.95))
                 _adjust_balance(econ, win)
-                result += f'\n✅ Победа! Выплата: <b>+{win} 🪙</b> (1.95x) 😻'
+                effective_mult = (win / bet) if bet > 0 else 0.0
+                result += f'\n✅ Победа! Выплата: <b>+{win} 🪙</b> (фактически x{effective_mult:.2f}) 😻'
             else:
                 result += f'\n💸 Вы проиграли <b>{bet} 🪙</b>. 😿'
-            add_account_exp(user_id, user_name, 5, username=user_username)
+            add_account_exp(user_id, user_name, 5, username=user_username, source='dice_bet')
             mark_dirty()
             check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
             completed = track_daily_task(user_id, user_name, 'dice', 1, chat_id, username=user_username)
@@ -1207,65 +1315,114 @@ def handle_messages(message):
         bot.reply_to(message, result + f"\n💰 Баланс: <b>{econ['balance']} 🪙</b> 😸", parse_mode='HTML')
         return
 
-    # СЛОТЫ
+    # СЛОТЫ — используем настоящую анимацию Telegram 🎰.
     elif text_lower.startswith(('слоты', '/slots', 'казино')):
         match = re.search(r'(?:слоты|/slots|казино)\s*(\d+)?', text, re.IGNORECASE)
         bet = int(match.group(1)) if match and match.group(1) else 0
-
-        econ = get_user_econ(user_id, user_name, username=user_username)
         if bet < 30:
             bot.reply_to(message, '❌ Минимальная ставка — 30 Ня-коинов! 😾', parse_mode='HTML')
             return
-        if bet > econ['balance']:
-            bot.reply_to(message, f"❌ Недостаточно коинов! Ваш баланс: <b>{econ['balance']} 🪙</b> 😿", parse_mode='HTML')
+
+        with _get_user_action_lock(user_id):
+            econ = get_user_econ(user_id, user_name, username=user_username)
+            if int(econ.get('balance', 0) or 0) < bet:
+                bot.reply_to(message, f"❌ Недостаточно коинов! Ваш баланс: <b>{econ.get('balance', 0)} 🪙</b> 😿", parse_mode='HTML')
+                return
+            _adjust_balance(econ, -bet)
+            process_casino_bet(bet, chat_id)
+            mark_dirty()
+
+        try:
+            dice_message = bot.send_dice(chat_id, emoji='🎰')
+            dice_value = int(dice_message.dice.value)
+            if not 1 <= dice_value <= 64:
+                raise ValueError(f'Unexpected Telegram slot value: {dice_value}')
+        except Exception as slot_send_error:
+            with _get_user_action_lock(user_id):
+                live_econ = get_user_econ(user_id, user_name, username=user_username)
+                _adjust_balance(live_econ, bet)
+                reverse_casino_bet(bet, chat_id)
+                mark_dirty()
+            print(f'[SLOTS SEND ERROR] {slot_send_error}')
+            try:
+                bot.reply_to(message, '❌ Не удалось запустить анимацию слотов. Ставка возвращена. 😿', parse_mode='HTML')
+            except Exception:
+                pass
             return
 
-        _adjust_balance(econ, -(bet))
-        process_casino_bet(bet, chat_id)
+        dice_message_id = getattr(dice_message, 'message_id', None)
 
-        symbols_pool = ['🍒', '🍋', '🍊', '🍀', '⭐', '💎']
-        luck_bonus = econ['pet'].get('luck_bonus', 0) if econ.get('pet') else 0
-        if econ.get('luck_clover_until', 0) > now_ts: luck_bonus += 15
+        def _resolve_slot_result():
+            # Let Telegram's client animation finish before posting the payout.
+            time.sleep(3.5)
+            with _get_user_action_lock(user_id):
+                try:
+                    live_econ = get_user_econ(user_id, user_name, username=user_username)
+                    if dice_value == 64:
+                        pattern = (7, 7, 7)
+                        multiplier = 5.0
+                        result_text = '💎👑 <b>МЕГА-ДЖЕКПОТ — ТРИ СЕМЁРКИ!</b> 🙀'
+                    else:
+                        encoded = dice_value - 1
+                        symbol_map = (1, 2, 3, 0)
+                        pattern = (
+                            symbol_map[encoded & 0b11],
+                            symbol_map[(encoded >> 2) & 0b11],
+                            symbol_map[(encoded >> 4) & 0b11],
+                        )
+                        if pattern[0] == pattern[1] == pattern[2]:
+                            multiplier = 1.8
+                            result_text = '🎉 <b>Три одинаковых символа!</b> Отличный выигрыш! 😻'
+                        elif len(set(pattern)) == 2:
+                            multiplier = 0.7
+                            result_text = '✨ <b>Два одинаковых символа!</b> Возвращается 70% ставки (x0.7). 😸'
+                        else:
+                            multiplier = 0.0
+                            result_text = '💸 <b>Комбинация не совпала.</b> В следующий раз повезёт! 😿'
 
-        pool = db.get('casino_pool', 1000000)
-        if pool < bet * 10:
-            weights = [38, 32, 18, 8, 3, 1]
-        else:
-            weights = [30, 25, 20, 14, 8 + int(luck_bonus * 0.04), 3 + int(luck_bonus * 0.03)]
-            
-        roll = random.choices(symbols_pool, weights=weights, k=3)
-        result = f"🎰 <b>[ {roll[0]} | {roll[1]} | {roll[2]} ]</b> 😺\n"
+                    win_amount = 0
+                    if multiplier > 0:
+                        win_amount = process_casino_win(int(bet * multiplier))
+                        _adjust_balance(live_econ, win_amount)
+                        live_econ['daily_casino_win'] = int(live_econ.get('daily_casino_win', 0) or 0) + max(0, win_amount - bet)
+                        live_econ['daily_casino_profit'] = int(live_econ.get('daily_casino_profit', 0) or 0) + (win_amount - bet)
+                        effective_multiplier = (win_amount / bet) if bet > 0 else 0.0
+                        result_text += f"\n💰 Выплата: <b>+{win_amount:,} 🪙</b> (x{effective_multiplier:.2f} фактически)"
+                    else:
+                        live_econ['daily_casino_profit'] = int(live_econ.get('daily_casino_profit', 0) or 0) - bet
+                        result_text += f"\n💸 Проигрыш: <b>{bet:,} 🪙</b>"
 
-        if roll[0] == roll[1] == roll[2] == '💎':
-            win = process_casino_win(int(bet * 5))
-            _adjust_balance(econ, win)
-            result += f'\n💎👑 <b>МЕГА ДЖЕКПОТ (5x)!</b> Выигрыш: <b>+{win} 🪙</b>! 🙀'
-        elif roll[0] == roll[1] == roll[2] and roll[0] in ['⭐', '🍀']:
-            multiplier = 3 if roll[0] == '⭐' else 2.5
-            win = process_casino_win(int(bet * multiplier))
-            _adjust_balance(econ, win)
-            result += f'\n🌟 <b>ОГРОМНЫЙ ВЫИГРЫШ ({multiplier}x)!</b> Награда: <b>+{win} 🪙</b>! 😻'
-        elif roll[0] == roll[1] == roll[2]:
-            win = process_casino_win(int(bet * 1.8))
-            _adjust_balance(econ, win)
-            result += f'\n🎉 <b>Три в ряд (1.8x)!</b> Выигрыш: <b>+{win} 🪙</b>! 😸'
-        elif roll.count('💎') == 2 or roll.count('⭐') == 2:
-            win = process_casino_win(int(bet * 1.2))
-            _adjust_balance(econ, win)
-            result += f'\n✨ <b>Два редких символа!</b> Выигрыш: <b>+{win} 🪙</b> (1.2x)! 😽'
-        elif len(set(roll)) == 2:
-            win = process_casino_win(int(bet * 0.6))
-            _adjust_balance(econ, win)
-            result += f'\n🙂 <b>Два совпадения!</b> Частичный возврат: <b>{win} 🪙</b> (0.6x).'
-        else:
-            result += f'\n💸 Проигрыш <b>-{bet} 🪙</b>. 😿'
+                    # Persist the stake/payout state before optional progression hooks.
+                    # If an achievement/task helper fails, the player must still get
+                    # a result message and the committed casino balance must be dirty.
+                    mark_dirty()
+                    completed = []
+                    try:
+                        add_account_exp(user_id, user_name, 5, username=user_username, source='slots_bet')
+                        check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
+                        completed = track_daily_task(user_id, user_name, 'slots', 1, chat_id, username=user_username)
+                        mark_dirty()
+                    except Exception as progression_error:
+                        print(f'[SLOTS PROGRESSION ERROR] {progression_error}')
 
-        add_account_exp(user_id, user_name, 5, username=user_username)
-        mark_dirty()
-        check_achievements(user_id, user_name, 'games', 1, chat_id, username=user_username)
-        completed = track_daily_task(user_id, user_name, 'slots', 1, chat_id, username=user_username)
-        bot.reply_to(message, result + f"\n💰 Баланс: <b>{econ['balance']} 🪙</b>", parse_mode='HTML')
-        for task_name, task_reward in completed: bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
+                    result_text += f"\n💳 Баланс: <b>{int(live_econ.get('balance', 0) or 0):,} 🪙</b>"
+                    try:
+                        if dice_message_id:
+                            bot.send_message(chat_id, result_text, reply_to_message_id=dice_message_id, parse_mode='HTML')
+                        else:
+                            bot.send_message(chat_id, result_text, parse_mode='HTML')
+                    except Exception as result_send_error:
+                        print(f'[SLOTS RESULT MESSAGE ERROR] {result_send_error}')
+                    for task_name, task_reward in completed:
+                        try:
+                            bot.send_message(chat_id, f'🎉 Задание выполнено: <b>{task_name}</b>! +{task_reward} 🪙 😻', parse_mode='HTML')
+                        except Exception as task_send_error:
+                            print(f'[SLOTS TASK MESSAGE ERROR] {task_send_error}')
+                except Exception as slot_result_error:
+                    print(f'[SLOTS RESULT ERROR] {slot_result_error}')
+
+        slot_thread = threading.Thread(target=_resolve_slot_result, daemon=True, name=f'slots-result-{user_id}')
+        slot_thread.start()
         return
 
     # РЫБАЛКА И ОХОТА
@@ -1286,7 +1443,7 @@ def handle_messages(message):
         caught = random.choices(FISH_TYPES, weights=weights, k=1)[0]
         econ['last_fish_time'] = time.time()
         add_inventory_item(econ['fish_inventory'], caught[0])
-        add_account_exp(user_id, user_name, 8, username=user_username)
+        add_account_exp(user_id, user_name, 8, username=user_username, source='fishing')
         mark_dirty()
         check_achievements(user_id, user_name, 'fish', 1, chat_id, username=user_username)
         rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""
@@ -1310,7 +1467,7 @@ def handle_messages(message):
         caught = random.choices(HUNT_TYPES, weights=weights, k=1)[0]
         econ['last_hunt_time'] = time.time()
         add_inventory_item(econ['hunt_inventory'], caught[0])
-        add_account_exp(user_id, user_name, 8, username=user_username)
+        add_account_exp(user_id, user_name, 8, username=user_username, source='hunting')
         mark_dirty()
         check_achievements(user_id, user_name, 'hunt', 1, chat_id, username=user_username)
         rush_info = "\n🌟 <i>Действует Золотая Лихорадка (+50% к шансу)!</i>" if gold_rush_event.get('active') else ""

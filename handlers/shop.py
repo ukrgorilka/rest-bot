@@ -7,6 +7,8 @@ unchanged.
 
 from __future__ import annotations
 
+import time
+
 
 def _inject(ctx):
     for _name, _value in ctx.items():
@@ -25,46 +27,195 @@ def cmd_garage(message):
     render_garage_view(message.chat.id, user_id, user_name)
 
 def cmd_custom_title(message):
+    """Create custom titles through a 4-Star invoice; manage owned titles for free."""
     if not can_process_user_message(message):
         return
-    user_id = message.from_user.id
-    user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
-    econ = get_user_econ(user_id, user_name, username=message.from_user.username)
-    if not econ.get('has_custom_title_cert'):
-        bot.reply_to(message, '❌ У вас нет сертификата кастомного титула. Его можно получить в разделе <code>/stars</code>.', parse_mode='HTML')
-        return
 
+    user = message.from_user
+    user_id = int(user.id)
+    user_name = (f"{user.first_name or ''} {user.last_name or ''}").strip() or user.username or 'Пользователь'
+    econ = get_user_econ(user_id, user_name, username=user.username)
     parts = (message.text or '').split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        current = econ.get('custom_title')
-        active = econ.get('active_title')
-        current_text = html.escape(str(current)) if current else 'не установлен'
-        active_text = html.escape(str(TITLES.get(active, {}).get('name', active))) if active else 'нет'
-        bot.reply_to(
-            message,
-            f"🌟 <b>КАСТОМНЫЙ ТИТУЛ</b>\n━━━━━━━━━━━━━━━━━━━━\n"
-            f"Текущий кастомный: <b>{current_text}</b>\n"
-            f"Активный обычный титул: <b>{active_text}</b>\n\n"
-            f"Использование: <code>/custom_title Ваш титул</code>\n"
-            f"Снять кастомный: <code>/custom_title off</code>",
-            parse_mode='HTML'
-        )
-        return
+    arg = parts[1].strip() if len(parts) > 1 else ''
+    action = arg.casefold()
+    if action.startswith('set '):
+        arg = arg[4:].strip()
+        action = ''
 
-    title = ' '.join(parts[1].split())
-    if title.lower() in {'off', 'none', 'remove', 'снять', 'удалить', '-'}:
-        econ['custom_title'] = None
+    titles = econ.setdefault('custom_titles', [])
+    if not isinstance(titles, list):
+        titles = []
+        econ['custom_titles'] = titles
+
+    # Migrate a legacy single-title save without dropping the equipped title.
+    legacy_text = econ.get('custom_title_text') or econ.get('custom_title')
+    if legacy_text and not econ.get('custom_title_text'):
+        econ['custom_title_text'] = str(legacy_text)
         mark_dirty()
-        bot.reply_to(message, '✅ Кастомный титул снят. Вы можете снова надеть обычный титул через настройки профиля.', parse_mode='HTML')
-        return
-    if len(title) < 2 or len(title) > 40:
-        bot.reply_to(message, '❌ Кастомный титул должен содержать от 2 до 40 символов.')
+    if legacy_text and not any(isinstance(t, dict) and t.get('text') == str(legacy_text) for t in titles):
+        legacy_id = str(econ.get('custom_title_id') or 'ct_legacy')
+        titles.append({'id': legacy_id, 'text': str(legacy_text), 'created_at': 0, 'legacy': True})
+        econ['custom_title_id'] = legacy_id
+        econ['custom_title_credit_used'] = True
+        mark_dirty()
+
+    def save_changes(changes, reason):
+        before = {key: __import__('copy').deepcopy(econ.get(key)) for key in changes}
+        for key, value in changes.items():
+            econ[key] = value
+        mark_dirty()
+        try:
+            saved = critical_save(reason, retries=3)
+        except Exception as exc:
+            print(f'[CUSTOM TITLE SAVE ERROR] {reason}: {exc}')
+            saved = False
+        if saved:
+            return True
+        for key, value in before.items():
+            if value is None and key not in econ:
+                continue
+            econ[key] = value
+        mark_dirty()
+        bot.reply_to(message, '⚠️ Не удалось надёжно сохранить изменение в Neon. Изменение отменено, попробуйте позже.')
+        return False
+
+    current = econ.get('custom_title')
+    saved_title = econ.get('custom_title_text')
+
+    if not arg:
+        from html import escape
+        equipped = escape(str(current)) if current else 'нет'
+        saved = escape(str(saved_title)) if saved_title else 'не выбран'
+        lines = [
+            '🌟 <b>КАСТОМНЫЕ ТИТУЛЫ</b>',
+            '━━━━━━━━━━━━━━━━━━━━',
+            f'📚 Создано титулов: <b>{len(titles)}</b>',
+            f'👑 Сейчас надет: <b>{equipped}</b>',
+            f'💾 Выбранный титул: <b>{saved}</b>',
+            '',
+            'Создать новый титул за <b>4 ⭐</b>:',
+            '<code>/create_tittle Ваш титул</code>',
+            'Снять текущий: <code>/create_tittle off</code>',
+            'Снова надеть выбранный: <code>/create_tittle on</code>',
+            'Удалить выбранный из коллекции: <code>/create_tittle delete</code>',
+            '',
+            'Каждый новый титул оплачивается отдельно. Уже созданные титулы можно менять бесплатно в <code>/инвентарь</code>.'
+        ]
+        bot.reply_to(message, '\n'.join(lines), parse_mode='HTML')
         return
 
-    econ['custom_title'] = title
-    econ['active_title'] = None
+    if action in {'off', 'none', 'remove', 'снять', 'выключить', '-'}:
+        if not current:
+            bot.reply_to(message, 'ℹ️ Кастомный титул не надет. Его текст сохранён; вернуть можно командой <code>/create_tittle on</code>.', parse_mode='HTML')
+            return
+        if save_changes({'custom_title': None}, 'custom title unequip'):
+            bot.reply_to(message, '✅ Кастомный титул снят, но оставлен в коллекции. Вернуть его можно командой <code>/create_tittle on</code>.', parse_mode='HTML')
+        return
+
+    if action in {'on', 'включить', 'надеть'}:
+        selected_id = econ.get('custom_title_id')
+        selected = next((t for t in titles if isinstance(t, dict) and t.get('id') == selected_id), None)
+        if not selected and saved_title:
+            selected = next((t for t in titles if isinstance(t, dict) and t.get('text') == saved_title), None)
+        if not selected and titles:
+            selected = titles[-1] if isinstance(titles[-1], dict) else None
+        if not selected:
+            bot.reply_to(message, '❌ У вас пока нет созданных кастомных титулов. Создание нового стоит 4 ⭐: <code>/create_tittle Ваш титул</code>', parse_mode='HTML')
+            return
+        title_id, title_text = str(selected.get('id')), str(selected.get('text', ''))
+        changes = {'custom_title_id': title_id, 'custom_title_text': title_text, 'custom_title': title_text, 'active_title': None}
+        if save_changes(changes, 'custom title equip'):
+            bot.reply_to(message, f'✅ Надет титул: <b>{__import__("html").escape(title_text)}</b>', parse_mode='HTML')
+        return
+
+    if action in {'delete', 'удалить', 'стереть', 'clear'}:
+        selected_id = econ.get('custom_title_id')
+        selected = next((t for t in titles if isinstance(t, dict) and t.get('id') == selected_id), None)
+        if not selected and saved_title:
+            selected = next((t for t in titles if isinstance(t, dict) and t.get('text') == saved_title), None)
+        if not selected:
+            bot.reply_to(message, 'ℹ️ Выбранного кастомного титула нет в коллекции.', parse_mode='HTML')
+            return
+        new_titles = [t for t in titles if not (isinstance(t, dict) and t.get('id') == selected.get('id'))]
+        changes = {'custom_titles': new_titles}
+        if selected.get('id') == econ.get('custom_title_id'):
+            changes.update({'custom_title': None, 'custom_title_text': None, 'custom_title_id': None})
+        if save_changes(changes, 'custom title delete'):
+            bot.reply_to(message, '✅ Выбранный титул удалён из коллекции. Ранее оплаченные другие титулы сохранены.', parse_mode='HTML')
+        return
+
+    title = ' '.join(arg.split())
+    if not title or len(title) > 40:
+        bot.reply_to(message, '❌ Титул должен содержать от 1 до 40 символов.')
+        return
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in title):
+        bot.reply_to(message, '❌ Титул содержит недопустимые управляющие символы.')
+        return
+
+    # A certificate paid for in the old version grants exactly one title credit.
+    # This preserves purchases while requiring 4 Stars for every subsequent title.
+    has_legacy_credit = bool(econ.get('has_custom_title_cert')) and not bool(econ.get('custom_title_credit_used'))
+    if has_legacy_credit:
+        import secrets
+        title_id = 'ct_' + secrets.token_hex(4)
+        new_item = {'id': title_id, 'text': title, 'created_at': time.time(), 'legacy_credit': True}
+        changes = {
+            'custom_titles': list(titles) + [new_item],
+            'custom_title_id': title_id,
+            'custom_title_text': title,
+            'custom_title': title,
+            'active_title': None,
+            'has_custom_title_cert': False,
+            'custom_title_credit_used': True,
+        }
+        if save_changes(changes, 'legacy custom title credit redeemed'):
+            bot.reply_to(message, f'🌟 <b>Титул создан!</b>\n\n<b>{__import__("html").escape(title)}</b>\n\nСледующий новый титул будет стоить 4 ⭐. Надевать и снимать созданные титулы можно бесплатно в <code>/инвентарь</code>.', parse_mode='HTML')
+        return
+
+    import secrets
+    token = secrets.token_hex(8)
+    now_ts = time.time()
+    pending = econ.setdefault('pending_custom_title_orders', {})
+    if not isinstance(pending, dict):
+        pending = {}
+        econ['pending_custom_title_orders'] = pending
+    # Keep only live orders and cap open invoices to prevent unbounded stale data.
+    for old_token, old_order in list(pending.items()):
+        try:
+            old_created = float((old_order or {}).get('created_at', 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            old_created = 0
+        if old_created <= 0 or now_ts - old_created > 172800:
+            pending.pop(old_token, None)
+    if len(pending) >= 5:
+        mark_dirty()
+        critical_save('prune expired custom title orders', retries=2)
+        bot.reply_to(message, '⚠️ У вас уже 5 неоплаченных счетов на кастомные титулы. Оплатите один из них или подождите 48 часов, пока старые заказы истекут.')
+        return
+    pending[token] = {'text': title, 'created_at': now_ts, 'amount': 4}
     mark_dirty()
-    bot.reply_to(message, f"🌟 Кастомный титул установлен: <b>{html.escape(title)}</b>", parse_mode='HTML')
+    if not critical_save('create custom title payment order', retries=3):
+        pending.pop(token, None)
+        mark_dirty()
+        bot.reply_to(message, '⚠️ Не удалось сохранить заказ в Neon. Ничего не списано, попробуйте ещё раз.')
+        return
+    try:
+        bot.send_invoice(
+            chat_id=message.chat.id,
+            title='Создание кастомного титула',
+            description=f'Создание титула: {title}',
+            invoice_payload=f'ctitle:{user_id}:{token}',
+            provider_token='',
+            currency='XTR',
+            prices=[LabeledPrice(label='Кастомный титул', amount=4)],
+        )
+        bot.reply_to(message, '⭐ Счёт на 4 Telegram Stars создан. Титул будет сохранён и надет после успешной оплаты.')
+    except Exception as exc:
+        print(f'[CUSTOM TITLE INVOICE ERROR] {exc}')
+        pending.pop(token, None)
+        mark_dirty()
+        critical_save('cancel custom title invoice', retries=2)
+        bot.reply_to(message, '❌ Не удалось выставить счёт. Заказ отменён, повторите команду позже.')
 
 def cmd_stars(message):
     if not can_process_user_message(message):
@@ -74,12 +225,11 @@ def cmd_stars(message):
     render_stars_shop(message.chat.id, user_id, user_name, category='main')
 
 def cmd_inventory(message):
-    if not can_process_user_message(message): return
-    uid=message.from_user.id; name=(f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    econ=get_user_econ(uid,name,username=message.from_user.username); pet=econ.get('pet'); pet_inventory=econ.get('pet_inventory',[]) or []
-    titles=[TITLES[t]['text'] for t in econ.get('titles',[]) if t in TITLES]
-    lines=['🎒 <b>ИНВЕНТАРЬ И КОЛЛЕКЦИЯ</b>','━━━━━━━━━━━━━━━━━━━━',f"🐾 Активный питомец: <b>{pet.get('name')}</b>" if pet else '🐾 Активный питомец: <i>нет</i>',f"🏅 Значки: {', '.join(map(str,econ.get('inventory',[]))) if econ.get('inventory') else 'нет'}",f"👑 Титулы: {', '.join(titles) if titles else 'нет'}",f"🎨 Темы: {', '.join(econ.get('purchased_themes',['default']))}",f"⭐️ Stars-предметы: {', '.join(econ.get('paid_stars_items',[])) if econ.get('paid_stars_items') else 'нет'}",f"🐾 Коллекция питомцев: <b>{len(pet_inventory)}</b> — {', '.join(PETS_DATA[x]['name'] for x in pet_inventory if x in PETS_DATA) if pet_inventory else 'нет'}",'━━━━━━━━━━━━━━━━━━━━','💡 Питомцев можно менять в зоомагазине без повторной покупки.']
-    bot.reply_to(message,'\n'.join(lines),parse_mode='HTML')
+    if not can_process_user_message(message):
+        return
+    uid = int(message.from_user.id)
+    name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
+    render_inventory_view(message.chat.id, uid, name, category='main')
 
 def cmd_shop(message):
     if not can_process_user_message(message):
@@ -196,7 +346,7 @@ def register(ctx, only=None):
     if "cmd_custom_title" in wanted:
         _handler = cmd_custom_title
         _handler = serialize_user_action(_handler)
-        bot.message_handler(commands=['custom_title', 'кастомный_титул'])(_handler)
+        bot.message_handler(commands=['create_tittle', 'create_title', 'custom_title', 'кастомный_титул'])(_handler)
         ctx["cmd_custom_title"] = _handler
         globals()["cmd_custom_title"] = _handler
         registered.append("cmd_custom_title")
