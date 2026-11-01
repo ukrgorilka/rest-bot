@@ -321,6 +321,15 @@ def handle_messages(message):
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь'
     text_lower = text.lower()
     now_ts = time.time()
+
+    # Plain-text business navigation was advertised by the catalog but had no
+    # router. Support both Russian and English aliases (e.g. 'бизнес 14').
+    business_match = re.fullmatch(r'(?:бизнес|бизнесы|business|biz)\s+(\d+)', text_lower)
+    if business_match:
+        render_business_detail(chat_id, message.from_user.id,
+                               (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username or 'Пользователь',
+                               int(business_match.group(1)))
+        return
     with QUIZ_LOCK:
         quiz = copy.deepcopy(current_quiz.get(chat_id))
 
@@ -940,7 +949,7 @@ def handle_messages(message):
     for pattern, responses in ALWAYS_ACTIVE_PATTERNS.items():
         if re.search(pattern, text_lower, re.IGNORECASE):
             bot.reply_to(message, random.choice(responses))
-            break
+            return
 
     if text_lower in ['+смехуятинка', 'смехуятинка']:
         if message.reply_to_message:
