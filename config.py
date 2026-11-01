@@ -1,4 +1,4 @@
-то"""NyaBot configuration.
+"""NyaBot configuration.
 
 All environment-backed settings are kept here so the bot launcher and
 application modules use one configuration source during the migration.
