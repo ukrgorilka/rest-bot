@@ -7,7 +7,9 @@ import threading
 import psycopg2
 from psycopg2.extras import Json
 
-from config import ALLOW_JSON_BOOTSTRAP, DATA_FILE, DATABASE_URL
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DATA_FILE = "rests_data.json"
 
 db_lock = threading.RLock()
 DB_SAVE_LOCK = threading.RLock()
@@ -226,43 +228,24 @@ def _load_data_from_sources(default_data, normalize_loaded_data):
                 print("[DB] Загружена база из Neon PostgreSQL.")
                 return normalize_loaded_data(pg_data)
 
-            # Existing Neon data is authoritative. A local file may override it
-            # only for the explicit pending-write recovery case handled above.
-            # When Neon has no state yet, importing a repository snapshot is
-            # disabled by default; this prevents an old rests_data.json from
-            # silently becoming the production database.
-            if local_data is not None and ALLOW_JSON_BOOTSTRAP:
+            if local_data is not None:
                 migrated = normalize_loaded_data(local_data)
 
-                if not _pg_save(migrated):
-                    raise RuntimeError(
-                        "Neon is empty and JSON bootstrap is enabled, "
-                        "but the local snapshot could not be persisted."
+                if _pg_save(migrated):
+                    print(
+                        "[DB] Выполнена первичная миграция "
+                        "rests_data.json -> Neon PostgreSQL."
                     )
 
-                print(
-                    "[DB] Выполнена разрешённая первичная миграция "
-                    "rests_data.json -> Neon PostgreSQL."
-                )
                 return migrated
 
-            if local_data is not None and not ALLOW_JSON_BOOTSTRAP:
-                print(
-                    "[DB] Neon не содержит сохранённого состояния; "
-                    "JSON bootstrap отключён, локальный snapshot пропущен."
-                )
-            elif local_data is None:
-                print(
-                    "[DB] Neon пустая, локальная JSON-база не найдена. "
-                    "Создаётся новая база."
-                )
+            print(
+                "[DB] Neon пустая, локальная JSON-база не найдена. "
+                "Создаётся новая база."
+            )
 
             base = normalize_loaded_data(default_data)
-            if not _pg_save(base):
-                raise RuntimeError(
-                    "Neon is empty and the initial default state "
-                    "could not be persisted."
-                )
+            _pg_save(base)
             return base
 
         except Exception as e:
