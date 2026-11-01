@@ -1,4 +1,4 @@
-"""NyaBot configuration.
+то"""NyaBot configuration.
 
 All environment-backed settings are kept here so the bot launcher and
 application modules use one configuration source during the migration.
@@ -38,6 +38,25 @@ ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "ukrgorilka").strip().lstrip("
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DATA_FILE = os.environ.get("DATA_FILE", "rests_data.json").strip() or "rests_data.json"
+ 
+# ---------------------------------------------------------------------------
+# Application settings
+# ---------------------------------------------------------------------------
+
+ALLOW_JSON_BOOTSTRAP = (
+    os.environ.get("ALLOW_JSON_BOOTSTRAP", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
+BOT_VERSION = os.environ.get("BOT_VERSION", "0.14").strip()
+
+BUSINESS_TAX_RATE = float(
+    os.environ.get("BUSINESS_TAX_RATE", "0.20")
+)
+
+BUSINESS_SELL_RATE = float(
+    os.environ.get("BUSINESS_SELL_RATE", "0.80")
+)
 
 # Optional Telegram JSON backup channel.
 DB_CHANNEL_ID = normalize_tg_id(os.environ.get("DB_CHANNEL_ID", "0"))
