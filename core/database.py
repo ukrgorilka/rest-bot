@@ -3,13 +3,15 @@ import json
 import copy
 import time
 import threading
+import uuid
 
 import psycopg2
 from psycopg2.extras import Json
 
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-DATA_FILE = "rests_data.json"
+DATA_FILE = os.environ.get("DATA_FILE", "rests_data.json").strip() or "rests_data.json"
+ALLOW_JSON_BOOTSTRAP = os.environ.get("ALLOW_JSON_BOOTSTRAP", "").strip().lower() in {"1", "true", "yes", "on"}
 
 db_lock = threading.RLock()
 DB_SAVE_LOCK = threading.RLock()
@@ -21,8 +23,12 @@ last_db_change_at = 0.0
 
 _PG_SCHEMA_LOCK = threading.Lock()
 _PG_SCHEMA_READY = False
-_PG_SINGLE_INSTANCE_CONN = None
-_PG_SINGLE_INSTANCE_LOCK_KEY = 741923811
+_PG_SINGLE_INSTANCE_OWNER = None
+_PG_SINGLE_INSTANCE_GUARD = threading.RLock()
+_PG_SINGLE_INSTANCE_LEASE_SECONDS = 90
+_PG_SINGLE_INSTANCE_RENEW_INTERVAL = 15.0
+_PG_SINGLE_INSTANCE_LAST_RENEWED_AT = 0.0
+_PG_LEGACY_SINGLE_INSTANCE_LOCK_KEY = 741923811
 _PG_SAVE_SERIAL_LOCK_KEY = 741923812
 
 
@@ -32,7 +38,12 @@ def _pg_connect():
         return None
     return psycopg2.connect(
         DATABASE_URL,
-        connect_timeout=10
+        connect_timeout=10,
+        application_name='nyabot',
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=3,
     )
 
 
@@ -53,6 +64,14 @@ def _pg_prepare_connection(conn):
                         id SMALLINT PRIMARY KEY,
                         data JSONB NOT NULL,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS bot_runtime_lock (
+                        lock_name TEXT PRIMARY KEY,
+                        owner_token TEXT NOT NULL,
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """)
 
@@ -95,53 +114,132 @@ def _pg_load():
         conn.close()
 
 
-def acquire_single_instance_lock():
-    """Keep only one live bot process connected to the shared Neon database."""
-    global _PG_SINGLE_INSTANCE_CONN
-    if not DATABASE_URL:
-        return True
-    if _PG_SINGLE_INSTANCE_CONN is not None:
-        return True
+def _claim_or_renew_singleton_lease(owner_token):
+    """Atomically claim/renew a DB row lease (safe with Neon pooler URLs)."""
     conn = _pg_connect()
     if conn is None:
         return False
     try:
         _pg_prepare_connection(conn)
-        with conn.cursor() as cur:
-            cur.execute("SELECT pg_try_advisory_lock(%s)", (_PG_SINGLE_INSTANCE_LOCK_KEY,))
-            row = cur.fetchone()
-            locked = bool(row and row[0])
-        if not locked:
-            conn.close()
-            print("[DB] Другой экземпляр бота уже использует Neon. Новый экземпляр остановлен.")
-            return False
-        _PG_SINGLE_INSTANCE_CONN = conn
-        print("[DB] Эксклюзивная блокировка экземпляра Neon получена.")
+        with conn:
+            with conn.cursor() as cur:
+                # Compatibility gate for a rolling Railway deploy: older builds
+                # use this session-level advisory key. The xact-scoped probe is
+                # safe with Neon transaction poolers and conflicts with that old
+                # lock, so the new version waits for the old poller to exit.
+                cur.execute(
+                    "SELECT pg_try_advisory_xact_lock(%s)",
+                    (_PG_LEGACY_SINGLE_INSTANCE_LOCK_KEY,),
+                )
+                legacy_gate = cur.fetchone()
+                if not legacy_gate or not legacy_gate[0]:
+                    return False
+
+                # Keep the compatibility gate and lease write in the same DB
+                # transaction. This also serializes races between new instances.
+                cur.execute(
+                    """
+                    INSERT INTO bot_runtime_lock (lock_name, owner_token, expires_at, heartbeat_at)
+                    VALUES ('nyabot', %s, NOW() + (%s::int * INTERVAL '1 second'), NOW())
+                    ON CONFLICT (lock_name) DO UPDATE SET
+                        owner_token = EXCLUDED.owner_token,
+                        expires_at = EXCLUDED.expires_at,
+                        heartbeat_at = NOW()
+                    WHERE bot_runtime_lock.expires_at <= NOW()
+                       OR bot_runtime_lock.owner_token = EXCLUDED.owner_token
+                    RETURNING owner_token
+                    """,
+                    (owner_token, _PG_SINGLE_INSTANCE_LEASE_SECONDS),
+                )
+                row = cur.fetchone()
+                return bool(row and row[0] == owner_token)
+    finally:
+        conn.close()
+
+
+def _get_singleton_owner_token():
+    global _PG_SINGLE_INSTANCE_OWNER
+    if _PG_SINGLE_INSTANCE_OWNER is None:
+        _PG_SINGLE_INSTANCE_OWNER = uuid.uuid4().hex
+    return _PG_SINGLE_INSTANCE_OWNER
+
+
+def acquire_single_instance_lock():
+    """Acquire NyaBot's distributed Neon lease before Telegram polling."""
+    global _PG_SINGLE_INSTANCE_LAST_RENEWED_AT
+    if not DATABASE_URL:
         return True
-    except Exception as exc:
+
+    with _PG_SINGLE_INSTANCE_GUARD:
+        owner_token = _get_singleton_owner_token()
         try:
-            conn.close()
-        except Exception:
-            pass
-        print(f"[DB] Не удалось получить блокировку экземпляра: {exc}")
-        return False
+            acquired = _claim_or_renew_singleton_lease(owner_token)
+        except Exception as exc:
+            print(f"[DB] Не удалось получить Neon singleton lease: {exc}")
+            return False
+        if not acquired:
+            print("[DB] Другой экземпляр бота владеет Neon singleton lease. Новый экземпляр остановлен.")
+            return False
+        _PG_SINGLE_INSTANCE_LAST_RENEWED_AT = time.monotonic()
+        print("[DB] Эксклюзивная аренда экземпляра Neon получена/продлена.")
+        return True
 
 
 def release_single_instance_lock():
-    global _PG_SINGLE_INSTANCE_CONN
-    conn = _PG_SINGLE_INSTANCE_CONN
-    _PG_SINGLE_INSTANCE_CONN = None
-    if conn is None:
+    """Release only the lease owned by this process; never delete another owner's lease."""
+    global _PG_SINGLE_INSTANCE_OWNER, _PG_SINGLE_INSTANCE_LAST_RENEWED_AT
+    if not DATABASE_URL:
         return
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT pg_advisory_unlock(%s)", (_PG_SINGLE_INSTANCE_LOCK_KEY,))
-    except Exception:
-        pass
-    try:
-        conn.close()
-    except Exception:
-        pass
+    with _PG_SINGLE_INSTANCE_GUARD:
+        owner_token = _PG_SINGLE_INSTANCE_OWNER
+        _PG_SINGLE_INSTANCE_OWNER = None
+        _PG_SINGLE_INSTANCE_LAST_RENEWED_AT = 0.0
+        if not owner_token:
+            return
+        try:
+            conn = _pg_connect()
+        except Exception as exc:
+            print(f"[DB] Не удалось подключиться к Neon для освобождения singleton lease; она истечёт автоматически: {exc}")
+            return
+        if conn is None:
+            return  # The lease will expire naturally if Neon is temporarily unavailable.
+        try:
+            _pg_prepare_connection(conn)
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM bot_runtime_lock WHERE lock_name = 'nyabot' AND owner_token = %s",
+                        (owner_token,),
+                    )
+        except Exception as exc:
+            print(f"[DB] Не удалось освободить Neon singleton lease; она истечёт автоматически: {exc}")
+        finally:
+            conn.close()
+
+
+def single_instance_lock_is_alive():
+    """Renew the singleton lease periodically and fail closed if ownership is lost."""
+    global _PG_SINGLE_INSTANCE_LAST_RENEWED_AT
+    if not DATABASE_URL:
+        return True
+
+    with _PG_SINGLE_INSTANCE_GUARD:
+        owner_token = _get_singleton_owner_token()
+        now = time.monotonic()
+        # A 90-second DB lease with 15-second renewals tolerates long-poll waits
+        # and avoids an extra SQL write for every individual Telegram update.
+        if _PG_SINGLE_INSTANCE_LAST_RENEWED_AT and now - _PG_SINGLE_INSTANCE_LAST_RENEWED_AT < _PG_SINGLE_INSTANCE_RENEW_INTERVAL:
+            return True
+        try:
+            alive = _claim_or_renew_singleton_lease(owner_token)
+        except Exception as exc:
+            print(f"[DB] Neon singleton lease heartbeat failed: {exc}")
+            return False
+        if not alive:
+            print("[DB] Neon singleton lease is owned by another process or has been removed; polling must stop.")
+            return False
+        _PG_SINGLE_INSTANCE_LAST_RENEWED_AT = now
+        return True
 
 
 def _pg_save(snapshot):
@@ -196,78 +294,57 @@ def _load_data_from_sources(default_data, normalize_loaded_data):
     if DATABASE_URL:
         try:
             pg_data = _pg_load()
-            local_data = _load_local_json()
 
             if pg_data is not None:
-                pg_ts = float(
-                    (pg_data.get("_meta") or {}).get("saved_at", 0) or 0
-                ) if isinstance(pg_data, dict) else 0.0
-
-                local_ts = float(
-                    (local_data.get("_meta") or {}).get("saved_at", 0) or 0
-                ) if isinstance(local_data, dict) else 0.0
-
-                local_meta = (local_data.get("_meta") or {}) if isinstance(local_data, dict) else {}
-                local_pending = bool(local_meta.get("pending_neon_sync", False))
-
-                # A local file is allowed to override Neon only when it explicitly
-                # records that the Neon write was pending. This prevents an old
-                # stale rests_data.json from silently overwriting a newer Neon DB.
-                if local_pending and local_data is not None and local_ts > pg_ts + 0.5:
-                    print("[DB] Локальный snapshot помечен как ожидающий синхронизации; восстанавливается в Neon.")
-                    local_normalized = normalize_loaded_data(local_data)
-                    local_normalized.setdefault("_meta", {})["pending_neon_sync"] = False
-                    try:
-                        if _pg_save(local_normalized):
-                            print("[DB] Ожидающий локальный snapshot успешно синхронизирован с Neon.")
-                            return local_normalized
-                    except Exception as sync_error:
-                        print(f"[DB] Не удалось синхронизировать pending snapshot: {sync_error}")
-                    # Neon remains authoritative when recovery cannot be completed.
-
-                print("[DB] Загружена база из Neon PostgreSQL.")
+                # Neon is the canonical source of live progress. Local JSON is
+                # only a backup and must never be copied on top of existing Neon
+                # state, even when a local snapshot claims to be newer.
+                print("[DB] Загружена каноническая база из Neon PostgreSQL; локальный JSON не накатывается поверх неё.")
                 return normalize_loaded_data(pg_data)
 
-            if local_data is not None:
+            local_data = _load_local_json()
+            if local_data is not None and ALLOW_JSON_BOOTSTRAP:
                 migrated = normalize_loaded_data(local_data)
-
-                if _pg_save(migrated):
-                    print(
-                        "[DB] Выполнена первичная миграция "
-                        "rests_data.json -> Neon PostgreSQL."
+                if not _pg_save(migrated):
+                    raise RuntimeError(
+                        "Neon is empty and explicit JSON bootstrap was requested, but the bootstrap snapshot could not be saved to Neon."
                     )
-
+                print(
+                    "[DB] Выполнена ЯВНАЯ первичная миграция "
+                    "rests_data.json -> Neon PostgreSQL (ALLOW_JSON_BOOTSTRAP=1)."
+                )
                 return migrated
 
-            print(
-                "[DB] Neon пустая, локальная JSON-база не найдена. "
-                "Создаётся новая база."
-            )
+            if local_data is not None and not ALLOW_JSON_BOOTSTRAP:
+                print("[DB] Neon не содержит bot_state. Старый rests_data.json НЕ используется без ALLOW_JSON_BOOTSTRAP=1.")
 
+            print("[DB] Neon пустая; создаётся новая база из встроенных дефолтов.")
             base = normalize_loaded_data(default_data)
-            _pg_save(base)
+            if not _pg_save(base):
+                raise RuntimeError("Neon is empty and the initial default state could not be persisted.")
             return base
 
+        except RuntimeError:
+            # Internal safety failures (for example, a failed initial/bootstrap write)
+            # must remain explicit and must never be downgraded into a generic fallback.
+            raise
         except Exception as e:
             print(f"[DB ERROR] Не удалось загрузить Neon: {e}")
-            # When DATABASE_URL is configured, silently booting from an old
-            # local snapshot is unsafe: the next autosave can overwrite a
-            # newer Neon state with stale JSON. Production therefore fails
-            # closed by default. Local fallback is an explicit emergency
-            # override for operators who understand the risk.
-            allow_local_fallback = os.environ.get("ALLOW_LOCAL_DB_FALLBACK", "").strip().lower() in {
-                "1", "true", "yes", "on"
-            }
-            if DATABASE_URL and not allow_local_fallback:
+            # Never start the live economy from a local backup while DATABASE_URL
+            # is configured. Neon may become reachable again and an autosave of
+            # the stale snapshot could overwrite real player progress.
+            if DATABASE_URL:
                 raise RuntimeError(
-                    "Neon database could not be loaded and local fallback is disabled."
+                    "Neon database could not be loaded; refusing to boot from local JSON."
                 ) from e
-            print("[DB] Переключение на локальный JSON как аварийный fallback.")
 
-    local_data = _load_local_json()
-
-    if local_data is not None:
-        return normalize_loaded_data(local_data)
+    if ALLOW_JSON_BOOTSTRAP:
+        local_data = _load_local_json()
+        if local_data is not None:
+            return normalize_loaded_data(local_data)
+        print("[DB] DATABASE_URL не задан, но ALLOW_JSON_BOOTSTRAP=1; локальный JSON не найден — используются дефолты.")
+    else:
+        print("[DB] DATABASE_URL не задан. rests_data.json не используется без явного ALLOW_JSON_BOOTSTRAP=1.")
 
     return normalize_loaded_data(default_data)
 
@@ -283,6 +360,7 @@ def save_snapshot(
     snapshot_version,
     db_version_getter,
     db_dirty_setter,
+    db_dirty_clear_if_version=None,
     send_backup=False,
     db_channel_id=0,
     bot_instance=None
@@ -313,26 +391,47 @@ def save_snapshot(
                 print(f"[DB ERROR] Ошибка сохранения в Neon: {e}")
 
         temp_file = f"{DATA_FILE}.tmp"
+        local_snapshot_saved = False
+        try:
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    snapshot,
+                    f,
+                    ensure_ascii=False,
+                    indent=4
+                )
+                f.flush()
+                os.fsync(f.fileno())
 
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(
-                snapshot,
-                f,
-                ensure_ascii=False,
-                indent=4
-            )
-            f.flush()
-            os.fsync(f.fileno())
+            os.replace(temp_file, DATA_FILE)
+            local_snapshot_saved = True
+        except Exception as e:
+            # Neon is the canonical store whenever DATABASE_URL is configured.
+            # If PostgreSQL has already committed this snapshot, failure to write
+            # the secondary local backup must not report the transaction as failed:
+            # callers may otherwise roll back memory even though Neon has committed.
+            print(f"[LOCAL SNAPSHOT ERROR] Could not write local backup: {e}")
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception:
+                pass
+            if not saved_to_pg:
+                return False
 
-        os.replace(temp_file, DATA_FILE)
+        if saved_to_pg or (not DATABASE_URL and local_snapshot_saved):
+            if db_dirty_clear_if_version is not None:
+                # Version comparison and dirty-flag clearing must happen under
+                # one lock. A new mutation between a separate getter/setter can
+                # otherwise have its dirty flag cleared before it is persisted.
+                # A bookkeeping error after a successful durable save is not a
+                # persistence failure: leaving the flag dirty only causes a retry.
+                try:
+                    db_dirty_clear_if_version(snapshot_version)
+                except Exception as e:
+                    print(f"[DB SAVE STATE ERROR] Saved snapshot but could not clear dirty state: {e}")
 
-        current_version = db_version_getter()
-
-        if current_version == snapshot_version:
-            if saved_to_pg or not DATABASE_URL:
-                db_dirty_setter(False)
-
-        if send_backup and db_channel_id and bot_instance:
+        if local_snapshot_saved and send_backup and db_channel_id and bot_instance:
             # Telegram backup delivery is best-effort. A backup API error must
             # never make an already persisted Neon/local snapshot look failed.
             try:
@@ -354,7 +453,7 @@ def save_snapshot(
             except Exception as e:
                 print(f"[BACKUP ERROR] {e}")
 
-        return (saved_to_pg or not DATABASE_URL)
+        return bool(saved_to_pg or (not DATABASE_URL and local_snapshot_saved))
 
     except Exception as e:
         print(f"Ошибка при сохранении базы данных: {e}")

@@ -7,11 +7,15 @@ of the bot shares the same lock instances.
 
 import functools
 import threading
+import weakref
 from contextlib import contextmanager
 
 
 # Per-user serialization prevents double-click/double-spend races.
-USER_ACTION_LOCKS = {}
+# Weak values prevent the registry retaining one RLock forever for every user
+# who ever interacted with the bot. Active handlers keep strong references to
+# their locks, so concurrent actions for the same user still share one lock.
+USER_ACTION_LOCKS = weakref.WeakValueDictionary()
 USER_ACTION_LOCKS_GUARD = threading.Lock()
 
 # Shared state / payment locks.
@@ -45,61 +49,87 @@ def _get_user_action_lock(user_id):
         return lock
 
 @contextmanager
-def ordered_user_action_locks(*user_ids):
-    """Acquire all per-user locks in deterministic order to prevent deadlocks."""
+def ordered_user_action_locks(*user_ids, retain_user_id=None):
+    """Acquire per-user locks in deterministic order.
+
+    ``retain_user_id`` keeps that user's lock acquired when the context exits.
+    This is used when upgrading a handler's existing single-user lock to a
+    multi-user transaction: the outer handler must remain serialized until it
+    returns, but the other participants' locks must be released normally.
+    """
     normalized = []
     for uid in user_ids:
         try:
             value = int(uid)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
         if value and value not in normalized:
             normalized.append(value)
     normalized.sort()
-    locks = [_get_user_action_lock(uid) for uid in normalized]
-    for lock in locks:
-        lock.acquire()
     try:
+        retained_uid = int(retain_user_id) if retain_user_id is not None else None
+    except (TypeError, ValueError, OverflowError):
+        retained_uid = None
+    locks = [(uid, _get_user_action_lock(uid)) for uid in normalized]
+    acquired = []
+    try:
+        for uid, lock in locks:
+            lock.acquire()
+            acquired.append((uid, lock))
         yield
     finally:
-        for lock in reversed(locks):
+        for uid, lock in reversed(acquired):
+            if retained_uid is not None and uid == retained_uid:
+                continue
             lock.release()
 
 
 @contextmanager
 def serialized_multi_user_action(current_user_id, *other_user_ids):
-    """Upgrade a serialized action to an ordered set of user locks."""
-    current_lock = _get_user_action_lock(current_user_id)
-    callback_released = False
-    current_released = False
-    try:
-        # Callbacks are registered under CALLBACK_STATE_LOCK -> user lock.
-        # Release both before upgrading so another user cannot deadlock us
-        # while holding their user lock and waiting for CALLBACK_STATE_LOCK.
-        try:
-            CALLBACK_STATE_LOCK.release()
-            callback_released = True
-        except RuntimeError:
-            pass
-        try:
-            current_lock.release()
-            current_released = True
-        except RuntimeError:
-            pass
+    """Upgrade the current handler lock to an ordered multi-user transaction.
 
-        with ordered_user_action_locks(current_user_id, *other_user_ids):
-            if callback_released:
-                CALLBACK_STATE_LOCK.acquire()
+    Callback handlers acquire CALLBACK_STATE_LOCK before their user lock. Keep
+    that global lock held while upgrading: dropping it and reacquiring it after
+    the participant locks are held creates a cycle (callback A holds users 1+2
+    and waits for CALLBACK_STATE_LOCK while callback B holds that lock and waits
+    for user 2). Other callbacks therefore cannot enter the lock-upgrade window.
+    """
+    try:
+        uid = int(current_user_id)
+    except (TypeError, ValueError, OverflowError):
+        uid = 0
+    current_lock = _get_user_action_lock(uid)
+    released_depth = 0
+    current_retained = False
+    try:
+        # Fully release any recursion depth owned by this handler before taking
+        # the sorted set. Usually this is one acquisition, but draining the RLock
+        # also makes nested wrappers safe.
+        if uid > 0:
+            while True:
+                try:
+                    current_lock.release()
+                    released_depth += 1
+                except RuntimeError:
+                    break
+
+        with ordered_user_action_locks(
+            uid, *other_user_ids,
+            retain_user_id=uid if released_depth else None,
+        ):
             try:
                 yield
             finally:
-                if callback_released:
-                    CALLBACK_STATE_LOCK.release()
+                # The ordered context keeps one current-user lock for the outer
+                # handler; restore any additional recursion depth below.
+                current_retained = bool(released_depth)
     finally:
-        if current_released:
+        # If acquiring the ordered set failed before entering its body, restore
+        # every release. Otherwise one acquisition remains retained, so restore
+        # only the extra recursion depth. This preserves the outer with-blocks.
+        restore_count = max(0, released_depth - (1 if current_retained else 0))
+        for _ in range(restore_count):
             current_lock.acquire()
-        if callback_released:
-            CALLBACK_STATE_LOCK.acquire()
 
 
 def _extract_update_user_id(update):
