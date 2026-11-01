@@ -1405,26 +1405,8 @@ RP_SOLO_ACTIONS = {
 
 ALWAYS_ACTIVE_PATTERNS = {
     r'\bзачем\b': [
-        'За мясом! 😼', 'За шкафом! 🚪😹', 'За приключениями! 🧭',
-        'За добавкой! 🍕', 'За котом, он опять сбежал! 🐈',
-        'За смыслом жизни… вернусь позже. 🤔'
-    ],
-    r'\bпочему\b': [
-        'Покачану! 😼', 'Потому что так звёзды сошлись! ✨',
-        'Потому что кот нажал не ту кнопку. 🐈', 'А вот это уже философский вопрос! 🤔',
-        'Потому что пятница в душе! 🎉'
-    ],
-    r'\b(когда|когда же)\b': [
-        'Уже почти… осталось подождать вечность! ⏳',
-        'После следующего мяу! 🐾', 'Когда кот разрешит. 😼'
-    ],
-    r'\b(где|куда)\b': [
-        'Там, где вкусняшки! 🍪', 'За поворотом налево, потом по звёздам. 🌟',
-        'Кот знает, но молчит. 🐈'
-    ],
-    r'\b(кто|кого)\b': [
-        'Главный подозреваемый — кот. 🐈', 'Это был я… наверное. 😼',
-        'Секретная информация под защитой печенек. 🍪'
+        'За мясом! 😼',
+        'За мясом! 😹🥩'
     ],
     r'\b(твоя\s+мамка|твоя\s+мама|твою\s+маму|твоя\s+мать|мамулька|маман)\b': [
         'Твоя мама самая лучшая и прекрасная! 🌸💖',
@@ -5687,9 +5669,8 @@ def render_garage_view(chat_id, user_id, user_name, message_id=None):
     for v_id, v_info in VEHICLES.items():
         if v_id in owned:
             continue
-        market_price = _vehicle_market_price(v_id)
-        lines.append(f"• <b>{v_info['name']}</b> — <code>{market_price:,} 🪙</code> — {html.escape(_vehicle_class_label(v_info))} — {html.escape(_vehicle_benefit_text(v_info))}")
-        catalog_btns.append(InlineKeyboardButton(f"Купить {v_info['short']} — {market_price:,} 🪙", callback_data=f"buy_veh_{v_id}:{user_id}"))
+        lines.append(f"• <b>{v_info['name']}</b> — <code>{v_info['price']:,} 🪙</code> — {html.escape(_vehicle_class_label(v_info))} — {html.escape(_vehicle_benefit_text(v_info))}")
+        catalog_btns.append(InlineKeyboardButton(f"Купить {v_info['short']} — {v_info['price']} 🪙", callback_data=f"buy_veh_{v_id}:{user_id}"))
     for i in range(0, len(catalog_btns), 2):
         markup.add(*catalog_btns[i:i+2])
     lines.append("━━━━━━━━━━━━━━━━━━━━")
@@ -5916,45 +5897,6 @@ def _business_by_number(number):
 def _business_user_owns(econ, b_id, donor=False):
     return b_id in (econ.get('donor_businesses', {}) if donor else econ.get('businesses', {}))
 
-# Dynamic market premiums for late-game assets. Existing owners and saved
-# purchase prices are intentionally untouched; these multipliers affect only
-# new purchases and the displayed current catalog price.
-BUSINESS_PRICE_MULTIPLIERS = {
-    10: 1.10,
-    11: 1.20,
-    12: 1.35,
-    13: 2.15,
-    14: 2.75,
-    15: 3.50,
-    16: 4.50,
-}
-
-def _business_market_price(b_id):
-    info = BUSINESSES.get(b_id)
-    if not info:
-        return 0
-    number = next((idx for idx, key in enumerate(BUSINESSES, 1) if key == b_id), 0)
-    multiplier = BUSINESS_PRICE_MULTIPLIERS.get(number, 1.0)
-    raw = int(info.get('price', 0) or 0) * multiplier
-    # Keep expensive prices readable and stable.
-    step = 1000 if raw >= 100000 else (100 if raw >= 10000 else 10)
-    return int(round(raw / step) * step) if step > 1 else int(raw)
-
-VEHICLE_PRICE_MULTIPLIERS = {
-    7: 1.20, 8: 1.35, 9: 1.55, 10: 1.80,
-    11: 2.10, 12: 2.50, 13: 3.00, 14: 3.60,
-}
-
-def _vehicle_market_price(v_id):
-    info = VEHICLES.get(v_id)
-    if not info:
-        return 0
-    tier = int(info.get('tier', 0) or 0)
-    multiplier = VEHICLE_PRICE_MULTIPLIERS.get(tier, 1.0)
-    raw = int(info.get('price', 0) or 0) * multiplier
-    step = 100000 if raw >= 1000000 else (10000 if raw >= 100000 else (1000 if raw >= 10000 else 100))
-    return int(round(raw / step) * step)
-
 def _business_purchase_price(econ, b_id):
     prices=econ.setdefault('biz_purchase_price', {})
     if b_id not in prices:
@@ -5987,7 +5929,7 @@ def _render_business_catalog(chat_id, user_id, user_name, message_id=None):
             line=f"{idx}. {info['name']} — {price_text} — {status}"
             donor.append(line)
         else:
-            price_text = f"{_business_market_price(b_id):,} 🪙"
+            price_text = f"{int(info.get('price', 0) or 0):,} 🪙"
             line=f"{idx}. {info['name']} — {price_text} — {status}"
             ordinary.append(line)
     lines=[
@@ -6023,7 +5965,7 @@ def render_business_detail(chat_id,user_id,user_name,number,message_id=None):
     owned=_business_user_owns(econ,b_id,is_donor)
     lvl=_business_level(econ,b_id) if owned else 1
     inc=_business_hourly_income(b_id,lvl)
-    price=_business_market_price(b_id) if not is_donor else 0
+    price=int(info.get('price',0) or 0)
     if owned:
         pending=_business_pending_amount(econ,b_id,time.time())
         purchase_price=_business_purchase_price(econ,b_id)
