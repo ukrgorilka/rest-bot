@@ -21,7 +21,6 @@ from urllib.parse import parse_qsl
 
 from config import (
     ADMIN_ID,
-    ALLOW_JSON_BOOTSTRAP,
     BOT_VERSION,
     BUSINESS_SELL_RATE,
     BUSINESS_TAX_RATE,
@@ -84,7 +83,6 @@ from services import (
     saving as saving_service,
 )
 from handlers import register_all as register_handlers
-from data.jobs import JOBS
 
 # ---------------------------------------------------------
 # ЕДИНЫЙ ЧАСОВОЙ ПОЯС (МСК / UTC+3)
