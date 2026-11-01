@@ -2053,92 +2053,6 @@ def callback_inline(call):
                 bot.answer_callback_query(call.id, f"🎉 Вы приобрели {b_info['name']}! 😻")
                 render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
 
-        elif action_data.startswith('biz_detail_buy:'):
-            b_id = action_data.split(':', 1)[1]
-            if b_id not in BUSINESSES:
-                bot.answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
-                return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            owned = econ.setdefault('businesses', {})
-            if b_id in owned:
-                bot.answer_callback_query(call.id, '❌ Этот бизнес уже куплен.', show_alert=True)
-                return
-            price = _business_market_price(b_id)
-            if int(econ.get('balance', 0) or 0) < price:
-                bot.answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙.', show_alert=True)
-                return
-            now = time.time()
-            _adjust_balance(econ, -price)
-            owned[b_id] = now
-            econ.setdefault('biz_purchase_price', {})[b_id] = price
-            econ.setdefault('biz_levels', {})[b_id] = 1
-            econ.setdefault('biz_last_collect', {})[b_id] = now
-            econ.setdefault('biz_income_carry', {})[b_id] = 0.0
-            _record_business_tx(econ, {'type': 'purchase', 'business': b_id, 'price': price, 'time': now})
-            check_achievements(user_id, user_name, 'biz_bought', 1, chat_id, username=user_username)
-            mark_dirty()
-            bot.answer_callback_query(call.id, f'🎉 Бизнес куплен за {price:,} 🪙!')
-            render_business_detail(chat_id, user_id, user_name,
-                                   next(i for i, key in enumerate(BUSINESSES, 1) if key == b_id),
-                                   message_id=call.message.message_id)
-            return
-
-        elif action_data.startswith('biz_detail_sell:'):
-            b_id = action_data.split(':', 1)[1]
-            if b_id not in BUSINESSES:
-                bot.answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
-                return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            owned = econ.setdefault('businesses', {})
-            if b_id not in owned:
-                bot.answer_callback_query(call.id, '❌ У вас нет этого бизнеса.', show_alert=True)
-                return
-            settled, tax = _settle_business_net_profit(econ, b_id, time.time())
-            purchase_price = int(econ.setdefault('biz_purchase_price', {}).get(b_id, BUSINESSES[b_id].get('price', 0)) or 0)
-            refund = int(purchase_price * BUSINESS_SELL_RATE)
-            _adjust_balance(econ, refund)
-            owned.pop(b_id, None)
-            econ.setdefault('biz_levels', {}).pop(b_id, None)
-            econ.setdefault('biz_last_collect', {}).pop(b_id, None)
-            econ.setdefault('biz_income_carry', {}).pop(b_id, None)
-            econ.setdefault('biz_purchase_price', {}).pop(b_id, None)
-            _record_business_tx(econ, {'type': 'sale', 'business': b_id, 'refund': refund, 'time': time.time()})
-            mark_dirty()
-            bot.answer_callback_query(call.id, f'💸 Продано за {refund:,} 🪙.')
-            render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            return
-
-        elif action_data.startswith('biz_detail_up:'):
-            b_id = action_data.split(':', 1)[1]
-            if b_id not in BUSINESSES:
-                bot.answer_callback_query(call.id, '❌ Бизнес не найден.', show_alert=True)
-                return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            if b_id not in econ.get('businesses', {}):
-                bot.answer_callback_query(call.id, '❌ Сначала купите бизнес.', show_alert=True)
-                return
-            level = max(1, min(5, int(econ.setdefault('biz_levels', {}).get(b_id, 1) or 1)))
-            if level >= 5:
-                bot.answer_callback_query(call.id, '❌ Уже максимальный уровень.', show_alert=True)
-                return
-            cost = int(BUSINESSES[b_id].get('upgrade_cost', 0) or 0) * level
-            if int(econ.get('balance', 0) or 0) < cost:
-                bot.answer_callback_query(call.id, f'❌ Нужно {cost:,} 🪙.', show_alert=True)
-                return
-            _settle_business_net_profit(econ, b_id, time.time())
-            _adjust_balance(econ, -cost)
-            econ.setdefault('biz_levels', {})[b_id] = level + 1
-            mark_dirty()
-            bot.answer_callback_query(call.id, f'⬆️ Улучшено до уровня {level + 1}!')
-            number = next(i for i, key in enumerate(BUSINESSES, 1) if key == b_id)
-            render_business_detail(chat_id, user_id, user_name, number,
-                                   message_id=call.message.message_id)
-            return
-
-        elif action_data.startswith('biz_detail_donor:'):
-            bot.answer_callback_query(call.id, '💎 Донатные бизнесы доступны в /stars.', show_alert=True)
-            return
-
         elif action_data == 'business_refresh':
             render_business_view(chat_id, user_id, user_name, message_id=call.message.message_id)
             bot.answer_callback_query(call.id, '🔄 Бизнесы обновлены! 😸')
@@ -2183,12 +2097,11 @@ def callback_inline(call):
                 if v_id in owned:
                     bot.answer_callback_query(call.id, "❌ Этот транспорт уже куплен. Надеть его можно из гаража! 😸", show_alert=True)
                     return
-                vehicle_price = _vehicle_market_price(v_id)
-                if econ['balance'] < vehicle_price:
-                    bot.answer_callback_query(call.id, f"❌ Нужно {vehicle_price:,} 🪙! 😿", show_alert=True)
+                if econ['balance'] < v_info['price']:
+                    bot.answer_callback_query(call.id, f"❌ Нужно {v_info['price']} 🪙! 😿", show_alert=True)
                     return
 
-                _adjust_balance(econ, -vehicle_price)
+                _adjust_balance(econ, -(v_info['price']))
                 owned.append(v_id)
                 # Новая машина автоматически надевается только если ничего не надето.
                 if not econ.get('equipped_vehicle') and not econ.get('vehicle'):

@@ -22,10 +22,6 @@ def cmd_business(message):
         return
     user_id = message.from_user.id
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
-    parts = (message.text or '').split(maxsplit=1)
-    if len(parts) > 1 and parts[1].strip().isdigit():
-        render_business_detail(message.chat.id, user_id, user_name, int(parts[1].strip()))
-        return
     render_business_view(message.chat.id, user_id, user_name)
 
 def cmd_miner(message):
