@@ -661,6 +661,13 @@ def callback_inline(call):
         owner_id = None
         action_data = raw_data
 
+        # Stale keyboards from the retired marriage/family-house feature must
+        # never recreate or mutate legacy marriage records after the switch.
+        if (raw_data.startswith(('m_yes_', 'm_no_', 'buy_house_', 'buy_furn_', 'buy_ring_')) or raw_data.startswith('shop_cat_rings')
+                or raw_data == 'house_refresh'):
+            _answer_callback_query(call.id, 'Старая система брака отключена. Используйте новую систему: «отн».', show_alert=True)
+            return
+
         if ':' in raw_data:
             parts = raw_data.rsplit(':', 1)
             if parts[1].isdigit():
@@ -926,142 +933,6 @@ def callback_inline(call):
             try: bot.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
             _answer_callback_query(call.id, "Ваш голос учтён! 😸")
-            return
-
-        # СЕМЕЙНЫЙ ДОМ: КНОПКИ
-        elif action_data.startswith('buy_house_'):
-            h_k = action_data.replace('buy_house_', '', 1)
-            if h_k not in FAMILY_HOUSES:
-                _answer_callback_query(call.id, '❌ Дом не найден.', show_alert=True)
-                return
-            h_info = FAMILY_HOUSES[h_k]
-            price = int(h_info.get('price', 0) or 0)
-            if price <= 0:
-                _answer_callback_query(call.id, '❌ Этот дом не продаётся за коины.', show_alert=True)
-                return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            marriage = econ.get('marriage')
-            if not isinstance(marriage, dict):
-                _answer_callback_query(call.id, '❌ Только для пар в браке!', show_alert=True)
-                return
-            try:
-                partner_id = int(marriage.get('partner_id', 0) or 0)
-            except (TypeError, ValueError, OverflowError):
-                partner_id = 0
-            if partner_id <= 0:
-                _answer_callback_query(call.id, '❌ Не удалось определить второго супруга. Обновите профиль.', show_alert=True)
-                return
-
-            with serialized_multi_user_action(user_id, partner_id):
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                p_econ = get_user_econ(partner_id, user_tag=f'ID:{partner_id}')
-                def _validate_house_purchase():
-                    current = econ.get('marriage')
-                    if not isinstance(current, dict):
-                        return 'not_married'
-                    try:
-                        current_partner = int(current.get('partner_id', 0) or 0)
-                    except (TypeError, ValueError, OverflowError):
-                        current_partner = 0
-                    return None if current_partner == partner_id else 'partner_changed'
-                def _apply_house_purchase():
-                    current = econ['marriage']
-                    current['house'] = h_k
-                    current['furniture'] = []
-                    current['last_house_calc'] = time.time()
-                    partner_marriage = p_econ.get('marriage')
-                    if isinstance(partner_marriage, dict):
-                        partner_marriage['house'] = h_k
-                        partner_marriage['furniture'] = []
-                        partner_marriage['last_house_calc'] = current['last_house_calc']
-                    return None
-                ok, result = _durable_profile_transaction(
-                    econ, f'Покупка семейного дома: {h_k}', ['marriage'], _apply_house_purchase,
-                    cost=price, extra_accounts=[(p_econ, ['marriage'])], validate=_validate_house_purchase,
-                )
-            if not ok:
-                if result == 'insufficient':
-                    _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙! 😿', show_alert=True)
-                elif result == 'not_married':
-                    _answer_callback_query(call.id, '❌ Семейный статус изменился. Обновите меню.', show_alert=True)
-                elif result == 'partner_changed':
-                    _answer_callback_query(call.id, '❌ Состав семьи изменился. Обновите меню.', show_alert=True)
-                else:
-                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку в Neon. Деньги и состояние дома восстановлены.', show_alert=True)
-                return
-            _answer_callback_query(call.id, f'🎉 Вы приобрели {h_info["name"]}! 😻', show_alert=True)
-            render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            return
-
-        elif action_data.startswith('buy_furn_'):
-            f_k = action_data.replace('buy_furn_', '', 1)
-            if f_k not in FAMILY_FURNITURE:
-                _answer_callback_query(call.id, '❌ Предмет мебели не найден.', show_alert=True)
-                return
-            f_info = FAMILY_FURNITURE[f_k]
-            price = int(f_info.get('price', 0) or 0)
-            if price <= 0:
-                _answer_callback_query(call.id, '❌ Эта мебель не продаётся за коины.', show_alert=True)
-                return
-            econ = get_user_econ(user_id, user_name, username=user_username)
-            marriage = econ.get('marriage')
-            if not isinstance(marriage, dict):
-                _answer_callback_query(call.id, '❌ Только для пар в браке!', show_alert=True)
-                return
-            try:
-                partner_id = int(marriage.get('partner_id', 0) or 0)
-            except (TypeError, ValueError, OverflowError):
-                partner_id = 0
-            if partner_id <= 0:
-                _answer_callback_query(call.id, '❌ Не удалось определить второго супруга. Обновите профиль.', show_alert=True)
-                return
-
-            with serialized_multi_user_action(user_id, partner_id):
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                p_econ = get_user_econ(partner_id, user_tag=f'ID:{partner_id}')
-                def _validate_furniture_purchase():
-                    current = econ.get('marriage')
-                    if not isinstance(current, dict):
-                        return 'not_married'
-                    try:
-                        current_partner = int(current.get('partner_id', 0) or 0)
-                    except (TypeError, ValueError, OverflowError):
-                        current_partner = 0
-                    if current_partner != partner_id:
-                        return 'partner_changed'
-                    current_furniture = current.get('furniture', [])
-                    partner_marriage = p_econ.get('marriage')
-                    partner_furniture = partner_marriage.get('furniture', []) if isinstance(partner_marriage, dict) else []
-                    if f_k in (current_furniture or []) or f_k in (partner_furniture or []):
-                        return 'already_owned'
-                    return None
-                def _apply_furniture_purchase():
-                    econ['marriage'].setdefault('furniture', []).append(f_k)
-                    partner_marriage = p_econ.get('marriage')
-                    if isinstance(partner_marriage, dict):
-                        partner_marriage.setdefault('furniture', []).append(f_k)
-                    return None
-                ok, result = _durable_profile_transaction(
-                    econ, f'Покупка семейной мебели: {f_k}', ['marriage'], _apply_furniture_purchase,
-                    cost=price, extra_accounts=[(p_econ, ['marriage'])], validate=_validate_furniture_purchase,
-                )
-            if not ok:
-                if result == 'insufficient':
-                    _answer_callback_query(call.id, f'❌ Нужно {price:,} 🪙! 😿', show_alert=True)
-                elif result == 'already_owned':
-                    _answer_callback_query(call.id, '❌ Этот предмет мебели уже куплен.', show_alert=True)
-                elif result in {'not_married', 'partner_changed'}:
-                    _answer_callback_query(call.id, '❌ Семейный статус изменился. Обновите меню.', show_alert=True)
-                else:
-                    _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку в Neon. Коины и мебель восстановлены.', show_alert=True)
-                return
-            _answer_callback_query(call.id, f'🛋 Куплена мебель: {f_info["name"]}! 😻', show_alert=True)
-            render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            return
-
-        elif action_data == 'house_refresh':
-            render_house_view(chat_id, user_id, user_name, message_id=call.message.message_id)
-            _answer_callback_query(call.id, "Статус дома обновлен! 😸")
             return
 
         # САД: НЕСКОЛЬКО ГРЯДОК
@@ -1727,28 +1598,6 @@ def callback_inline(call):
                 bot.edit_message_text("❌ <b>Партия в «Дурака» отменена создателем.</b> Все ставки возвращены игрокам. 😸", chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
             except Exception:
                 pass
-            return
-
-        # ИСПРАВЛЕННЫЙ ПЕРЕХОД В РАЗДЕЛ «КОЛЬЦА» В МАГАЗИНЕ
-        elif action_data == 'shop_cat_rings':
-            lines = [
-                "💍 <b>КАТАЛОГ СВАДЕБНЫХ КОЛЕЦ</b> 💒 😺",
-                "━━━━━━━━━━━━━━━━━━━━",
-                "<i>Кольца необходимы для заключения брака (/marry) и украшают ваш профиль!</i>\n"
-            ]
-            for r_k, r_v in RINGS.items():
-                lines.append(f"• {r_v['emoji']} <b>{r_v['name']}</b> — <code>{r_v['price']} 🪙</code>")
-            lines.append("━━━━━━━━━━━━━━━━━━━━")
-
-            markup = InlineKeyboardMarkup(row_width=1)
-            for r_k, r_v in RINGS.items():
-                markup.add(InlineKeyboardButton(f"Купить {r_v['emoji']} {r_v['name']} ({r_v['price']} 🪙)", callback_data=f"buy_ring_{r_k}:{user_id}"))
-            markup.add(InlineKeyboardButton("🔙 Назад в магазин", callback_data=f"shop_main:{user_id}"))
-
-            try:
-                bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
-            _answer_callback_query(call.id)
             return
 
         # САД: УДОБРЕНИЕ (старый callback)
@@ -3554,54 +3403,6 @@ def callback_inline(call):
                     render_job_detail(chat_id, user_id, user_name, number,
                                       message_id=call.message.message_id)
 
-        # БРАКИ
-        elif raw_data.startswith('m_yes_') or raw_data.startswith('m_no_'):
-            prop_id = raw_data[6:].split(':')[0]
-            prop = pending_marriages.get(prop_id)
-            if not prop:
-                _answer_callback_query(call.id, "❌ Предложение устарело! 😿", show_alert=True)
-                return
-            if user_id != prop['to_id'] and prop['to_id'] is not None:
-                _answer_callback_query(call.id, "❌ Это предложение адресовано не вам! 😾", show_alert=True)
-                return
-
-            if raw_data.startswith('m_yes_'):
-                with serialized_multi_user_action(int(user_id), int(prop['from_id'])):
-                    live_prop = pending_marriages.get(prop_id)
-                    if not live_prop or int(live_prop.get('to_id')) != int(user_id):
-                        _answer_callback_query(call.id, "❌ Предложение уже недействительно! 😿", show_alert=True)
-                        return
-                    from_econ = get_user_econ(int(live_prop['from_id']), live_prop['from_tag'])
-                    to_econ = get_user_econ(user_id, user_name, username=user_username)
-                    if from_econ.get('marriage') or to_econ.get('marriage'):
-                        pending_marriages.pop(prop_id, None)
-                        _answer_callback_query(call.id, "❌ Один из пользователей уже состоит в браке! 😿", show_alert=True)
-                        return
-                    m_time = time.time()
-                    from_econ['marriage'] = {'partner_id': user_id, 'partner_name': user_name, 'ring': live_prop['ring'], 'married_at': m_time, 'vault': 0}
-                    to_econ['marriage'] = {'partner_id': live_prop['from_id'], 'partner_name': live_prop['from_tag'], 'ring': live_prop['ring'], 'married_at': m_time, 'vault': 0}
-                    check_achievements(live_prop['from_id'], live_prop['from_tag'], 'marriages', 1, chat_id)
-                    check_achievements(user_id, user_name, 'marriages', 1, chat_id, username=user_username)
-                    pending_marriages.pop(prop_id, None)
-                    mark_dirty()
-                prop = live_prop
-                ring_emoji = RINGS.get(prop['ring'], {}).get('emoji', '💍')
-                try:
-                    bot.edit_message_text(
-                        f"💒 <b>Горько! Свадьба состоялась!</b> 🎉 😻\n\n{ring_emoji} {make_link(chat_id, prop['from_tag'], prop['from_id'], ping=True)} и {make_link(chat_id, user_name, user_id, ping=True)} теперь законные супруги! ❤️",
-                        chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
-                    )
-                except Exception as e: print(f"[NONFATAL ERROR] {e}")
-            else:
-                with CALLBACK_STATE_LOCK:
-                    pending_marriages.pop(prop_id, None)
-                try:
-                    bot.edit_message_text(
-                        f"💔 {make_link(chat_id, user_name, user_id, ping=False)} отклонил(а) предложение руки и сердца. 😿",
-                        chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML'
-                    )
-                except Exception as e: print(f"[NONFATAL ERROR] {e}")
-
         # БЛЭКДЖЕК
         elif action_data.startswith('bj_hit_') or action_data.startswith('bj_stand_'):
             game_id = action_data.split('_', 2)[2]
@@ -4032,46 +3833,6 @@ def callback_inline(call):
             markup.add(InlineKeyboardButton('🔙 Назад в магазин', callback_data=f'shop_main:{user_id}'))
             try: bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e: print(f"[NONFATAL ERROR] {e}")
-
-        elif action_data.startswith('buy_ring_'):
-            r_id = action_data.replace('buy_ring_', '', 1)
-            if r_id in RINGS:
-                r_info = RINGS[r_id]
-                try:
-                    price = int(r_info.get('price', 0) or 0)
-                except (TypeError, ValueError, OverflowError):
-                    price = 0
-                if price <= 0:
-                    _answer_callback_query(call.id, '❌ Это кольцо не продаётся за коины.', show_alert=True)
-                    return
-                econ = get_user_econ(user_id, user_name, username=user_username)
-                def _validate_ring_purchase():
-                    rings = econ.get('rings', [])
-                    if not isinstance(rings, list):
-                        rings = []
-                    if r_id in rings:
-                        return 'already_owned'
-                    return None
-                def _buy_ring():
-                    rings = econ.get('rings')
-                    if not isinstance(rings, list):
-                        rings = []
-                        econ['rings'] = rings
-                    rings.append(r_id)
-                    return r_id
-                ok, result = _durable_profile_transaction(
-                    econ, f'Покупка кольца: {r_id}', ['rings'], _buy_ring,
-                    cost=price, validate=_validate_ring_purchase,
-                )
-                if not ok:
-                    if result == 'insufficient':
-                        _answer_callback_query(call.id, f'❌ Нужно {price} 🪙! 😿', show_alert=True)
-                    elif result == 'already_owned':
-                        _answer_callback_query(call.id, '❌ Это кольцо уже куплено.', show_alert=True)
-                    else:
-                        _answer_callback_query(call.id, '⚠️ Не удалось сохранить покупку. Коины и кольцо восстановлены.', show_alert=True)
-                    return
-                _answer_callback_query(call.id, f"🎉 Вы приобрели {r_info['name']}! 😻", show_alert=True)
 
         elif action_data.startswith('buy_title_'):
             title_key = action_data.replace('buy_title_', '', 1)

@@ -202,6 +202,8 @@ def _admin_usage():
 def cmd_admins(message):
     if getattr(message.chat, 'type', '') not in ('group','supergroup'):
         return
+    if not _moderation_system_available(message.chat.id):
+        return
     if not is_admin(message.chat.id, message.from_user.id):
         bot.reply_to(message, '❌ Список админов доступен только администраторам.')
         return
@@ -246,8 +248,14 @@ def cmd_admin_control(message):
     cid=str(message.chat.id)
     if action in ('функции','функция','админфункции'):
         if not is_chat_owner(message.chat.id, message.from_user.id):
-            bot.reply_to(message, '❌ Включать/выключать функции админов может только владелец чата.')
+            # When moderation is disabled or the bot has lost Telegram rights,
+            # non-owner admin controls should also stay silent. The creator keeps
+            # the recovery path so they can re-enable the feature.
+            if _moderation_system_available(message.chat.id):
+                bot.reply_to(message, '❌ Включать/выключать функции админов может только владелец чата.')
             return
+    elif not _moderation_system_available(message.chat.id):
+        return
     elif not can_admin_action(message.chat.id, message.from_user.id, 'admin_manage'):
         bot.reply_to(message, '❌ Недостаточно прав для управления ролями или функции админов отключены.')
         return
@@ -389,7 +397,7 @@ def handle_messages(message):
     if text.startswith('/'):
         command_token = text.split()[0].split('@')[0].lower()
         catchall_slash_commands = {
-            '/add_promo', '/admin', '/admin_help', '/calc', '/dice', '/fish', '/force_divorce',
+            '/add_promo', '/admin', '/admin_help', '/calc', '/dice', '/fish',
             '/give_item', '/hunt', '/inspect', '/pay', '/resume', '/set_karma', '/shutdown',
             '/slots', '/sticker', '/nya_sticker', '/start_bot', '/stop_bot', '/wipe'
         }
@@ -469,12 +477,12 @@ def handle_messages(message):
 
     # Ставим тот же часовой лимит перед текстовыми экономическими роутерами,
     # которые Telegram не передаёт в отдельный command-handler (например,
-    # «кости 100», «перевод @user 100», «ограбить @user», «семейный сейф положить 100»).
+    # «кости 100», «перевод @user 100», «ограбить @user»).
     raw_rate_limited_prefixes = (
         'бонус', 'коин', 'взять бонус', 'кости', 'кубик', 'слоты', 'казино',
         'рыбалка', 'рыба', 'охота', 'продать ', 'ограбить', 'перевод ',
         'передать ', 'отправить ', 'скинуть ', 'банк положить', 'банк снять',
-        'депозит ', 'семейный сейф ', 'передать', '/pay ', '/dice', '/slots', '/fish', '/hunt'
+        'депозит ', 'передать', '/pay ', '/dice', '/slots', '/fish', '/hunt'
     )
     raw_needs_rate_limit = any(text_lower == p.rstrip() or text_lower.startswith(p) for p in raw_rate_limited_prefixes)
     if raw_needs_rate_limit and not is_super_admin:
@@ -609,7 +617,6 @@ def handle_messages(message):
                 "• <code>/give_coins @user 1000</code> — выдать коины\n"
                 "• <code>/inspect @user</code> — осмотр игрока\n"
                 "• <code>/set_karma @user 100</code> — изменить карму\n"
-                "• <code>/force_divorce @user</code> — принудительный развод\n"
                 "• <code>/give_item @user item_name</code> — выдать предмет\n"
                 "• <code>/give_gif @user gulya</code> — выдать GIF профиля\n"
                 "• <code>/give @user gif gulya</code> — выдать GIF через /give\n"
@@ -677,22 +684,6 @@ def handle_messages(message):
             te['karma'] = k_val
             mark_dirty()
             bot.reply_to(message, f"✅ Карма {t_name} установлена на {k_val}.")
-            return
-
-        if text_lower.startswith('/force_divorce'):
-            t_name, t_id, _ = parse_target_and_args(message, '/force_divorce')
-            if not t_id: return
-            te = get_user_econ(t_id, t_name)
-            if te.get('marriage'):
-                p_id = te['marriage']['partner_id']
-                if p_id != 0:
-                    pe = get_user_econ(p_id)
-                    pe['marriage'] = None
-                te['marriage'] = None
-                mark_dirty()
-                bot.reply_to(message, f"✅ Игрок {t_name} принудительно разведен.")
-            else:
-                bot.reply_to(message, "❌ Игрок не в браке.")
             return
 
         if text_lower.startswith('/wipe'):
@@ -772,61 +763,6 @@ def handle_messages(message):
         amount_val = m_crypto.group(3)
         trade_crypto(chat_id, user_id, user_name, action_type, ticker_val, amount_val, reply_msg=message, username=user_username)
         return
-
-    # СЕМЕЙНЫЙ СЕЙФ
-    if text_lower.startswith('семейный сейф'):
-        econ = get_user_econ(user_id, user_name, username=user_username)
-        if not econ.get('marriage'):
-            bot.reply_to(message, "❌ Вы не состоите в браке! 😿")
-            return
-        m_amt = re.search(r'(\d+)', text_lower)
-        if 'положить' in text_lower and m_amt:
-            amt = int(m_amt.group(1))
-            if amt <= 0:
-                bot.reply_to(message, "❌ Сумма должна быть положительной. 😿")
-                return
-            with CALLBACK_STATE_LOCK:
-                m = econ.get('marriage')
-                if not m:
-                    bot.reply_to(message, "❌ Брак уже расторгнут! 😿")
-                    return
-                update_family_house_income(m)
-                p_id = m.get('partner_id'); p_tag = m.get('partner_name')
-                p_econ = get_user_econ(p_id, p_tag) if p_id is not None else {}
-                with TRANSFER_LOCK:
-                    if int(econ.get('balance', 0) or 0) < amt:
-                        bot.reply_to(message, f"❌ Недостаточно средств на руках! У вас: {econ.get('balance', 0)} 🪙 😿")
-                        return
-                    _adjust_balance(econ, -(amt))
-                    m['vault'] = max(0, int(m.get('vault', 0) or 0)) + amt
-                    if isinstance(p_econ.get('marriage'), dict): p_econ['marriage']['vault'] = m['vault']
-                    mark_dirty()
-            bot.reply_to(message, f"💍 Вы положили <b>{amt} 🪙</b> в семейный сейф!\nВ сейфе: <b>{m['vault']} 🪙</b> 😻", parse_mode='HTML')
-            return
-        elif 'снять' in text_lower and m_amt:
-            amt = int(m_amt.group(1))
-            if amt <= 0:
-                bot.reply_to(message, "❌ Сумма должна быть положительной. 😿")
-                return
-            with CALLBACK_STATE_LOCK:
-                m = econ.get('marriage')
-                if not m:
-                    bot.reply_to(message, "❌ Брак уже расторгнут! 😿")
-                    return
-                update_family_house_income(m)
-                p_id = m.get('partner_id'); p_tag = m.get('partner_name')
-                p_econ = get_user_econ(p_id, p_tag) if p_id is not None else {}
-                cur_vault = max(0, int(m.get('vault', 0) or 0))
-                if cur_vault < amt:
-                    bot.reply_to(message, f"❌ В сейфе недостаточно коинов! Накоплено: {cur_vault} 🪙 😿")
-                    return
-                with TRANSFER_LOCK:
-                    m['vault'] = cur_vault - amt
-                    if isinstance(p_econ.get('marriage'), dict): p_econ['marriage']['vault'] = m['vault']
-                    _adjust_balance(econ, amt, reason='Снятие из семейного сейфа')
-                    mark_dirty()
-            bot.reply_to(message, f"💸 Вы взяли <b>{amt} 🪙</b> из семейного сейфа!\nОстаток: <b>{m['vault']} 🪙</b> 😸", parse_mode='HTML')
-            return
 
     # КВЕСТ СООБЩЕНИЙ
     completed_tasks = track_daily_task(user_id, user_name, 'messages', 1, chat_id, username=user_username) if activity_reward_allowed else []
@@ -1162,9 +1098,6 @@ def handle_messages(message):
     elif text_lower in ['ачивки', 'достижения']: cmd_achievements(message); return
     elif text_lower in ['бизнес', 'бизнесы']: cmd_business(message); return
     elif text_lower in ['собрать', 'собрать прибыль', 'прибыль']: cmd_collect(message); return
-    elif text_lower in ['семья', 'брак', 'мой брак']: cmd_family(message); return
-    elif text_lower in ['подарок']: cmd_gift(message); return
-    elif text_lower in ['развод']: cmd_divorce(message); return
     elif text_lower in ['баланс', 'коины', 'ня-коины', 'деньги']: cmd_balance(message); return
     elif text_lower in ['инвентарь', 'профиль', 'мои значки']: cmd_profile(message); return
     elif text_lower in ['пасс', 'пас', 'пропуск', 'хеллоуин', 'bp', '/pass']: cmd_halloween_pass(message); return
@@ -1186,7 +1119,7 @@ def handle_messages(message):
     elif text_lower.startswith(('дурак', '/durak')): cmd_durak(message); return
     elif text_lower in ['настройки профиля', 'настройка профиля']: cmd_profile_settings(message); return
     elif text_lower.startswith(('сейф', '/safe')): cmd_safe(message); return
-    elif text_lower in ['дом', 'мой дом', 'семейный дом', '/house']: cmd_house(message); return
+    elif text_lower in ['дом', 'мой дом', '/house']: cmd_house(message); return
     elif text_lower in ['шериф', 'полиция', '/sheriff']: cmd_sheriff(message); return
     elif text_lower.startswith(('поймать', '/catch')): cmd_catch(message); return
     elif text_lower in ['кпз', 'тюрьма', '/jail']: cmd_jail(message); return
