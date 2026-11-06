@@ -1037,7 +1037,9 @@ def get_cached_bot_username():
             me = bot.get_me()
             BOT_USERNAME_CACHE = (me.username or "").lower()
         except Exception:
-            BOT_USERNAME_CACHE = ""
+            # Keep None so a transient Telegram API failure is retried on the
+            # next addressed command instead of caching a permanent false miss.
+            return None
     return BOT_USERNAME_CACHE
 
 # ID каналов и чатов
@@ -1236,14 +1238,6 @@ TITLES = {
     'clown': {'name': 'Главный Клоун', 'text': '🤡 Главный Клоун', 'price': 2000, 'buff': 'smeh_boost', 'val': 100, 'desc': '+1 очко Смехуятинки за смс'},
     'beer_baron': {'name': 'Пивной Барон', 'text': '🍺 Пивной Барон', 'price': 3200, 'buff': 'bonus_coins', 'val': 25, 'desc': '+25 коинов к /bonus'},
     'tapok_master': {'name': 'Повелитель Тапка', 'text': '🩴 Повелитель Тапка', 'price': 4000, 'buff': 'luck', 'val': 15, 'desc': '+15% к удаче охоты/рыбалки'},
-}
-
-RINGS = {
-    'copper': {'name': 'Медное колечко', 'emoji': '🥉', 'price': 600},
-    'silver': {'name': 'Серебряное кольцо', 'emoji': '🥈', 'price': 1800},
-    'gold': {'name': 'Золотое кольцо', 'emoji': '🥇', 'price': 4200},
-    'diamond': {'name': 'Бриллиантовое кольцо', 'emoji': '💍', 'price': 9600},
-    'cosmic': {'name': 'Космическое кольцо Любви', 'emoji': '🌌', 'price': 24000},
 }
 
 THEMES = {
@@ -1646,7 +1640,6 @@ ACHIEVEMENTS = {
     'rp_200': {'title': '🌟 РП-Маэстро', 'desc': 'Использовать 200 РП-действий', 'stat': 'rp_actions', 'target': 200, 'reward': 1500},
     'first_trade': {'title': '📊 Начинающий инвестор', 'desc': 'Совершить первую сделку на бирже', 'stat': 'crypto_trades', 'target': 1, 'reward': 80},
     'crypto_master': {'title': '🐺 Волк с Ня-Стрит', 'desc': 'Совершить 20 сделок на бирже', 'stat': 'crypto_trades', 'target': 20, 'reward': 800},
-    'first_marriage': {'title': '💍 Счастливы вместе', 'desc': 'Вступить в законный брак', 'stat': 'marriages', 'target': 1, 'reward': 250},
     'first_biz': {'title': '🏢 Первое предприятие', 'desc': 'Приобрести свой первый бизнес', 'stat': 'biz_bought', 'target': 1, 'reward': 300},
     'biz_all': {'title': '🏰 Бизнес-магнат', 'desc': 'Купить 4 разных бизнеса', 'stat': 'biz_bought', 'target': 4, 'reward': 2500},
     'mars_owner': {'title': '🪐 Первопроходец Марса', 'desc': 'Стать владельцем Марса', 'stat': 'mars_owned', 'target': 1, 'reward': 5000},
@@ -1809,26 +1802,6 @@ ALWAYS_ACTIVE_PATTERNS = {
 
 
 # ---------------------------------------------------------
-# СЕМЕЙНЫЕ ДОМА И МЕБЕЛЬ (ПАССИВНЫЙ ДОХОД В СЕЙФ СЕМЬИ)
-# ---------------------------------------------------------
-FAMILY_HOUSES = {
-    'moscow': {'name': '🏙 Квартира на Арбате (Москва)', 'price': 15000, 'income': 10, 'city': 'Москва 🇷🇺'},
-    'kyiv': {'name': '🏛 Пентхаус на Крещатике (Киев)', 'price': 15000, 'income': 10, 'city': 'Киев 🇺🇦'},
-    'bern': {'name': '🏔 Шале в Альпах (Берн, Швейцария)', 'price': 45000, 'income': 35, 'city': 'Берн 🇨🇭'},
-    'tokyo': {'name': '🌸 Пагода в Сибуе (Токио)', 'price': 70000, 'income': 60, 'city': 'Токио 🇯🇵'},
-    'london': {'name': '🏰 Особняк у Тауэра (Лондон)', 'price': 120000, 'income': 110, 'city': 'Лондон 🇬🇧'}
-}
-
-FAMILY_FURNITURE = {
-    'fireplace': {'name': '🔥 Уютный камин', 'price': 2500, 'income': 3},
-    'sofa': {'name': '🛋 Мягкий велюровый диван', 'price': 1800, 'income': 2},
-    'jacuzzi': {'name': '🛁 Джакузи с подсветкой', 'price': 6500, 'income': 8},
-    'cinema': {'name': '🎬 Домашний кинотеатр 4K', 'price': 12000, 'income': 15},
-    'cat_castle': {'name': '🐱 Игровой замок котика', 'price': 3500, 'income': 5},
-    'pool': {'name': '🏊‍♂️ Бассейн во дворе', 'price': 25000, 'income': 30}
-}
-
-# ---------------------------------------------------------
 # МЕМНЫЕ БОЛЕЗНИ И АПТЕКА
 # ---------------------------------------------------------
 MEME_DISEASES = {
@@ -1859,7 +1832,6 @@ HALLOWEEN_BP_MAX_EXP = HALLOWEEN_BP_EXP_PER_LVL * HALLOWEEN_BP_MAX_LEVEL
 # ---------------------------------------------------------
 # ИГРОВЫЕ СТРУКТУРЫ
 # ---------------------------------------------------------
-pending_marriages = {}
 active_bj_games = {}
 active_rps_games = {}
 active_drops = {}
@@ -1911,7 +1883,7 @@ def _default_data():
             'fix': {'reward': 5000, 'exp': 100, 'claimed': []}
         },
         'market': {},
-        'marriages': {},
+        'relationships': {'pairs': {}, 'users': {}, 'pending': {}},
         'lottery': {'tickets': {}, 'pot': 0, 'last_draw': 0},
         'bot_active': True,
         'bot_status_note': '',
@@ -1976,9 +1948,15 @@ def _normalize_loaded_data(data):
         base['stars_hard_limited_stock'] = {}
     if not isinstance(base.get('stars_limited_stock'), dict):
         base['stars_limited_stock'] = {}
-    for _dict_key in ('rests', 'history', 'settings', 'moderation', 'chat_admins', 'admin_permissions', 'anonymous_messages', 'economy', 'market', 'marriages'):
+    for _dict_key in ('rests', 'history', 'settings', 'moderation', 'chat_admins', 'admin_permissions', 'anonymous_messages', 'economy', 'market', 'relationships'):
         if not isinstance(base.get(_dict_key), dict):
             base[_dict_key] = {}
+    relationship_state = base.setdefault('relationships', {})
+    for relationship_key in ('pairs', 'users', 'pending'):
+        if not isinstance(relationship_state.get(relationship_key), dict):
+            relationship_state[relationship_key] = {}
+    if not isinstance(relationship_state.get('history'), list):
+        relationship_state['history'] = []
     if not isinstance(base.get('lottery'), dict):
         base['lottery'] = {'tickets': {}, 'pot': 0, 'last_draw': 0}
     else:
@@ -2711,7 +2689,7 @@ def merge_user_econ_data(dest, src):
             dest[field] = copy.deepcopy(src[field])
 
     for field in (
-        'inventory', 'titles', 'rings', 'purchased_themes', 'purchased_fonts',
+        'inventory', 'titles', 'purchased_themes', 'purchased_fonts',
         'achievements', 'paid_stars_items', 'pet_inventory',
     ):
         target = as_list(dest, field)
@@ -2779,8 +2757,6 @@ def merge_user_econ_data(dest, src):
                 pet_list.append(pet_id)
     if not dest.get('pet') and isinstance(src.get('pet'), dict):
         dest['pet'] = copy.deepcopy(src['pet'])
-    if not dest.get('marriage') and src.get('marriage'):
-        dest['marriage'] = copy.deepcopy(src['marriage'])
 
     return dest
 
@@ -2968,8 +2944,8 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
         ('last_pet_walk', 0), ('last_pet_care', 0), ('rest_rewards_count', 0),
         ('titles', []), ('active_title', None), ('custom_title', None), ('custom_title_text', None),
         ('custom_titles', []), ('custom_title_id', None), ('custom_title_credit_used', False), ('pending_custom_title_orders', {}),
-        ('has_custom_title_cert', False), ('rings', []), ('active_ring', None),
-        ('marriage', None), ('businesses', {}), ('biz_levels', {}), ('biz_purchase_price', {}), ('business_transactions', []), ('business_tax_paid', 0),
+        ('has_custom_title_cert', False),
+        ('relationship_gender', None), ('businesses', {}), ('biz_levels', {}), ('biz_purchase_price', {}), ('business_transactions', []), ('business_tax_paid', 0),
         ('last_biz_collect', time.time()), ('biz_last_collect', {}), ('biz_income_carry', {}), ('donor_business_purchased_at', {}), ('vehicle', None), ('vehicle_inventory', []), ('equipped_vehicle', None), ('donor_businesses', {}),
         ('equipped_rod', None), ('equipped_bow', None), ('rod_inventory', []), ('bow_inventory', []), ('daily_tasks_date', ''),
         ('daily_progress', {}), ('daily_claimed', []), ('weekly_tasks_yearweek', ''),
@@ -3003,7 +2979,7 @@ def get_user_econ(user_id=None, user_tag=None, username=None):
     # Defaults are copied so mutable containers are never shared between profiles.
     _collection_defaults = {
         'inventory': (list, []), 'titles': (list, []), 'custom_titles': (list, []),
-        'rings': (list, []), 'achievements': (list, []), 'paid_stars_items': (list, []),
+        'achievements': (list, []), 'paid_stars_items': (list, []),
         'pet_inventory': (list, []), 'vehicle_inventory': (list, []),
         'rod_inventory': (list, []), 'bow_inventory': (list, []),
         'purchased_themes': (list, ['default']), 'purchased_fonts': (list, ['default']),
@@ -3742,29 +3718,6 @@ def atomic_safe_attempt(chat_id, econ, code_entered, user_id, user_name, usernam
         return ('miss', None, pot)
 
 
-def update_family_house_income(marriage_data):
-    if not marriage_data or not isinstance(marriage_data, dict):
-        return 0
-    house_id = marriage_data.get('house')
-    if not house_id or house_id not in FAMILY_HOUSES:
-        marriage_data['last_house_calc'] = time.time()
-        return 0
-    now = time.time()
-    last_calc = marriage_data.get('last_house_calc', now)
-    hours_passed = (now - last_calc) / 3600.0
-    if hours_passed < 0.1:
-        return 0
-    hourly_rate = FAMILY_HOUSES[house_id]['income']
-    for furn in marriage_data.get('furniture', []):
-        if furn in FAMILY_FURNITURE:
-            hourly_rate += FAMILY_FURNITURE[furn]['income']
-    earned = int(hourly_rate * hours_passed)
-    if earned > 0:
-        marriage_data['vault'] = marriage_data.get('vault', 0) + earned
-        marriage_data['last_house_calc'] = now
-        mark_dirty()
-    return earned
-
 def is_in_jail(user_id):
     econ = get_user_econ(user_id=user_id)
     jail_until = econ.get('jail_until', 0)
@@ -3838,12 +3791,12 @@ def process_casino_win(win):
 
 
 # Все slash-команды и русские алиасы для единого антифлуда.
-REGISTERED_COMMAND_ALIASES = frozenset(['21', 'achievements', 'activity', 'backpack', 'bail', 'balance', 'ball', 'bank', 'basketball', 'battle_pass', 'biz', 'bj', 'blackjack', 'bowling', 'bp', 'brick', 'business', 'case', 'catch', 'chance', 'chest', 'chromosomes', 'collect', 'collection', 'cook', 'crash', 'crypto', 'csaper', 'daily_heroes', 'darts', 'dashboard', 'detector', 'dick', 'divorce', 'donate', 'durak', 'economystats', 'escape', 'fact_vd', 'family', 'fanfic', 'fap', 'fat', 'findgroup', 'foot', 'football', 'gamestats', 'garage', 'garden', 'gear', 'gift', 'gift_stars', 'give', 'give_gif', 'grant', 'groupinfo', 'groups', 'guild', 'help', 'history', 'home', 'house', 'info', 'inventory', 'iq', 'jail', 'jobs', 'loan', 'lottery', 'market', 'marry', 'meme', 'memes', 'menu', 'miner', 'mines', 'minesweeper', 'monopoly', 'pass', 'pet', 'pet_fight', 'petclothes', 'pharmacy', 'pmarket', 'portfolio', 'profile', 'profile_settings', 'promo', 'raid', 'repay', 'resources', 'rps', 'safe', 'salary', 'season', 'sell', 'set_profile', 'settings', 'sheriff', 'shop', 'stars', 'start', 'stats', 'status', 'story', 'stream', 'tasks', 'top', 'top_daily', 'top_weekly', 'train', 'trash', 'user', 'vd_fact', 'vip', 'walk', 'wheel', 'work', 'world', 'активность', 'аптека', 'ачивки', 'баланс', 'банк', 'баскетбол', 'бизнес', 'бизнесы', 'биржа', 'битвы_питомцев', 'блэкджек', 'бой_питомцев', 'больница', 'боулинг', 'брак', 'вакансии', 'выдать', 'выдать_gif', 'гараж', 'герои_дня', 'гильдия', 'группы', 'гулять', 'дартс', 'депозит', 'детектор', 'дом', 'донат', 'дроч', 'дурак', 'жилье', 'жильё', 'задания', 'залог', 'замер', 'зарплата', 'звезды', 'игрыстат', 'инв', 'инвентарь', 'инвентарь_баффов', 'инфогруппы', 'история', 'история_дня', 'карта', 'квесты', 'кейс', 'кирпич', 'клан', 'колесо', 'коллекция', 'кпз', 'краш', 'кредит', 'крипта', 'кулинария', 'лотерея', 'магазин', 'майнер', 'майнинг', 'мем', 'мемы', 'мины', 'мир', 'монополия', 'мусорка', 'найтигруппу', 'настройки', 'настройки_профиля', 'одежда_питомца', 'опыт', 'панель', 'пасс', 'пенальти',
- 'пет', 'писюн', 'питомец', 'побег', 'погасить', 'подарить_звезды', 'подарок', 'подарок_звезды', 'подрочить', 'поймать', 'пользователь', 'помойка', 'портфель', 'правда', 'прибыль', 'приготовить', 'продать', 'промо', 'промокод', 'профиль', 'работа', 'развод', 'ракета', 'рейд', 'рейтинг_сезона', 'ресурсы', 'рулетка', 'рынок_игроков', 'рюкзак', 'сад', 'сапер', 'сапер_классик', 'сапёр_классик', 'сезон', 'сейф', 'семья', 'снасти', 'статистика', 'статус', 'стрим', 'сундук', 'топ', 'топ_день', 'топ_неделя', 'тюрьма', 'ударники', 'ферма', 'футбол', 'хеллоуин', 'хромосома', 'хромосомы', 'цуефа', 'чест', 'шанс', 'шар', 'шериф', 'экономика', 'юзер']) | frozenset({'custom_title', 'кастомный_титул', 'create_tittle', 'create_title', 'ban', 'bans', 'biometry', 'force_save', 'games', 'give_stars_all', 'kick', 'miniigry', 'minigames', 'mute', 'mutes', 'save_json', 'stars_all', 'unban', 'unmute', 'warn', 'warns', 'анмут', 'бан', 'баны', 'биометрия', 'варн', 'варны', 'выдать_все_звезды', 'замеры', 'игры', 'кик', 'мут', 'муты', 'налаштування_профілю', 'разбан', 'снятьмут', 'сохранить', 'сохранить_json'})
+REGISTERED_COMMAND_ALIASES = frozenset(['21', 'achievements', 'activity', 'backpack', 'bail', 'balance', 'ball', 'bank', 'basketball', 'battle_pass', 'biz', 'bj', 'blackjack', 'bowling', 'bp', 'brick', 'business', 'case', 'catch', 'chance', 'chest', 'chromosomes', 'collect', 'collection', 'cook', 'crash', 'crypto', 'csaper', 'daily_heroes', 'darts', 'dashboard', 'detector', 'dick',  'donate', 'durak', 'economystats', 'escape', 'fact_vd',  'fanfic', 'fap', 'fat', 'findgroup', 'foot', 'football', 'gamestats', 'garage', 'garden', 'gear', 'gift', 'gift_stars', 'give', 'give_gif', 'grant', 'groupinfo', 'groups', 'guild', 'help', 'history', 'home', 'house', 'info', 'inventory', 'iq', 'jail', 'jobs', 'loan', 'lottery', 'market',  'meme', 'memes', 'menu', 'miner', 'mines', 'minesweeper', 'monopoly', 'pass', 'pet', 'pet_fight', 'petclothes', 'pharmacy', 'pmarket', 'portfolio', 'profile', 'profile_settings', 'promo', 'raid', 'repay', 'resources', 'rps', 'safe', 'salary', 'season', 'sell', 'set_profile', 'settings', 'sheriff', 'shop', 'stars', 'start', 'stats', 'status', 'story', 'stream', 'tasks', 'top', 'top_daily', 'top_weekly', 'train', 'trash', 'user', 'vd_fact', 'vip', 'walk', 'wheel', 'work', 'world', 'активность', 'аптека', 'ачивки', 'баланс', 'банк', 'баскетбол', 'бизнес', 'бизнесы', 'биржа', 'битвы_питомцев', 'блэкджек', 'бой_питомцев', 'больница', 'боулинг',  'вакансии', 'выдать', 'выдать_gif', 'гараж', 'герои_дня', 'гильдия', 'группы', 'гулять', 'дартс', 'депозит', 'детектор', 'дом', 'донат', 'дроч', 'дурак', 'жилье', 'жильё', 'задания', 'залог', 'замер', 'зарплата', 'звезды', 'игрыстат', 'инв', 'инвентарь', 'инвентарь_баффов', 'инфогруппы', 'история', 'история_дня', 'карта', 'квесты', 'кейс', 'кирпич', 'клан', 'колесо', 'коллекция', 'кпз', 'краш', 'кредит', 'крипта', 'кулинария', 'лотерея', 'магазин', 'майнер', 'майнинг', 'мем', 'мемы', 'мины', 'мир', 'монополия', 'мусорка', 'найтигруппу', 'настройки', 'настройки_профиля', 'одежда_питомца', 'опыт', 'панель', 'пасс', 'пенальти',
+ 'пет', 'писюн', 'питомец', 'побег', 'погасить', 'подарить_звезды', 'подарок', 'подарок_звезды', 'подрочить', 'поймать', 'пользователь', 'помойка', 'портфель', 'правда', 'прибыль', 'приготовить', 'продать', 'промо', 'промокод', 'профиль', 'работа',  'ракета', 'рейд', 'рейтинг_сезона', 'ресурсы', 'рулетка', 'рынок_игроков', 'рюкзак', 'сад', 'сапер', 'сапер_классик', 'сапёр_классик', 'сезон', 'сейф',  'снасти', 'статистика', 'статус', 'стрим', 'сундук', 'топ', 'топ_день', 'топ_неделя', 'тюрьма', 'ударники', 'ферма', 'футбол', 'хеллоуин', 'хромосома', 'хромосомы', 'цуефа', 'чест', 'шанс', 'шар', 'шериф', 'экономика', 'юзер']) | frozenset({'custom_title', 'кастомный_титул', 'create_tittle', 'create_title', 'ban', 'bans', 'biometry', 'force_save', 'games', 'give_stars_all', 'kick', 'miniigry', 'minigames', 'mute', 'mutes', 'save_json', 'stars_all', 'unban', 'unmute', 'warn', 'warns', 'анмут', 'бан', 'баны', 'биометрия', 'варн', 'варны', 'выдать_все_звезды', 'замеры', 'игры', 'кик', 'мут', 'муты', 'налаштування_профілю', 'разбан', 'снятьмут', 'сохранить', 'сохранить_json'})
 
 
 
-REGISTERED_COMMAND_ALIASES = REGISTERED_COMMAND_ALIASES | frozenset({'moneyhistory', 'coinhistory', 'история_денег'})
+REGISTERED_COMMAND_ALIASES = REGISTERED_COMMAND_ALIASES | frozenset({'moneyhistory', 'coinhistory', 'история_денег', 'отн'})
 
 def is_registered_command_text(text):
     text = str(text or '').strip().lower()
@@ -3862,6 +3815,11 @@ def can_process_user_message(message):
             return False
 
     if not message or not getattr(message, 'from_user', None):
+        return False
+
+    # Commands explicitly addressed to another Telegram bot belong to that bot.
+    # Fail closed when getMe is temporarily unavailable rather than answering them.
+    if _is_command_addressed_to_other_bot(message):
         return False
 
     try:
@@ -4295,9 +4253,33 @@ def _mod_parse(message, command):
 def _mod_is_group(message):
     return getattr(message.chat, 'type', '') in ('group', 'supergroup')
 
+def _moderation_system_available(chat_id):
+    """Return False when moderation is disabled or the bot lacks Telegram rights.
+
+    Command handlers use this as a silent gate: users should not get misleading
+    "not enough rights" replies when the bot itself cannot perform moderation.
+    """
+    try:
+        if not get_chat_settings(chat_id).get('admin_functions_enabled', True):
+            return False
+        return bool(_bot_can_restrict(chat_id))
+    except Exception:
+        return False
+
+
+def _is_telegram_permission_error(exc):
+    text = str(exc or '').lower()
+    return any(token in text for token in (
+        'not enough rights', 'administrator rights', 'chat_admin_required',
+        "can't restrict", 'cannot restrict', 'have no rights',
+    ))
+
+
 def _mod_can_act(message, target_id, action):
     if not _mod_is_group(message):
         return False, 'Эти команды работают только в группах.'
+    # _execute_moderation has already checked the bot's Telegram rights. Avoid
+    # a second getMe/getChatMember round-trip for the same command.
     if not can_admin_action(message.chat.id, message.from_user.id, action):
         return False, 'Недостаточно прав для этой команды или функции админов отключены.'
     if not target_id:
@@ -4358,6 +4340,8 @@ def _mod_unban(chat_id, user_id):
     bot.unban_chat_member(chat_id, user_id, only_if_banned=True)
 
 def _clear_moderation(message, action):
+    if not _moderation_system_available(message.chat.id):
+        return
     if not _mod_is_group(message):
         bot.reply_to(message,'❌ Эта команда работает только в группе.'); return
     if not can_admin_action(message.chat.id,message.from_user.id, 'mute' if action=='unmute' else 'ban'):
@@ -4375,9 +4359,13 @@ def _clear_moderation(message, action):
             bot.reply_to(message,f'🔓 {make_link(message.chat.id,target_name,target_id,ping=True)} разблокирован.',parse_mode='HTML')
         mark_dirty()
     except Exception as exc:
+        if _is_telegram_permission_error(exc):
+            return
         bot.reply_to(message,f'❌ Не удалось снять ограничение: <code>{html.escape(str(exc))}</code>',parse_mode='HTML')
 
 def _mod_list(message, kind):
+    if not _moderation_system_available(message.chat.id):
+        return
     if not _mod_is_group(message):
         bot.reply_to(message, 'Списки модерации доступны только в группах.')
         return
@@ -4397,13 +4385,16 @@ def _mod_list(message, kind):
     bot.reply_to(message, f'{title}\n━━━━━━━━━━━━━━━━━━━━\n' + ('\n'.join(lines) if lines else 'Список пуст.') + f'\n\nЛимит варнов: {get_chat_settings(message.chat.id).get("warn_limit",3)}', parse_mode='HTML')
 
 def _execute_moderation(message, action):
+    if not _moderation_system_available(message.chat.id):
+        return
     if not _mod_is_group(message):
         bot.reply_to(message, '❌ Эта команда работает только в группе.')
         return
     target_id, target_name, args = _mod_parse(message, action)
     ok, err = _mod_can_act(message, target_id, action)
     if not ok:
-        bot.reply_to(message, '❌ ' + err)
+        if err:
+            bot.reply_to(message, '❌ ' + err)
         return
     args = args.strip()
     duration = None; reason = 'Не указана'
@@ -4456,6 +4447,10 @@ def _execute_moderation(message, action):
             _mod_unban(message.chat.id, target_id)
             bot.reply_to(message, f'👢 {make_link(message.chat.id,target_name,target_id,ping=True)} исключён из группы.\nПричина: {html.escape(reason)}', parse_mode='HTML')
     except Exception as exc:
+        # Telegram may revoke bot admin permissions between the preflight check
+        # and the API call. Stay silent in that case, as requested.
+        if _is_telegram_permission_error(exc):
+            return
         bot.reply_to(message, f'❌ Не удалось выполнить действие: <code>{html.escape(str(exc))}</code>', parse_mode='HTML')
 
 def _moderation_worker():
@@ -4504,7 +4499,7 @@ def resolve_user_from_string(chat_id, query_str):
     if not query_str:
         return None, None
 
-    query = query_str.strip()
+    query = str(query_str).strip()
 
     m_tg = re.search(r'tg://(?:openmessage\?user_id=|user\?id=)(\d+)', query)
     if m_tg:
@@ -4522,50 +4517,41 @@ def resolve_user_from_string(chat_id, query_str):
         query = m_tme.group(1)
 
     clean_q = query.replace('@', '').strip().lower()
-    str_chat = str(chat_id)
+    # Snapshot under the shared DB lock: malformed legacy profiles are ignored
+    # and concurrent updates cannot invalidate the iteration.
+    with db_lock:
+        economy = db.get('economy', {}) if isinstance(db, dict) else {}
+        economy_items = list(economy.items()) if isinstance(economy, dict) else []
 
-    if 'economy' in db:
-        for k, v in list(db['economy'].items()):
-            u_name = v.get('username')
-            if u_name and u_name.lower() == clean_q and v.get('user_id'):
-                return v['user_id'], v.get('display_name', query.replace('@', '').strip())
+    for _key, value in economy_items:
+        if not isinstance(value, dict):
+            continue
+        username = value.get('username')
+        if isinstance(username, str) and username.lower() == clean_q and value.get('user_id'):
+            return value['user_id'], value.get('display_name', query.replace('@', '').strip())
 
-    if 'economy' in db:
-        for k, v in list(db['economy'].items()):
-            uid = v.get('user_id')
-            if uid and str(uid) == clean_q:
-                return uid, v.get('display_name', f"ID:{uid}")
+    for _key, value in economy_items:
+        if not isinstance(value, dict):
+            continue
+        uid = value.get('user_id')
+        if uid and str(uid) == clean_q:
+            return uid, value.get('display_name', f"ID:{uid}")
 
-    if 'economy' in db:
-        display_matches = []
-        for k, v in list(db['economy'].items()):
-            if not isinstance(v, dict):
-                continue
-            disp = str(v.get('display_name', '') or '').lower()
-            if disp == clean_q or clean_tag(disp).lower() == clean_q:
-                display_matches.append((v.get('user_id'), v.get('display_name')))
-        if len(display_matches) == 1:
-            return display_matches[0]
-        if len(display_matches) > 1:
-            # Ambiguous display names are unsafe for destructive/admin actions.
-            return None, query.replace('@', '').strip()
+    display_matches = []
+    for _key, value in economy_items:
+        if not isinstance(value, dict):
+            continue
+        display_name = str(value.get('display_name', '') or '').lower()
+        if display_name == clean_q or clean_tag(display_name).lower() == clean_q:
+            display_matches.append((value.get('user_id'), value.get('display_name')))
 
-    if str_chat in db.get('rests', {}):
-        for r_key, r_info in list(db['rests'][str_chat].items()):
-            rec_uid = r_info.get('user_id')
-            rec_name = r_info.get('user_name', r_key)
-            if str(rec_uid) == clean_q or rec_name.lower() == clean_q or r_key.lower() == clean_q:
-                return rec_uid, rec_name
-
-    if str_chat in db.get('history', {}):
-        for hist_user, items in list(db['history'][str_chat].items()):
-            if hist_user.lower() == clean_q:
-                for item in reversed(items):
-                    if item.get('user_id'):
-                        return item.get('user_id'), hist_user
-                return None, hist_user
-
+    if len(display_matches) == 1:
+        return display_matches[0]
+    if len(display_matches) > 1:
+        # Ambiguous display names are unsafe for destructive/admin actions.
+        return None, query.replace('@', '').strip()
     return None, query.replace('@', '').strip()
+
 
 def check_user_rest(chat_rests, user_id=None, user_name=None):
     if not chat_rests:
@@ -5016,10 +5002,6 @@ def memory_and_debt_worker():
                 if chat_id_lobby and msg_id_lobby:
                     try: bot.delete_message(chat_id_lobby, msg_id_lobby)
                     except Exception as e: print(f"[NONFATAL ERROR] {e}")
-
-            for k in list(pending_marriages.keys()):
-                if now - pending_marriages[k].get('start_time', now) > 900:
-                    del pending_marriages[k]
 
             with CALLBACK_STATE_LOCK:
                 for k in list(active_drops.keys()):
@@ -7887,10 +7869,7 @@ def send_shop_menu(chat_id, user_id, user_tag, message_id=None):
         InlineKeyboardButton('🎨 Темы профиля', callback_data=f'shop_cat_themes:{user_id}'),
         InlineKeyboardButton('🧰 Расходники', callback_data=f'shop_cat_buffs:{user_id}')
     )
-    markup.add(
-        InlineKeyboardButton('💍 Кольца (Брак)', callback_data=f'shop_cat_rings:{user_id}'),
-        InlineKeyboardButton('🐾 Зоомагазин', callback_data=f'shop_cat_pets_0:{user_id}')
-    )
+    markup.add(InlineKeyboardButton('🐾 Зоомагазин', callback_data=f'shop_cat_pets_0:{user_id}'))
     markup.add(
         InlineKeyboardButton('🏎 Гараж', callback_data=f'shop_cat_garage:{user_id}'),
         InlineKeyboardButton('🪴 Семена Сада', callback_data=f'shop_cat_garden:{user_id}')
@@ -8269,94 +8248,6 @@ def render_activity_leaderboard(chat_id, period='day'):
 
 # ---------------------------------------------------------
 # СЕМЕЙНЫЙ ДОМ И ОБУСТРОЙСТВО (/house, /дом)
-# ---------------------------------------------------------
-def render_house_view(chat_id, user_id, user_name, message_id=None):
-    econ = get_user_econ(user_id, user_name)
-    m = econ.get('marriage')
-    if not m:
-        text = "❌ <b>Семейный дом доступен только тем, кто состоит в браке!</b> 😿\nСделайте предложение через <code>брак @username</code>!"
-        if message_id:
-            try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML')
-            except Exception as e: print(f"[NONFATAL ERROR] {e}")
-            return
-        bot.send_message(chat_id, text, parse_mode='HTML')
-        return
-
-    update_family_house_income(m)
-    mark_dirty()
-
-    cur_house = m.get('house')
-    cur_furniture = m.get('furniture', [])
-
-    markup = InlineKeyboardMarkup(row_width=1)
-
-    if not cur_house:
-        lines = [
-            "🏡 <b>КАТАЛОГ СЕМЕЙНОЙ НЕДВИЖИМОСТИ</b> 😺",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"Супруги: <b>{m.get('partner_name')}</b> и {make_link(chat_id, user_name, user_id, ping=False)}",
-            "<i>Купите ваш первый семейный дом в одном из городов мира! Дом приносит постоянный пассивный доход в семейный сейф.</i> 😻\n",
-            "<b>Доступные дома:</b>"
-        ]
-        for h_k, h_v in FAMILY_HOUSES.items():
-            lines.append(f"• <b>{h_v['name']}</b> — <code>{h_v['price']:,} 🪙</code> (Доход: +{h_v['income']} 🪙/ч в сейф)")
-            markup.add(InlineKeyboardButton(f"Купить {h_v['name']} ({h_v['price']:,} 🪙)", callback_data=f"buy_house_{h_k}:{user_id}"))
-    else:
-        h_info = FAMILY_HOUSES.get(cur_house, FAMILY_HOUSES['moscow'])
-        hourly_total = h_info['income']
-        furn_names = []
-        for f_k in cur_furniture:
-            if f_k in FAMILY_FURNITURE:
-                furn_names.append(FAMILY_FURNITURE[f_k]['name'])
-                hourly_total += FAMILY_FURNITURE[f_k]['income']
-
-        furn_str = ", ".join(furn_names) if furn_names else "Пусто (нужна мебель)"
-        lines = [
-            f"🏡 <b>СЕМЕЙНЫЙ ОЧАГ: {h_info['name']}</b> 😺",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📍 Город: <b>{h_info['city']}</b>",
-            f"👫 Владельцы: <b>{m.get('partner_name')}</b> & {make_link(chat_id, user_name, user_id, ping=False)}",
-            f"🛋 Интерьер и мебель: <i>{furn_str}</i>",
-            f"💰 Пассивный доход дома: <b>+{hourly_total} 🪙 в час</b> прямо в семейный сейф!",
-            f"🏦 В семейном сейфе: <b>{m.get('vault', 0):,} 🪙</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "<b>Каталог мебели для обустройства:</b>"
-        ]
-        for f_k, f_v in FAMILY_FURNITURE.items():
-            is_bought = " (Уже куплено)" if f_k in cur_furniture else ""
-            lines.append(f"• <b>{f_v['name']}</b> — <code>{f_v['price']:,} 🪙</code> (+{f_v['income']} 🪙/ч){is_bought}")
-            if f_k not in cur_furniture:
-                markup.add(InlineKeyboardButton(f"Купить {f_v['name']} ({f_v['price']:,} 🪙)", callback_data=f"buy_furn_{f_k}:{user_id}"))
-
-        markup.add(InlineKeyboardButton("🔄 Обновить статус дома", callback_data=f"house_refresh:{user_id}"))
-
-    text = "\n".join(lines)
-    if message_id:
-        try: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e: print(f"[NONFATAL ERROR] {e}")
-        return
-    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-
-
-
-
-# ---------------------------------------------------------
-# КРИМИНАЛ И ПОЛИЦИЯ ЧАТА (ШЕРИФ, РОЗЫСК, КПЗ, ПОБЕГ, ЗАЛОГ)
-# ---------------------------------------------------------
-
-
-
-
-
-# ---------------------------------------------------------
-# ПОДПОЛЬНЫЕ БОИ ПИТОМЦЕВ (/pet_fight, /бой)
-# ---------------------------------------------------------
-
-# ---------------------------------------------------------
-# БИРЖА КОНТЕНТА И МЕМОДЕЛЬНЯ (/meme)
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# МЕМ-КОНКУРС 2.0
 # ---------------------------------------------------------
 def finalize_meme_contests(current_date=None):
     current_date = current_date or daily_task_date()
@@ -9848,6 +9739,24 @@ def _nyabot_diagnostics_handler(message):
         except Exception:
             pass
 
+
+def _is_command_addressed_to_other_bot(message):
+    text = str(getattr(message, 'text', '') or '').strip()
+    match = re.match(r'^/([A-Za-z0-9_]+)@([A-Za-z0-9_]+)(?:\s|$)', text)
+    if not match:
+        return False
+    target_username = match.group(2).lower()
+    own_username = get_cached_bot_username()
+    return not own_username or target_username != own_username
+
+
+# This handler is registered before every feature handler. TeleBot stops after
+# the first matching handler in a group, so /command@another_bot is consumed
+# silently and cannot leak into this bot's command handlers or text router.
+bot.message_handler(
+    func=_is_command_addressed_to_other_bot,
+    content_types=['text'],
+)(_ignore_other_bot_command := (lambda message: None))
 
 bot.message_handler(commands=["nyadiag", "диагностика"])(_nyabot_diagnostics_handler)
 

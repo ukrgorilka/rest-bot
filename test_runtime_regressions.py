@@ -451,9 +451,9 @@ class BattlePassRewardTests(unittest.TestCase):
         tree = ast.parse(text, filename=str(source_path))
         callback = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'callback_inline')
         targets = {
-            'buy_med_', 'buy_buff_', 'buy_house_', 'buy_furn_', 'buy_seed_',
+            'buy_med_', 'buy_buff_', 'buy_seed_',
             'buy_studio_', 'buy_biz_', 'buy_veh_', 'buy_rod_', 'buy_bow_',
-            'buy_ring_', 'buy_badge_', 'buy_theme_', 'buy_title_', 'buy_pet_',
+            'buy_badge_', 'buy_theme_', 'buy_title_', 'buy_pet_',
         }
         branches = {}
         for node in ast.walk(callback):
@@ -2565,7 +2565,7 @@ class DurableShopTransactionTests(unittest.TestCase):
     def test_profile_shop_callbacks_use_durable_helper_and_no_direct_debit(self):
         targets = [
             "buy_studio_", "buy_seed_", "buy_buff_", "buy_theme_", "buy_rod_",
-            "buy_bow_", "buy_ring_", "buy_title_", "buy_badge_", "buy_pet_",
+            "buy_bow_", "buy_title_", "buy_badge_", "buy_pet_",
         ]
         for target in targets:
             with self.subTest(target=target):
@@ -2577,7 +2577,7 @@ class DurableShopTransactionTests(unittest.TestCase):
                 self.assertNotIn('_adjust_balance(', block)
 
     def test_one_time_items_have_duplicate_validation(self):
-        for target in ("buy_ring_", "buy_theme_", "buy_title_", "buy_badge_", "buy_pet_"):
+        for target in ("buy_theme_", "buy_title_", "buy_badge_", "buy_pet_"):
             with self.subTest(target=target):
                 needle = f"elif action_data.startswith('{target}')"
                 start = self.source.index(needle)

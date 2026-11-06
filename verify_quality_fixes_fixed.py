@@ -235,7 +235,7 @@ _cb_text = text('handlers/callbacks.py')
 check('Battle Pass claim recognizes legacy paid Stars entitlement', "'bp_premium' in paid_items" in _cb_text and "bool(econ.get('bp_premium')" in _cb_text)
 check('Battle Pass rewards use durable field-scoped save and rollback', '_durable_profile_transaction(' in _cb_text and "'battle pass reward claim'" in _cb_text and "'pet_inventory'" in _cb_text and 'Не удалось сохранить награды в Neon' in _cb_text)
 check('Battle Pass helper prevents duplicate reward grants', 'def _apply_halloween_bp_rewards(econ):' in _cb_text and "claimed_free" in _cb_text and "claimed_prem" in _cb_text)
-_store_targets = ['buy_med_', 'buy_buff_', 'buy_house_', 'buy_furn_', 'buy_seed_', 'buy_studio_', 'buy_biz_', 'buy_veh_', 'buy_rod_', 'buy_bow_', 'buy_ring_', 'buy_badge_', 'buy_theme_', 'buy_title_', 'buy_pet_']
+_store_targets = ['buy_med_', 'buy_buff_', 'buy_seed_', 'buy_studio_', 'buy_biz_', 'buy_veh_', 'buy_rod_', 'buy_bow_', 'buy_badge_', 'buy_theme_', 'buy_title_', 'buy_pet_']
 _store_branches_ok = True
 _cb_tree = ast.parse(_cb_text)
 _cb_fn = next(n for n in _cb_tree.body if isinstance(n, ast.FunctionDef) and n.name == 'callback_inline')
