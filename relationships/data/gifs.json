@@ -1,0 +1,597 @@
+{
+  "_catalog_version": 3,
+  "_instructions": "Default pair mode is preview: the bot replies to the command with a caption and a Tenor page URL, so Telegram can render a link-preview card. Tapping the card opens that exact Tenor GIF page. Use отн гиф медиа to send the actual GIF as Telegram animation; отн гиф превью switches back. Each entry stores a Tenor page URL plus its direct CDN GIF URL. Pair-specific pools exist for male_female, female_female, and male_male; generic is the fallback.",
+  "_sources": {
+    "mf_kiss_1": {
+      "preview_url": "https://tenor.com/view/anime-couple-kiss-gif-12997856",
+      "description": "Аниме-пара: девушка и парень целуются."
+    },
+    "mf_kiss_2": {
+      "preview_url": "https://tenor.com/view/kiss-couple-anime-gif-22705238",
+      "description": "Аниме-пара целуется, вокруг сердечки."
+    },
+    "mf_hug_1": {
+      "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319944",
+      "description": "Парень и девушка обнимаются."
+    },
+    "mf_hug_2": {
+      "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319910",
+      "description": "Аниме-пара обнимается на фоне голубого неба."
+    },
+    "mf_cuddle_1": {
+      "preview_url": "https://tenor.com/view/anime-cuddle-couple-sleep-in-my-arms-gif-17316337",
+      "description": "Аниме-пара нежно обнимается."
+    },
+    "mf_cuddle_2": {
+      "preview_url": "https://tenor.com/view/anime-couple-hug-cute-cuddle-gif-14898682",
+      "description": "Девушка отдыхает рядом с парнем."
+    },
+    "mf_cuddle_3": {
+      "preview_url": "https://tenor.com/view/anime-cuddle-cute-gif-12668760",
+      "description": "Милая аниме-анимация объятий."
+    },
+    "ff_kiss_1": {
+      "preview_url": "https://tenor.com/view/anime-kiss-girl-gif-4699297936810852159",
+      "description": "Две девушки из аниме целуются."
+    },
+    "ff_hug_1": {
+      "preview_url": "https://tenor.com/view/hugs-gif-1678648846955360068",
+      "description": "Две девушки обнимаются."
+    },
+    "ff_hug_2": {
+      "preview_url": "https://tenor.com/view/anime-hug-anime-yuri-gif-10188735499791065864",
+      "description": "Две девушки из аниме обнимаются."
+    },
+    "mm_kiss_1": {
+      "preview_url": "https://tenor.com/view/boyslove-anime-kiss-gif-27053338",
+      "description": "Аниме-пара парней: нежный поцелуй."
+    },
+    "mm_kiss_2": {
+      "preview_url": "https://tenor.com/view/series-bl-gif-25234156",
+      "description": "Два героя из анимации целуются."
+    },
+    "mm_hug_1": {
+      "preview_url": "https://tenor.com/view/love-stage-love-stage-hug-bl-boys-love-gif-3732938995823527333",
+      "description": "Два парня из аниме сидят рядом."
+    },
+    "mm_hug_2": {
+      "preview_url": "https://tenor.com/view/bl-anime-cuddle-boys-love-sweet-gif-17215891",
+      "description": "Два парня обнимаются."
+    },
+    "mm_hug_3": {
+      "preview_url": "https://tenor.com/view/bl-anime-cuddle-dakaretai-otoko1i-ni-odosarete-imasu-takato-saij-gif-17215892",
+      "description": "Аниме-пара парней обнимается."
+    },
+    "hand_1": {
+      "preview_url": "https://tenor.com/view/anime-hand-holding-love-live-gif-26701584",
+      "description": "Аниме-пара держится за руки."
+    },
+    "hand_2": {
+      "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-21319959",
+      "description": "Парень и девушка держатся за руки."
+    },
+    "hand_3": {
+      "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-14702952937611931388",
+      "description": "Аниме-пара держится за руки."
+    },
+    "hand_4": {
+      "preview_url": "https://tenor.com/view/anime-holding-hands-gif-26840472",
+      "description": "Двое персонажей держатся за руки."
+    },
+    "pat_1": {
+      "preview_url": "https://tenor.com/view/anime-head-pat-gif-23472597",
+      "description": "Аниме-персонаж гладит другого по голове."
+    },
+    "pat_2": {
+      "preview_url": "https://tenor.com/view/anime-pat-headpat-gif-12913693752179961330",
+      "description": "Мягкое поглаживание по голове."
+    },
+    "bite_1": {
+      "preview_url": "https://tenor.com/view/anime-cute-bite-you-biting-biting-cheeks-gif-10816445371054123709",
+      "description": "Милый мультяшный укус за щёку."
+    },
+    "flowers_1": {
+      "preview_url": "https://tenor.com/view/hands-flowers-cute-anime-aesthetic-gif-18758025",
+      "description": "Анимированные руки дарят цветок."
+    },
+    "date_1": {
+      "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-21319959",
+      "description": "Аниме-пара держится за руки."
+    },
+    "date_2": {
+      "preview_url": "https://tenor.com/view/anime-couple-date-jacket-gif-23956216",
+      "description": "Аниме-пара вместе на прогулке."
+    },
+    "dinner_1": {
+      "preview_url": "https://tenor.com/view/couple-cooking-eating-food-gif-8950240",
+      "description": "Пара вместе готовит на кухне."
+    },
+    "dinner_2": {
+      "preview_url": "https://tenor.com/view/anime-cooking-cook-cooking-anime-gif-1235498559999413454",
+      "description": "Анимированная сцена приготовления еды."
+    },
+    "surprise_1": {
+      "preview_url": "https://tenor.com/view/anime-surprise-surprised-girl-cute-gif-11367551408932435671",
+      "description": "Удивлённая героиня из аниме."
+    },
+    "field_1": {
+      "preview_url": "https://tenor.com/view/anime-gif-3531831",
+      "description": "Аниме-пара среди цветов."
+    },
+    "field_2": {
+      "preview_url": "https://tenor.com/view/studio-ghibli-gif-26858590",
+      "description": "Анимированная пара в цветущем поле."
+    },
+    "mf_kiss_new": {
+      "preview_url": "https://tenor.com/view/anime-couple-kiss-anime-gif-21171309",
+      "description": "Парень и девушка целуются в аниме-сцене."
+    },
+    "mf_hug_hat": {
+      "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21171435",
+      "description": "Парень в шляпе обнимает девушку."
+    },
+    "mf_hug_catear": {
+      "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319964",
+      "description": "Милая аниме-сцена объятий парня и девушки."
+    },
+    "mf_cuddle_new": {
+      "preview_url": "https://tenor.com/view/anime-couple-cuddle-gif-27015841",
+      "description": "Аниме-пара обнимается."
+    },
+    "mf_hands_new": {
+      "preview_url": "https://tenor.com/view/anime-hug-couple-gif-24663793",
+      "description": "Аниме-пара держится за руки."
+    },
+    "aesthetic_hands": {
+      "preview_url": "https://tenor.com/view/aesthetic-anime-couple-couples-couples-romance-gif-2337746046254879273",
+      "description": "Аниме-пара держится за руки на снежном фоне."
+    },
+    "ff_hug_umbrella": {
+      "preview_url": "https://tenor.com/view/anime-hug-yuru-yuri-gif-11942972",
+      "description": "Две девушки из аниме обнимаются под зонтом."
+    },
+    "generic_cuddle_bed": {
+      "preview_url": "https://tenor.com/view/anime-hug-hugging-cuddle-cuddles-gif-8969155665145887766",
+      "description": "Аниме-персонажи обнимаются."
+    },
+    "mm_hug_tasogare": {
+      "preview_url": "https://tenor.com/view/tasogare-twilight-outfocus-out-of-focus-boys-love-gif-4250239955227258700",
+      "description": "Два парня из аниме обнимаются."
+    },
+    "mm_pat_linkclick": {
+      "preview_url": "https://tenor.com/view/cheng-xiaoshi-link-click-shiguang-dailiren-anime-gif-13645261627405157619",
+      "description": "Один парень из аниме ласково касается волос другого."
+    },
+    "mm_kiss_forehead": {
+      "preview_url": "https://tenor.com/view/kiss-boys-love-thai-bl-couple-sweet-gif-17366865",
+      "description": "Два парня из аниме целуются в лоб."
+    },
+    "mm_hug_lovestage": {
+      "preview_url": "https://tenor.com/view/love-stage-love-stage-hug-bl-boys-love-gif-3732938995823527333",
+      "description": "Два парня из аниме сидят рядом."
+    }
+  },
+  "generic": {
+    "kiss": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-kiss-gif-12997856",
+        "media_url": "https://media1.tenor.com/m/GaTIienSLHMAAAAd/anime-couple.gif",
+        "description": "Аниме-пара: девушка и парень целуются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/kiss-couple-anime-gif-22705238",
+        "media_url": "https://media1.tenor.com/m/4Xfw8ADVYp4AAAAd/kiss-couple.gif",
+        "description": "Аниме-пара целуется, вокруг сердечки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-kiss-anime-gif-21171309",
+        "media_url": "https://media1.tenor.com/m/HPWDBAuRpAoAAAAd/anime-couple-kiss-anime.gif",
+        "description": "Парень и девушка целуются в аниме-сцене."
+      }
+    ],
+    "hug": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319944",
+        "media_url": "https://media1.tenor.com/m/8X6WB7UvCMAAAAAd/anime-couple-hug.gif",
+        "description": "Парень и девушка обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319910",
+        "media_url": "https://media1.tenor.com/m/KTXwwKkWd5MAAAAd/anime-couple-hug.gif",
+        "description": "Аниме-пара обнимается на фоне голубого неба."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21171435",
+        "media_url": "https://media1.tenor.com/m/4D5jSREXInMAAAAd/anime-couple-hug.gif",
+        "description": "Парень в шляпе обнимает девушку."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319964",
+        "media_url": "https://media1.tenor.com/m/bYKzqxi3MfMAAAAd/anime-couple.gif",
+        "description": "Милая аниме-сцена объятий парня и девушки."
+      }
+    ],
+    "bite": [
+      {
+        "preview_url": "https://tenor.com/view/anime-cute-bite-you-biting-biting-cheeks-gif-10816445371054123709",
+        "media_url": "https://media1.tenor.com/m/lhu7wcoZar0AAAAj/anime-cute.gif",
+        "description": "Милый мультяшный укус за щёку."
+      }
+    ],
+    "pat": [
+      {
+        "preview_url": "https://tenor.com/view/anime-head-pat-gif-23472597",
+        "media_url": "https://media1.tenor.com/m/gh3ARxA0yO0AAAAd/anime-head-pat.gif",
+        "description": "Аниме-персонаж гладит другого по голове."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-pat-headpat-gif-12913693752179961330",
+        "media_url": "https://media1.tenor.com/m/szaoDETeLfIAAAAd/anime-pat.gif",
+        "description": "Мягкое поглаживание по голове."
+      }
+    ],
+    "cuddle": [
+      {
+        "preview_url": "https://tenor.com/view/anime-cuddle-couple-sleep-in-my-arms-gif-17316337",
+        "media_url": "https://media1.tenor.com/m/edCLIQ6xc9IAAAAd/anime-cuddle.gif",
+        "description": "Аниме-пара нежно обнимается."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-cute-cuddle-gif-14898682",
+        "media_url": "https://media1.tenor.com/m/G9yuomdknAsAAAAd/anime-couple.gif",
+        "description": "Девушка отдыхает рядом с парнем."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-cuddle-cute-gif-12668760",
+        "media_url": "https://media1.tenor.com/m/A5ZuMAZ44l8AAAAd/anime-cuddle.gif",
+        "description": "Милая аниме-анимация объятий."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-cuddle-gif-27015841",
+        "media_url": "https://media1.tenor.com/m/1OU9r0OdhLkAAAAd/anime-couple.gif",
+        "description": "Аниме-пара обнимается."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-hug-hugging-cuddle-cuddles-gif-8969155665145887766",
+        "media_url": "https://media1.tenor.com/m/fHjXjowz_BYAAAAd/anime-hug.gif",
+        "description": "Аниме-персонажи обнимаются."
+      }
+    ],
+    "compliment": [
+      {
+        "preview_url": "https://tenor.com/view/anime-hand-holding-love-live-gif-26701584",
+        "media_url": "https://media1.tenor.com/m/SXyLEwzHkyYAAAAd/anime-hand-holding.gif",
+        "description": "Аниме-пара держится за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-14702952937611931388",
+        "media_url": "https://media1.tenor.com/m/zAthzBOlLvwAAAAd/anime-couple-hand-holding.gif",
+        "description": "Аниме-пара держится за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-gif-3531831",
+        "media_url": "https://media1.tenor.com/m/_EsZoq9WICwAAAAd/anime.gif",
+        "description": "Аниме-пара среди цветов."
+      }
+    ],
+    "help": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-21319959",
+        "media_url": "https://media1.tenor.com/m/-76rfR0BNTAAAAAd/anime-couple-hand-holding.gif",
+        "description": "Парень и девушка держатся за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-holding-hands-gif-26840472",
+        "media_url": "https://media1.tenor.com/m/FxUyp3G36hAAAAAd/anime-holding-hands.gif",
+        "description": "Двое персонажей держатся за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319910",
+        "media_url": "https://media1.tenor.com/m/KTXwwKkWd5MAAAAd/anime-couple-hug.gif",
+        "description": "Аниме-пара обнимается на фоне голубого неба."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-hug-couple-gif-24663793",
+        "media_url": "https://media1.tenor.com/m/g7bSW61_zQEAAAAd/anime-hug.gif",
+        "description": "Аниме-пара держится за руки."
+      }
+    ],
+    "flowers": [
+      {
+        "preview_url": "https://tenor.com/view/hands-flowers-cute-anime-aesthetic-gif-18758025",
+        "media_url": "https://media1.tenor.com/m/VK8bAF-nA6IAAAAAd/hands-flowers.gif",
+        "description": "Анимированные руки дарят цветок."
+      },
+      {
+        "preview_url": "https://tenor.com/view/studio-ghibli-gif-26858590",
+        "media_url": "https://media1.tenor.com/m/zsfJdmPMoCcAAAAd/studio-ghibli.gif",
+        "description": "Анимированная пара в цветущем поле."
+      }
+    ],
+    "date": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-21319959",
+        "media_url": "https://media1.tenor.com/m/-76rfR0BNTAAAAAd/anime-couple-hand-holding.gif",
+        "description": "Аниме-пара держится за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-date-jacket-gif-23956216",
+        "media_url": "https://media1.tenor.com/m/1248oWLmyeIAAAAd/anime-couple.gif",
+        "description": "Аниме-пара вместе на прогулке."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-holding-hands-gif-26840472",
+        "media_url": "https://media1.tenor.com/m/FxUyp3G36hAAAAAd/anime-holding-hands.gif",
+        "description": "Двое персонажей держатся за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/aesthetic-anime-couple-couples-couples-romance-gif-2337746046254879273",
+        "media_url": "https://media1.tenor.com/m/IHFXpKYYkikAAAAd/aesthetic-anime.gif",
+        "description": "Аниме-пара держится за руки на снежном фоне."
+      }
+    ],
+    "dinner": [
+      {
+        "preview_url": "https://tenor.com/view/couple-cooking-eating-food-gif-8950240",
+        "media_url": "https://media1.tenor.com/m/a4IqrBn-yOcAAAAd/couple-cooking.gif",
+        "description": "Пара вместе готовит на кухне."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-cooking-cook-cooking-anime-gif-1235498559999413454",
+        "media_url": "https://media1.tenor.com/m/ESVfZPVFjM4AAAAd/anime-cooking-cook.gif",
+        "description": "Анимированная сцена приготовления еды."
+      }
+    ],
+    "letter": [
+      {
+        "preview_url": "https://tenor.com/view/anime-hand-holding-love-live-gif-26701584",
+        "media_url": "https://media1.tenor.com/m/SXyLEwzHkyYAAAAd/anime-hand-holding.gif",
+        "description": "Аниме-пара держится за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-gif-3531831",
+        "media_url": "https://media1.tenor.com/m/_EsZoq9WICwAAAAd/anime.gif",
+        "description": "Аниме-пара среди цветов."
+      }
+    ],
+    "surprise": [
+      {
+        "preview_url": "https://tenor.com/view/anime-surprise-surprised-girl-cute-gif-11367551408932435671",
+        "media_url": "https://media1.tenor.com/m/ncGnx09ottcAAAAd/anime-surprise.gif",
+        "description": "Удивлённая героиня из аниме."
+      },
+      {
+        "preview_url": "https://tenor.com/view/hands-flowers-cute-anime-aesthetic-gif-18758025",
+        "media_url": "https://media1.tenor.com/m/VK8bAF-nA6IAAAAAd/hands-flowers.gif",
+        "description": "Анимированные руки дарят цветок."
+      }
+    ],
+    "picnic": [
+      {
+        "preview_url": "https://tenor.com/view/anime-gif-3531831",
+        "media_url": "https://media1.tenor.com/m/_EsZoq9WICwAAAAd/anime.gif",
+        "description": "Аниме-пара среди цветов."
+      },
+      {
+        "preview_url": "https://tenor.com/view/studio-ghibli-gif-26858590",
+        "media_url": "https://media1.tenor.com/m/zsfJdmPMoCcAAAAd/studio-ghibli.gif",
+        "description": "Анимированная пара в цветущем поле."
+      },
+      {
+        "preview_url": "https://tenor.com/view/aesthetic-anime-couple-couples-couples-romance-gif-2337746046254879273",
+        "media_url": "https://media1.tenor.com/m/IHFXpKYYkikAAAAd/aesthetic-anime.gif",
+        "description": "Аниме-пара держится за руки на снежном фоне."
+      }
+    ],
+    "travel": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-date-jacket-gif-23956216",
+        "media_url": "https://media1.tenor.com/m/1248oWLmyeIAAAAd/anime-couple.gif",
+        "description": "Аниме-пара вместе на прогулке."
+      },
+      {
+        "preview_url": "https://tenor.com/view/studio-ghibli-gif-26858590",
+        "media_url": "https://media1.tenor.com/m/zsfJdmPMoCcAAAAd/studio-ghibli.gif",
+        "description": "Анимированная пара в цветущем поле."
+      }
+    ],
+    "anniversary": [
+      {
+        "preview_url": "https://tenor.com/view/anime-gif-3531831",
+        "media_url": "https://media1.tenor.com/m/_EsZoq9WICwAAAAd/anime.gif",
+        "description": "Аниме-пара среди цветов."
+      },
+      {
+        "preview_url": "https://tenor.com/view/studio-ghibli-gif-26858590",
+        "media_url": "https://media1.tenor.com/m/zsfJdmPMoCcAAAAd/studio-ghibli.gif",
+        "description": "Анимированная пара в цветущем поле."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hand-holding-gif-14702952937611931388",
+        "media_url": "https://media1.tenor.com/m/zAthzBOlLvwAAAAd/anime-couple-hand-holding.gif",
+        "description": "Аниме-пара держится за руки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/aesthetic-anime-couple-couples-couples-romance-gif-2337746046254879273",
+        "media_url": "https://media1.tenor.com/m/IHFXpKYYkikAAAAd/aesthetic-anime.gif",
+        "description": "Аниме-пара держится за руки на снежном фоне."
+      }
+    ]
+  },
+  "male_female": {
+    "kiss": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-kiss-gif-12997856",
+        "media_url": "https://media1.tenor.com/m/GaTIienSLHMAAAAd/anime-couple.gif",
+        "description": "Аниме-пара: девушка и парень целуются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/kiss-couple-anime-gif-22705238",
+        "media_url": "https://media1.tenor.com/m/4Xfw8ADVYp4AAAAd/kiss-couple.gif",
+        "description": "Аниме-пара целуется, вокруг сердечки."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-kiss-anime-gif-21171309",
+        "media_url": "https://media1.tenor.com/m/HPWDBAuRpAoAAAAd/anime-couple-kiss-anime.gif",
+        "description": "Парень и девушка целуются в аниме-сцене."
+      }
+    ],
+    "hug": [
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319944",
+        "media_url": "https://media1.tenor.com/m/8X6WB7UvCMAAAAAd/anime-couple-hug.gif",
+        "description": "Парень и девушка обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319910",
+        "media_url": "https://media1.tenor.com/m/KTXwwKkWd5MAAAAd/anime-couple-hug.gif",
+        "description": "Аниме-пара обнимается на фоне голубого неба."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21171435",
+        "media_url": "https://media1.tenor.com/m/4D5jSREXInMAAAAd/anime-couple-hug.gif",
+        "description": "Парень в шляпе обнимает девушку."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-gif-21319964",
+        "media_url": "https://media1.tenor.com/m/bYKzqxi3MfMAAAAd/anime-couple.gif",
+        "description": "Милая аниме-сцена объятий парня и девушки."
+      }
+    ],
+    "cuddle": [
+      {
+        "preview_url": "https://tenor.com/view/anime-cuddle-couple-sleep-in-my-arms-gif-17316337",
+        "media_url": "https://media1.tenor.com/m/edCLIQ6xc9IAAAAd/anime-cuddle.gif",
+        "description": "Аниме-пара нежно обнимается."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-hug-cute-cuddle-gif-14898682",
+        "media_url": "https://media1.tenor.com/m/G9yuomdknAsAAAAd/anime-couple.gif",
+        "description": "Девушка отдыхает рядом с парнем."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-cuddle-cute-gif-12668760",
+        "media_url": "https://media1.tenor.com/m/A5ZuMAZ44l8AAAAd/anime-cuddle.gif",
+        "description": "Милая аниме-анимация объятий."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-couple-cuddle-gif-27015841",
+        "media_url": "https://media1.tenor.com/m/1OU9r0OdhLkAAAAd/anime-couple.gif",
+        "description": "Аниме-пара обнимается."
+      }
+    ]
+  },
+  "female_female": {
+    "kiss": [
+      {
+        "preview_url": "https://tenor.com/view/anime-kiss-girl-gif-4699297936810852159",
+        "media_url": "https://media1.tenor.com/m/QTdCk1lWPz8AAAAd/anime-kiss-girl.gif",
+        "description": "Две девушки из аниме целуются."
+      }
+    ],
+    "hug": [
+      {
+        "preview_url": "https://tenor.com/view/hugs-gif-1678648846955360068",
+        "media_url": "https://media1.tenor.com/m/F0vCO4Fkr0QAAAAd/hugs.gif",
+        "description": "Две девушки обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-hug-anime-yuri-gif-10188735499791065864",
+        "media_url": "https://media1.tenor.com/m/jWWo9G91YwgAAAAd/anime-hug-anime.gif",
+        "description": "Две девушки из аниме обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-hug-yuru-yuri-gif-11942972",
+        "media_url": "https://media1.tenor.com/m/wDTx4fVkJsUAAAAd/anime-hug.gif",
+        "description": "Две девушки из аниме обнимаются под зонтом."
+      }
+    ],
+    "cuddle": [
+      {
+        "preview_url": "https://tenor.com/view/hugs-gif-1678648846955360068",
+        "media_url": "https://media1.tenor.com/m/F0vCO4Fkr0QAAAAd/hugs.gif",
+        "description": "Две девушки обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-hug-anime-yuri-gif-10188735499791065864",
+        "media_url": "https://media1.tenor.com/m/jWWo9G91YwgAAAAd/anime-hug-anime.gif",
+        "description": "Две девушки из аниме обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/anime-hug-yuru-yuri-gif-11942972",
+        "media_url": "https://media1.tenor.com/m/wDTx4fVkJsUAAAAd/anime-hug.gif",
+        "description": "Две девушки из аниме обнимаются под зонтом."
+      }
+    ]
+  },
+  "male_male": {
+    "kiss": [
+      {
+        "preview_url": "https://tenor.com/view/boyslove-anime-kiss-gif-27053338",
+        "media_url": "https://media1.tenor.com/m/gHP1W-EifLMAAAAd/boyslove-anime.gif",
+        "description": "Аниме-пара парней: нежный поцелуй."
+      },
+      {
+        "preview_url": "https://tenor.com/view/series-bl-gif-25234156",
+        "media_url": "https://media1.tenor.com/m/NVk2KUbkYRAAAAAd/series-bl.gif",
+        "description": "Два героя из анимации целуются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/kiss-boys-love-thai-bl-couple-sweet-gif-17366865",
+        "media_url": "https://media1.tenor.com/m/95A57etuwzwAAAAd/kiss-boys-love.gif",
+        "description": "Два парня из аниме целуются в лоб."
+      }
+    ],
+    "hug": [
+      {
+        "preview_url": "https://tenor.com/view/love-stage-love-stage-hug-bl-boys-love-gif-3732938995823527333",
+        "media_url": "https://media1.tenor.com/m/M84QPR5DxaUAAAAd/love-stage-love-stage-hug.gif",
+        "description": "Два парня из аниме сидят рядом."
+      },
+      {
+        "preview_url": "https://tenor.com/view/bl-anime-cuddle-boys-love-sweet-gif-17215891",
+        "media_url": "https://media1.tenor.com/m/Cvc7mVa0KyYAAAAd/bl-anime.gif",
+        "description": "Два парня обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/bl-anime-cuddle-dakaretai-otoko1i-ni-odosarete-imasu-takato-saij-gif-17215892",
+        "media_url": "https://media1.tenor.com/m/kdJLfM18VrQAAAAd/bl-anime.gif",
+        "description": "Аниме-пара парней обнимается."
+      },
+      {
+        "preview_url": "https://tenor.com/view/tasogare-twilight-outfocus-out-of-focus-boys-love-gif-4250239955227258700",
+        "media_url": "https://media1.tenor.com/m/OvviuHV-L0wAAAAd/tasogare-twilight.gif",
+        "description": "Два парня из аниме обнимаются."
+      }
+    ],
+    "cuddle": [
+      {
+        "preview_url": "https://tenor.com/view/love-stage-love-stage-hug-bl-boys-love-gif-3732938995823527333",
+        "media_url": "https://media1.tenor.com/m/M84QPR5DxaUAAAAd/love-stage-love-stage-hug.gif",
+        "description": "Два парня из аниме сидят рядом."
+      },
+      {
+        "preview_url": "https://tenor.com/view/bl-anime-cuddle-boys-love-sweet-gif-17215891",
+        "media_url": "https://media1.tenor.com/m/Cvc7mVa0KyYAAAAd/bl-anime.gif",
+        "description": "Два парня обнимаются."
+      },
+      {
+        "preview_url": "https://tenor.com/view/bl-anime-cuddle-dakaretai-otoko1i-ni-odosarete-imasu-takato-saij-gif-17215892",
+        "media_url": "https://media1.tenor.com/m/kdJLfM18VrQAAAAd/bl-anime.gif",
+        "description": "Аниме-пара парней обнимается."
+      },
+      {
+        "preview_url": "https://tenor.com/view/tasogare-twilight-outfocus-out-of-focus-boys-love-gif-4250239955227258700",
+        "media_url": "https://media1.tenor.com/m/OvviuHV-L0wAAAAd/tasogare-twilight.gif",
+        "description": "Два парня из аниме обнимаются."
+      }
+    ],
+    "pat": [
+      {
+        "preview_url": "https://tenor.com/view/cheng-xiaoshi-link-click-shiguang-dailiren-anime-gif-13645261627405157619",
+        "media_url": "https://media1.tenor.com/m/vV21J4jAxPMAAAAd/cheng-xiaoshi-link-click.gif",
+        "description": "Один парень из аниме ласково касается волос другого."
+      }
+    ]
+  }
+}
