@@ -976,10 +976,20 @@ def handle_messages(message):
             bot.reply_to(message, f"✅ Пользователь {user_link} сейчас не находится в ресте! 😸", parse_mode='HTML')
         return
 
-    for pattern, responses in ALWAYS_ACTIVE_PATTERNS.items():
-        if re.search(pattern, text_lower, re.IGNORECASE):
-            bot.reply_to(message, random.choice(responses))
-            break
+    if not text_lower.startswith('/'):
+        _now_pat = time.time()
+        _pat_cache = globals().setdefault('_PATTERN_COOLDOWNS', {})
+        if len(_pat_cache) > 500:
+            _cutoff_pat = _now_pat - 30.0
+            for _k in [k for k, ts in _pat_cache.items() if ts < _cutoff_pat]:
+                _pat_cache.pop(_k, None)
+        for pattern, responses in ALWAYS_ACTIVE_PATTERNS.items():
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                _cd_key = (chat_id, pattern)
+                if _now_pat - _pat_cache.get(_cd_key, 0.0) >= 5.0:
+                    _pat_cache[_cd_key] = _now_pat
+                    bot.reply_to(message, random.choice(responses))
+                break
 
     if text_lower in ['+смехуятинка', 'смехуятинка']:
         if message.reply_to_message:
@@ -1028,7 +1038,7 @@ def handle_messages(message):
         return
 
     # БАНК: пополнение/снятие прямо текстом, без кнопок.
-    m_bank = re.match(r'^(?:банк|депозит|сч[её]т)\\s+(положить|внести|пополнить|снять|вывести)\\s+(\\d+)$', text_lower)
+    m_bank = re.match(r'^(?:банк|депозит|сч[её]т)\s+(положить|внести|пополнить|снять|вывести)\s+(\d+)$', text_lower)
     if m_bank:
         action, amount_raw = m_bank.groups()
         amount = int(amount_raw)

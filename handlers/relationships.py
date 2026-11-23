@@ -182,6 +182,18 @@ def _today():
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def _format_wait(seconds):
+    remaining = max(1, int(math.ceil(float(seconds))))
+    hours, rem = divmod(remaining, 3600)
+    minutes = rem // 60
+    secs = rem % 60
+    if hours:
+        return f"{hours} ч. {minutes} мин." if minutes else f"{hours} ч."
+    if minutes:
+        return f"{minutes} мин. {secs} сек." if secs else f"{minutes} мин."
+    return f"{secs} сек."
+
+
 def _level(total_earned):
     total_earned = _safe_int(total_earned, 0, minimum=0)
     level = 1
@@ -509,7 +521,7 @@ def _get_gif(action_key, pair):
 
 
 def _progress_task(pair, kind, amount=1):
-    task = pair.get("daily_task")
+    task = _ensure_daily_task(pair)
     if not isinstance(task, dict) or task.get("date") != _today() or task.get("claimed"):
         return
     if task.get("kind") == kind:
@@ -575,26 +587,56 @@ def _pair_profile_text(pair, user_id, chat_id):
     gender_labels = {"male": "мужской", "female": "женский", None: "не указан"}
     my_gender = gender_labels.get(_gender(user_id), "не указан")
     partner_gender = gender_labels.get(_gender(partner_id), "не указан")
-    started = datetime.fromtimestamp(float(pair.get("started_at", time.time())), timezone.utc).strftime("%d.%m.%Y")
-    days = max(1, int((time.time() - float(pair.get("started_at", time.time()))) / 86400) + 1)
+    now = time.time()
+    started_ts = float(pair.get("started_at", now))
+    started = datetime.fromtimestamp(started_ts, timezone.utc).strftime("%d.%m.%Y")
+    days = max(1, int((now - started_ts) / 86400) + 1)
     earned = int(pair.get("earned_total", 0) or 0)
     level = _level(earned)
-    house = HOUSES.get(pair.get("house"), {}).get("name", "пока нет")
+    if level >= len(LEVEL_THRESHOLDS):
+        level_note = "макс."
+    else:
+        to_next = max(0, LEVEL_THRESHOLDS[level] - earned)
+        level_note = f"до {level + 1} ур.: {to_next} леп."
+    house_data = HOUSES.get(pair.get("house"))
+    house = f"{house_data['name']} ({house_data['income']}/ч)" if house_data else "пока нет"
     children = pair.get("children", []) if isinstance(pair.get("children"), list) else []
+    extra_lines = []
+    task = pair.get("daily_task")
+    if isinstance(task, dict) and task.get("date") == _today():
+        if task.get("claimed"):
+            task_status = "✅ выполнено"
+        elif int(task.get("progress", 0)) >= int(task.get("target", 1)):
+            task_status = "🎁 готово (отн забрать награду)"
+        else:
+            task_status = f"{int(task.get('progress', 0))}/{int(task.get('target', 1))}"
+        extra_lines.append(f"🎯 Задание дня: <b>{task_status}</b>")
+    family_plan = pair.get("family_plan")
+    if isinstance(family_plan, dict):
+        if family_plan.get("status") == "active":
+            weeks = min(40, max(0, int((now - _safe_timestamp(family_plan.get("started_at"), now)) // 3600)))
+            extra_lines.append(f"🍼 Семейный таймер: <b>{weeks}/40 недель</b>")
+        elif family_plan.get("status") == "pending":
+            extra_lines.append("💌 Семейное планирование: <b>ждёт подтверждения</b>")
+    protection = _safe_timestamp(pair.get("protection_until"), 0)
+    if protection > now:
+        extra_lines.append(f"🛡 Защита активна: <b>ещё {max(1, math.ceil((protection - now) / 3600))} ч.</b>")
+    extra_block = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
     return (
         "💞 <b>ПРОФИЛЬ ОТНОШЕНИЙ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 Вы: {html.escape(str(names.get(int(user_id)) or _user_name(user_id)))} · {my_gender}\n"
         f"💗 Партнёр: {make_link(chat_id, names.get(partner_id) or _user_name(partner_id), partner_id, ping=False)} · {partner_gender}\n"
         f"📅 Вместе с: <b>{started}</b> · <b>{days} дн.</b>\n"
-        f"⭐ Уровень пары: <b>{level}</b>\n"
+        f"⭐ Уровень пары: <b>{level}</b> ({level_note})\n"
         f"🌸 Баланс: <b>{int(pair.get('petals', 0) or 0)} лепестков</b>\n"
         f"🌺 Всего заработано: <b>{earned} лепестков</b>\n"
         f"🏡 Дом: <b>{house}</b>\n"
-        f"👶 Детей: <b>{len(children)}</b>\n"
-        f"🖼 GIF: <b>{'превью-ссылка' if pair.get('gif_mode', 'preview') == 'preview' else 'медиа'}</b>\n"
+        f"👶 Детей: <b>{len(children)}/{MAX_CHILDREN_PER_PAIR}</b>\n"
+        f"🖼 GIF: <b>{'превью-ссылка' if pair.get('gif_mode', 'preview') == 'preview' else 'медиа'}</b>"
+        f"{extra_block}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Команды: <code>отн действия</code>, <code>отн задания</code>, "
+        "Команды: <code>отн действия</code>, <code>отн задания</code>, <code>отн топ</code>, "
         "<code>отн дети</code>, <code>отн планирование</code>, <code>отн дом</code>, <code>отн магазин</code>"
     )
 
@@ -607,24 +649,24 @@ def _help_text():
         "💗 <code>отн принять</code> / <code>отн отказать</code> — ответить на предложение\n"
         "✉️ <code>отн отменить</code> — отменить своё исходящее предложение\n"
         "👤 <code>отн профиль</code> — профиль вашей пары\n"
-        "⚧ <code>отн пол мужчина</code> или <code>отн пол женщина</code> — указать пол для подбора GIF\n"
-        "🎭 <code>отн действия</code> — список доступных RP-действий\n"
-        "🖼 <code>отн гиф превью</code> / <code>отн гиф медиа</code> — карточка со ссылкой или вложенная GIF-анимация\n"
+        "🏆 <code>отн топ</code> — рейтинг лучших пар\n"
+        "⚧ <code>отн пол мужчина</code> / <code>женщина</code> / <code>сбросить</code> — пол для подбора GIF\n"
+        "🎭 <code>отн действия</code> — список RP-действий и их перезарядка\n"
+        "🖼 <code>отн гиф</code> / <code>отн гиф превью</code> / <code>отн гиф медиа</code> — режим GIF\n"
         "🌷 <code>отн сделать комплимент</code> — +15 лепестков раз в час\n"
         "🌸 <code>отн задания</code> / <code>отн забрать награду</code> — ежедневное задание\n"
         "👶 <code>отн планировать ребёнка</code> — предложить совместное семейное планирование\n"
-        "🤝 <code>отн планирование принять</code> / <code>отн планирование отказать</code> — ответить на предложение\n"
+        "🤝 <code>отн планирование принять</code> / <code>отказать</code> / <code>отменить</code> — ответ на предложение\n"
         "🕒 <code>отн беременность</code> / <code>отн родить</code> — статус и завершение игрового семейного таймера (40 часов)\n"
-        "🧸 <code>отн дети</code> / <code>отн ребёнок имя Мира</code> / <code>отн ребёнок забота</code> — воспитывать детей\n"
-        "🛡 <code>отн защита купить</code> / <code>отн контрацептив купить</code> — игровой предмет защиты на 48 часов\n"
+        "🧸 <code>отн дети</code> / <code>отн ребёнок имя Мира</code> / <code>отн ребёнок забота [№/имя]</code> / <code>отн ребёнок переименовать 1 НовоеИмя</code>\n"
+        "🛡 <code>отн защита купить</code> / <code>отн защита снять</code> — игровой предмет защиты на 48 часов\n"
         "👨‍👩‍👧 <code>отн в семью @username</code> или ответом на сообщение — приглашение в семью; <code>отн родить @username</code> — тот же запрос\n"
         "✅ <code>отн принять в семью</code> / <code>отн отказаться от семьи</code> / <code>отн выйти из семьи</code> — управление участием\n"
-        "🏡 <code>отн дом</code> / <code>отн дом купить домик</code> — общий дом\n"
-        "🎁 <code>отн магазин</code> / <code>отн подарок розы</code> — подарки\n"
+        "🏡 <code>отн дом</code> / <code>отн дом купить домик</code> / <code>отн дом улучшить вилла</code> — общий дом и улучшение\n"
+        "🎁 <code>отн магазин</code> / <code>отн подарок розы</code> — магазин подарков\n"
         "📜 <code>отн подарки</code> — история подарков пары\n"
         "📖 <code>отн история</code> — архив завершённых отношений\n"
-        "💔 <code>отн расстаться</code> — запросить завершение отношений\n"
-        "⚠️ <code>отн расстаться подтвердить</code> — подтвердить завершение\n"
+        "💔 <code>отн расстаться</code> / <code>отн расстаться подтвердить</code> / <code>отн расстаться отменить</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Уровень растёт от общего количества заработанных лепестков. Потраченные лепестки не отнимают уровень."
     )
@@ -838,6 +880,45 @@ def _relationship_history(message, user_id):
         _reply(message, "\n".join(lines))
 
 
+def _top_pairs(message, chat_id):
+    with _relationship_transaction():
+        root = _store()
+        active_pairs = []
+        for pair_id, raw_pair in list(root["pairs"].items()):
+            if not isinstance(raw_pair, dict):
+                continue
+            users = [_safe_int(x, 0, minimum=1) for x in raw_pair.get("users", [])]
+            if len(users) != 2:
+                continue
+            pair = _normalize_pair(pair_id, raw_pair)
+            active_pairs.append(copy.deepcopy(pair))
+    if not active_pairs:
+        _reply(message, "🏆 Пока нет активных пар. Создай первую командой <code>отн предложить @username</code>!")
+        return
+    active_pairs.sort(
+        key=lambda p: (
+            -_safe_int(p.get("earned_total"), 0, minimum=0),
+            _safe_timestamp(p.get("started_at"), time.time()),
+        )
+    )
+    now = time.time()
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>ТОП ПАР ПО ОТНОШЕНИЯМ</b>", "━━━━━━━━━━━━━━━━━━━━"]
+    for idx, pair in enumerate(active_pairs[:10], start=1):
+        ids, names = _pair_names(pair)
+        n1 = html.escape(str(names.get(ids[0]) or f"ID:{ids[0]}"))
+        n2 = html.escape(str(names.get(ids[1]) or f"ID:{ids[1]}"))
+        earned = _safe_int(pair.get("earned_total"), 0, minimum=0)
+        lvl = _level(earned)
+        days = max(1, int((now - _safe_timestamp(pair.get("started_at"), now)) / 86400) + 1)
+        house_icon = ""
+        if pair.get("house") in HOUSES:
+            house_icon = f" · {HOUSES[pair['house']]['name'].split()[0]}"
+        badge = medals[idx - 1] if idx <= 3 else f"{idx}."
+        lines.append(f"{badge} <b>{n1}</b> + <b>{n2}</b> — ур. {lvl} · {earned} леп. · {days} дн.{house_icon}")
+    _reply(message, "\n".join(lines))
+
+
 def _valid_media_url(value):
     if not isinstance(value, str) or len(value) > 2048:
         return False
@@ -931,11 +1012,7 @@ def _do_action(message, action_name, user_id, user_name):
         cooldown_key = action.get("cooldown_key") or action_name
         cooldown_until = float(pair.setdefault("cooldowns", {}).get(cooldown_key, 0) or 0)
         if cooldown_until > now:
-            remaining = int(cooldown_until - now)
-            hours, rem = divmod(remaining, 3600)
-            minutes = rem // 60
-            seconds = rem % 60
-            wait = f"{hours} ч. {minutes} мин." if hours else (f"{minutes} мин. {seconds} сек." if minutes else f"{seconds} сек.")
+            wait = _format_wait(cooldown_until - now)
             _reply(message, f"⏳ Это действие пока на перезарядке. Осталось: <b>{wait}</b>.")
             return
         pair["cooldowns"][cooldown_key] = now + int(action["cooldown"])
@@ -979,10 +1056,23 @@ def _actions_list(pair, user_id):
         "путешествие": "ур. 6 · +120 лепестков · раз в 36 ч.",
         "отпраздновать годовщину": "ур. 7 · +180 лепестков · раз в 48 ч.",
     }
+    now = time.time()
+    cooldowns = pair.get("cooldowns", {}) if isinstance(pair.get("cooldowns"), dict) else {}
     for name, description in descriptions.items():
-        required = int(ACTIONS[name]["level"])
-        marker = "✅" if level >= required else "🔒"
-        lines.append(f"{marker} <code>отн {name}</code> — {description}")
+        action_cfg = ACTIONS[name]
+        required = int(action_cfg["level"])
+        cd_key = action_cfg.get("cooldown_key") or name
+        cd_until = _safe_timestamp(cooldowns.get(cd_key), 0)
+        if level < required:
+            marker = "🔒"
+            cd_note = ""
+        elif cd_until > now:
+            marker = "⏳"
+            cd_note = f" · ещё {_format_wait(cd_until - now)}"
+        else:
+            marker = "✅"
+            cd_note = ""
+        lines.append(f"{marker} <code>отн {name}</code> — {description}{cd_note}")
     if level >= len(LEVEL_THRESHOLDS):
         lines.append(f"\nТекущий уровень: <b>{level}</b> · достигнут максимальный уровень.")
     else:
@@ -1081,22 +1171,57 @@ def _children_command(message, pair, user_id, command):
         _reply(message, f"🎉 В семье пополнение! Добро пожаловать, <b>{html.escape(child_name)}</b>. Потрачено 80 лепестков на семейные расходы. Используйте <code>отн дети</code> и <code>отн ребёнок забота</code>.")
         return
 
+    if lower.startswith("переименовать"):
+        if not children:
+            _reply(message, "У пары пока нет детей.")
+            return
+        rest = normalized[len("переименовать"):].strip()
+        parts = rest.split(" ", 1)
+        if len(parts) < 2 or not parts[0].isdigit():
+            _reply(message, "Формат: <code>отн ребёнок переименовать 1 НовоеИмя</code>.")
+            return
+        index = int(parts[0]) - 1
+        if index < 0 or index >= len(children):
+            _reply(message, "Такого ребёнка нет. Посмотри список: <code>отн дети</code>.")
+            return
+        child = children[index]
+        if child.get("member_id"):
+            _reply(message, "Нельзя переименовать приглашённого участника семьи.")
+            return
+        clean_name = re.sub(r"[<>\x00-\x1f\x7f]", "", parts[1])[:32].strip()
+        if not clean_name:
+            _reply(message, "Укажи корректное новое имя: <code>отн ребёнок переименовать 1 Мира</code>.")
+            return
+        old_name = str(child.get("name") or "Ребёнок")
+        child["name"] = clean_name
+        mark_dirty()
+        _reply(message, f"✅ Ребёнок <b>{html.escape(old_name)}</b> переименован в <b>{html.escape(clean_name)}</b>.")
+        return
+
     if lower.startswith("забота"):
         if not children:
             _reply(message, "У пары пока нет детей. Начните с <code>отн планировать ребёнка</code>.")
             return
-        try:
-            index = int(lower[len("забота"):].strip() or "1") - 1
-        except ValueError:
+        selector = normalized[len("забота"):].strip()
+        index = None
+        if not selector:
             index = 0
-        if index < 0 or index >= len(children):
-            _reply(message, "Такого ребёнка нет. Посмотри список: <code>отн дети</code>.")
+        elif selector.isdigit():
+            index = int(selector) - 1
+        else:
+            sel_lower = selector.lower()
+            for idx, item in enumerate(children):
+                if isinstance(item, dict) and str(item.get("name", "")).strip().lower() == sel_lower:
+                    index = idx
+                    break
+        if index is None or index < 0 or index >= len(children):
+            _reply(message, "Такого ребёнка нет. Укажи номер или имя из списка: <code>отн дети</code>.")
             return
         child = children[index]
         now = time.time()
         remaining = float(child.get("last_care_at", 0) or 0) + 43200 - now
         if remaining > 0:
-            _reply(message, f"🧸 Ребёнку пока хватает заботы. Попробуйте через {max(1, int(remaining // 3600))} ч.")
+            _reply(message, f"🧸 Ребёнку пока хватает заботы. Попробуйте через <b>{_format_wait(remaining)}</b>.")
             return
         child["happiness"] = min(100, int(child.get("happiness", 50)) + 15)
         child["last_care_at"] = now
@@ -1108,7 +1233,7 @@ def _children_command(message, pair, user_id, command):
     lines = ["👶 <b>ДЕТИ ВАШЕЙ ПАРЫ</b>", "━━━━━━━━━━━━━━━━━━━━"]
     if not children:
         lines.append("Пока детей нет. Команда: <code>отн планировать ребёнка</code>.")
-    for child in children:
+    for idx, child in enumerate(children, start=1):
         if not isinstance(child, dict):
             continue
         if child.get("member_id"):
@@ -1128,7 +1253,7 @@ def _children_command(message, pair, user_id, command):
                 stage = "взрослый"
         age_text = "" if age_days is None else f" · возраст {age_days} дн."
         lines.append(
-            f"• <b>{html.escape(str(child.get('name', 'Ребёнок')))}</b> · {stage}{age_text} · "
+            f"{idx}. <b>{html.escape(str(child.get('name', 'Ребёнок')))}</b> · {stage}{age_text} · "
             f"счастье {_safe_int(child.get('happiness'), 50, minimum=0, maximum=100)}/100"
         )
 
@@ -1399,18 +1524,41 @@ def _respond_family_invite(message, user_id, accept):
 
 
 def _house_command(message, pair, command):
-    _calculate_house_income(pair)
-    if command.startswith("купить"):
-        key = command[len("купить"):].strip().lower()
+    accrued = _calculate_house_income(pair)
+    is_buy = command.startswith("купить")
+    is_upgrade = command.startswith("улучшить")
+    if is_buy or is_upgrade:
+        prefix = "купить" if is_buy else "улучшить"
+        key = command[len(prefix):].strip().lower()
         if key not in HOUSES:
             _reply(message, "Выбери дом: " + ", ".join(f"<code>{k}</code> ({v['price']} лепестков)" for k, v in HOUSES.items()))
             return
-        if pair.get("house"):
-            _reply(message, "У пары уже есть дом. Второй дом пока нельзя купить.")
-            return
         house = HOUSES[key]
+        current_key = pair.get("house")
+        if current_key in HOUSES:
+            current_house = HOUSES[current_key]
+            if key == current_key:
+                _reply(message, f"У пары уже есть <b>{current_house['name']}</b>.")
+                return
+            if int(house["price"]) <= int(current_house["price"]):
+                _reply(message, "Нельзя перейти на дом такого же или более низкого класса. Выбери дом получше для улучшения.")
+                return
+            upgrade_cost = int(house["price"]) - int(current_house["price"])
+            if int(pair.get("petals", 0) or 0) < upgrade_cost:
+                _reply(message, f"Для улучшения до <b>{house['name']}</b> нужна доплата <b>{upgrade_cost} лепестков</b> (у вас: {int(pair.get('petals', 0) or 0)}).")
+                return
+            pair["petals"] = int(pair.get("petals", 0)) - upgrade_cost
+            pair["house"] = key
+            pair["last_house_income_at"] = time.time()
+            mark_dirty()
+            _reply(
+                message,
+                f"🏡 Дом улучшен до <b>{house['name']}</b>! Доплата: {upgrade_cost} лепестков.\n"
+                f"Новый доход: <b>{house['income']} лепестков/час</b> (максимум за 72 часа офлайн).",
+            )
+            return
         if int(pair.get("petals", 0) or 0) < int(house["price"]):
-            _reply(message, f"Для покупки нужно {house['price']} лепестков.")
+            _reply(message, f"Для покупки нужно {house['price']} лепестков (у вас: {int(pair.get('petals', 0) or 0)}).")
             return
         pair["petals"] = int(pair.get("petals", 0)) - int(house["price"])
         pair["house"] = key
@@ -1421,9 +1569,30 @@ def _house_command(message, pair, command):
     house_id = pair.get("house")
     if house_id in HOUSES:
         house = HOUSES[house_id]
-        _reply(message, f"🏡 <b>Дом пары</b>\n{house['name']}\nДоход: {house['income']} лепестков/час\nБаланс: {int(pair.get('petals', 0))} лепестков.")
+        lines = [
+            "🏡 <b>Дом пары</b>",
+            f"{house['name']}",
+            f"Доход: <b>{house['income']} лепестков/час</b>",
+            f"Баланс: <b>{int(pair.get('petals', 0))} лепестков</b>",
+        ]
+        if accrued:
+            lines.append(f"✨ Начислено за простой: +<b>{accrued} лепестков</b>")
+        upgrades = [
+            (k, v, int(v["price"]) - int(house["price"]))
+            for k, v in HOUSES.items()
+            if int(v["price"]) > int(house["price"])
+        ]
+        if upgrades:
+            lines.append("\n⬆️ <b>Доступные улучшения (с зачётом текущего дома):</b>")
+            for k, v, diff in upgrades:
+                lines.append(f"• <code>отн дом улучшить {k}</code> — {v['name']} · доплата {diff} леп. · {v['income']}/ч")
+        _reply(message, "\n".join(lines))
     else:
-        lines = ["🏡 <b>ДОМА ДЛЯ ПАРЫ</b>"]
+        lines = [
+            "🏡 <b>ДОМА ДЛЯ ПАРЫ</b>",
+            f"🌸 Баланс пары: <b>{int(pair.get('petals', 0) or 0)} лепестков</b>",
+            "━━━━━━━━━━━━━━━━━━━━",
+        ]
         for key, house in HOUSES.items():
             lines.append(f"• <code>отн дом купить {key}</code> — {house['name']} · {house['price']} лепестков · {house['income']}/ч")
         _reply(message, "\n".join(lines))
@@ -1446,28 +1615,37 @@ def _shop_command(message, pair, command):
         _reply(message, "\n".join(lines))
         return
     gifts = {
-        "розы": {"name": "🌹 Букет роз", "price": 20},
         "шоколад": {"name": "🍫 Коробка шоколада", "price": 15},
+        "розы": {"name": "🌹 Букет роз", "price": 20},
+        "торт": {"name": "🎂 Торт на двоих", "price": 30},
         "мишку": {"name": "🧸 Плюшевый мишка", "price": 45},
+        "духи": {"name": "🌸 Флакон духов", "price": 65},
         "украшение": {"name": "💎 Украшение", "price": 90},
+        "кольцо": {"name": "💍 Парные кольца", "price": 150},
+        "звезда": {"name": "🌠 Звезда с неба", "price": 250},
     }
     if command.startswith("подарок"):
         gift_key = command[len("подарок"):].strip().lower()
         if gift_key not in gifts:
-            _reply(message, "Укажи подарок: <code>отн подарок розы</code>, <code>шоколад</code>, <code>мишку</code> или <code>украшение</code>.")
+            options = ", ".join(f"<code>{k}</code>" for k in gifts)
+            _reply(message, f"Укажи подарок: <code>отн подарок розы</code>. Доступно: {options}.")
             return
         gift = gifts[gift_key]
         if int(pair.get("petals", 0) or 0) < gift["price"]:
-            _reply(message, f"Не хватает лепестков. Нужно {gift['price']}.")
+            _reply(message, f"Не хватает лепестков. Нужно {gift['price']} (у вас: {int(pair.get('petals', 0) or 0)}).")
             return
         pair["petals"] = int(pair.get("petals", 0)) - int(gift["price"])
         gift_history = pair.setdefault("gifts", [])
         gift_history.append({"name": gift["name"], "by": int(message.from_user.id), "at": time.time()})
         del gift_history[:-MAX_GIFT_HISTORY]
         mark_dirty()
-        _reply(message, f"🎁 Вы подарили паре: <b>{gift['name']}</b>! Подарок сохранён в истории пары.")
+        _reply(message, f"🎁 Вы подарили паре: <b>{gift['name']}</b>! Подарок сохранён в истории пары. Остаток: <b>{pair['petals']} лепестков</b>.")
         return
-    lines = ["🎁 <b>МАГАЗИН ОТНОШЕНИЙ</b>", "━━━━━━━━━━━━━━━━━━━━"]
+    lines = [
+        "🎁 <b>МАГАЗИН ОТНОШЕНИЙ</b>",
+        f"🌸 Баланс пары: <b>{int(pair.get('petals', 0) or 0)} лепестков</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
     for key, gift in gifts.items():
         lines.append(f"• <code>отн подарок {key}</code> — {gift['name']} · {gift['price']} лепестков")
     _reply(message, "\n".join(lines))
@@ -1480,7 +1658,7 @@ def handle_relationship_commands(message):
     match = re.match(r"^отн(?:\s+(.*))?$", raw, flags=re.IGNORECASE)
     if not match:
         return
-    args = (match.group(1) or "").strip()
+    args = re.sub(r"\s+", " ", (match.group(1) or "").strip())
     user_id = _safe_int(getattr(message.from_user, "id", 0), 0, minimum=1)
     if not user_id:
         return
@@ -1502,10 +1680,12 @@ def handle_relationship_commands(message):
         _accept_proposal(message, user_id, user_name)
         return
     if command == "отказать":
+        removed = False
         with _relationship_transaction():
-            _store()["pending"].pop(str(user_id), None)
-            mark_dirty()
-        _reply(message, "Предложение отклонено.")
+            if _store()["pending"].pop(str(user_id), None) is not None:
+                removed = True
+                mark_dirty()
+        _reply(message, "Предложение отклонено." if removed else "💌 У тебя нет входящего предложения отношений.")
         return
     if command == "принять в семью" or command == "отказаться от семьи":
         with _relationship_transaction():
@@ -1527,11 +1707,27 @@ def handle_relationship_commands(message):
                 mark_dirty()
         _reply(message, "✅ Исходящее предложение отменено." if removed else "У тебя нет исходящих предложений.")
         return
+    if command == "расстаться отменить":
+        with _relationship_transaction():
+            pair = _pair_for(user_id)
+            if not pair:
+                _reply(message, "У тебя сейчас нет отношений.")
+                return
+            if not isinstance(pair.get("breakup_confirmation"), dict):
+                _reply(message, "Активного запроса на расставание сейчас нет.")
+                return
+            pair["breakup_confirmation"] = None
+            mark_dirty()
+            _reply(message, "💗 Запрос на расставание отменён. Пара остаётся вместе!")
+        return
     if command in {"расстаться", "расстаться подтвердить"}:
         _end_relationship(message, user_id, confirm=(command == "расстаться подтвердить"))
         return
     if command == "история":
         _relationship_history(message, user_id)
+        return
+    if command in {"топ", "рейтинг"}:
+        _top_pairs(message, message.chat.id)
         return
     if command == "пол" or command.startswith("пол "):
         value = command[len("пол"):].strip()
@@ -1541,8 +1737,15 @@ def handle_relationship_commands(message):
         elif value in {"женщина", "женский", "девушка", "ж"}:
             gender = "female"
             label = "женский"
+        elif value in {"сбросить", "убрать", "нет"}:
+            with _relationship_transaction():
+                econ = get_user_econ(user_id=user_id, username=getattr(message.from_user, "username", None))
+                econ["relationship_gender"] = None
+                mark_dirty()
+            _reply(message, "✅ Пол сброшен. Для пары будет использоваться универсальный набор GIF.")
+            return
         else:
-            _reply(message, "Укажи: <code>отн пол мужчина</code> или <code>отн пол женщина</code>.")
+            _reply(message, "Укажи: <code>отн пол мужчина</code>, <code>отн пол женщина</code> или <code>отн пол сбросить</code>.")
             return
         with _relationship_transaction():
             econ = get_user_econ(user_id=user_id, username=getattr(message.from_user, "username", None))
@@ -1551,11 +1754,15 @@ def handle_relationship_commands(message):
         _reply(message, f"✅ Пол сохранён как {label}. Для пары будут подбираться соответствующие GIF, когда они добавлены в каталог.")
         return
 
-    if command in {"гиф превью", "гиф медиа"}:
+    if command in {"гиф", "гиф превью", "гиф медиа"}:
         with _relationship_transaction():
             pair = _pair_for(user_id)
             if not pair:
                 _reply(message, "Для настройки GIF сначала нужны отношения.")
+                return
+            if command == "гиф":
+                mode_label = "превью-ссылка" if pair.get("gif_mode", "preview") == "preview" else "медиа"
+                _reply(message, f"🖼 Текущий режим GIF: <b>{mode_label}</b>.\nПереключить: <code>отн гиф превью</code> или <code>отн гиф медиа</code>.")
                 return
             pair["gif_mode"] = "preview" if command.endswith("превью") else "media"
             mark_dirty()
@@ -1592,16 +1799,27 @@ def handle_relationship_commands(message):
         return
 
     if command in {"профиль", "пара"}:
+        family_note = ""
         with _relationship_transaction():
             pair = _pair_for(user_id)
             if pair:
+                if pair.setdefault("names", {}).get(str(user_id)) != user_name:
+                    pair["names"][str(user_id)] = user_name
+                    mark_dirty()
                 _calculate_house_income(pair)
                 _ensure_daily_task(pair)
                 pair_snapshot = copy.deepcopy(pair)
             else:
                 pair_snapshot = None
+                root = _store()
+                fam_pair_id = root["family_members"].get(str(user_id))
+                fam_pair = root["pairs"].get(str(fam_pair_id)) if fam_pair_id else None
+                if isinstance(fam_pair, dict):
+                    _, fam_names = _pair_names(fam_pair)
+                    parents = " и ".join(html.escape(str(n)) for n in fam_names.values())
+                    family_note = f"\n\n👨‍👩‍👧 Ты состоишь в игровой семье пары: <b>{parents}</b>. Выйти: <code>отн выйти из семьи</code>."
         if not pair_snapshot:
-            _reply(message, "💔 У тебя пока нет отношений. Начать можно командой <code>отн предложить @username</code>.")
+            _reply(message, f"💔 У тебя пока нет отношений. Начать можно командой <code>отн предложить @username</code>.{family_note}")
             return
         _reply(message, _pair_profile_text(pair_snapshot, user_id, message.chat.id))
         return
@@ -1643,6 +1861,11 @@ def handle_relationship_commands(message):
                 if not pair:
                     _reply(message, "Пригласить участника в семью могут только участники пары.")
                     return
+                has_reply = bool(getattr(message, "reply_to_message", None) and getattr(message.reply_to_message, "from_user", None))
+                plan = pair.get("family_plan")
+                if not has_reply and not raw_target.startswith("@") and not raw_target.isdigit() and isinstance(plan, dict) and plan.get("status") == "active":
+                    _reply(message, f"Чтобы задать имя будущего ребёнка, используй <code>отн ребёнок имя {html.escape(raw_target[:32])}</code>. А чтобы завершить таймер, просто напиши <code>отн родить</code>.")
+                    return
                 _invite_family_member(message, pair, user_id, raw_target)
             return
         elif command == "родить":
@@ -1656,7 +1879,7 @@ def handle_relationship_commands(message):
             _children_command(message, pair, user_id, child_command)
         return
 
-    if command in {"дом", "дом купить"} or command.startswith("дом купить "):
+    if command in {"дом", "дом купить", "дом улучшить"} or command.startswith(("дом купить ", "дом улучшить ")):
         with _relationship_transaction():
             pair = _pair_for(user_id)
             if not pair:
