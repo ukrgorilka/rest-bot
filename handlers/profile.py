@@ -81,10 +81,10 @@ def cmd_biometry(message):
     text = card(
         "📊 <b>Биометрия и замеры</b>",
         body=[
-            f"🍆 Писюн: <b>{econ.get('dick_size',15)} см</b> · 💦 Фап: <b>{econ.get('fap_count',0)}</b>",
+            f"🍆 Писюн: <b>{econ.get('dick_size',15)} см</b> · 🍒 Сиськи: <b>{econ.get('boobs_size',2)} разм.</b>",
+            f"💦 Фап: <b>{econ.get('fap_count',0)}</b> · 😎 Могнул: <b>{econ.get('mog_count',0)}</b> раз(а)",
             f"🧬 Хромосомы: <b>{econ.get('chromosomes',46)}</b> · 🧠 IQ: <b>{econ.get('iq',100)}</b>",
             f"🥩 Жир: <b>{econ.get('fat',20)}%</b> · 🦶 Пятка: <b>{econ.get('foot_size',25)} см</b>",
-            f"😎 Могнул: <b>{econ.get('mog_count',0)}</b> раз(а)",
         ],
         footer="<i>Здесь собраны биометрия и симулятор Могера.</i>",
     )

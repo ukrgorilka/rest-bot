@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 from core.locks import serialize_user_action
 from core.ui import card, format_duration, progress_bar
@@ -69,6 +70,7 @@ HOUSES = {
 }
 
 GIF_DATA = None
+_TENOR_MEDIA_CACHE = {}
 
 
 def _inject(ctx):
@@ -259,7 +261,7 @@ def _normalize_pair(pair_id, pair):
     set_value("level", _level(pair.get("earned_total", 0)))
 
     gif_mode = pair.get("gif_mode")
-    set_value("gif_mode", gif_mode if gif_mode in {"preview", "media"} else "preview")
+    set_value("gif_mode", gif_mode if gif_mode in {"preview", "media"} else "media")
 
     protection_until = _safe_timestamp(pair.get("protection_until"), 0)
     set_value("protection_until", protection_until)
@@ -375,6 +377,17 @@ def _normalize_pair(pair_id, pair):
     set_value("streak", _safe_int(pair.get("streak"), 0, minimum=0))
     last_streak = str(pair.get("last_streak_date") or "")[:10]
     set_value("last_streak_date", last_streak)
+    set_value("condom_enabled", bool(pair.get("condom_enabled", False)))
+    sex_inv = pair.get("sex_invite")
+    if isinstance(sex_inv, dict):
+        s_by = _safe_int(sex_inv.get("by"), 0, minimum=1)
+        s_exp = _safe_timestamp(sex_inv.get("expires_at"), 0)
+        if not s_by or not s_exp or time.time() >= s_exp:
+            set_value("sex_invite", None)
+        else:
+            set_value("sex_invite", {"by": s_by, "expires_at": s_exp})
+    elif sex_inv is not None:
+        set_value("sex_invite", None)
 
     if changed:
         mark_dirty()
@@ -500,7 +513,16 @@ def _get_gif(action_key, pair):
     generic_assets = data.get("generic", {})
     if not isinstance(generic_assets, dict):
         generic_assets = {}
-    candidates = assets.get(action_key) or generic_assets.get(action_key) or []
+    custom_root = (db.get("relationships", {}) if isinstance(globals().get("db"), dict) else {}).get("custom_gifs", {})
+    custom_pair = custom_root.get(pair_type, {}).get(action_key, []) if isinstance(custom_root, dict) else []
+    custom_gen = custom_root.get("generic", {}).get(action_key, []) if isinstance(custom_root, dict) else []
+    auto_root = data.get("auto_resolve", {}) if isinstance(data.get("auto_resolve"), dict) else {}
+    auto_pair = auto_root.get(pair_type, {}).get(action_key, []) if isinstance(auto_root.get(pair_type), dict) else []
+    auto_gen = auto_root.get("generic", {}).get(action_key, []) if isinstance(auto_root.get("generic"), dict) else []
+    base_candidates = assets.get(action_key) or generic_assets.get(action_key) or []
+    if isinstance(base_candidates, (str, dict)):
+        base_candidates = [base_candidates]
+    candidates = list(custom_pair) + list(custom_gen) + list(auto_pair) + list(auto_gen) + list(base_candidates)
     if isinstance(candidates, (str, dict)):
         candidates = [candidates]
     if not isinstance(candidates, list):
@@ -522,6 +544,9 @@ def _get_gif(action_key, pair):
                 return {"url": media_url, "mode": "media"}
             if selected.get("file_id"):
                 return selected
+            preview_url = selected.get("preview_url") or selected.get("url")
+            if preview_url:
+                return {"url": preview_url, "mode": "media", "resolve_tenor": True}
         preview_url = selected.get("preview_url") or selected.get("url")
         if preview_url:
             return {
@@ -652,8 +677,10 @@ def _pair_profile_text(pair, user_id, chat_id):
         elif family_plan.get("status") == "pending":
             extra_lines.append("💌 Семейное планирование: <b>ждёт подтверждения</b>")
     protection = _safe_timestamp(pair.get("protection_until"), 0)
+    condom_on = bool(pair.get("condom_enabled", False)) or (protection > now)
+    extra_lines.append(f"🛡 Презик: <b>{'включён' if condom_on else 'выключен'}</b> (<code>отн презик</code>)")
     if protection > now:
-        extra_lines.append(f"🛡 Защита активна: <b>ещё {max(1, math.ceil((protection - now) / 3600))} ч.</b>")
+        extra_lines.append(f"🛡 Защита (48ч): <b>ещё {max(1, math.ceil((protection - now) / 3600))} ч.</b>")
     extra_block = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
     if level >= len(LEVEL_THRESHOLDS):
         lvl_bar = progress_bar(1, 1, width=8)
@@ -697,6 +724,8 @@ def _help_text():
             "👶 <code>отн планировать ребёнка</code> · <code>отн планирование принять</code> / <code>отказать</code> / <code>отменить</code>",
             "🕒 <code>отн беременность</code> · <code>отн родить</code>",
             "🧸 <code>отн дети</code> · <code>отн ребёнок имя Мира</code> · <code>отн ребёнок забота [№/имя]</code> · <code>отн ребёнок переименовать 1 Имя</code>",
+            "🔥 <code>отн секс</code> — близость с партнёром (шанс на ребёнка, если презик выключен)",
+            "🛡 <code>отн презик</code> / <code>вкл</code> / <code>выкл</code> — включить или выключить защиту",
             "🛡 <code>отн защита купить</code> / <code>отн защита снять</code>",
             "👨‍👩‍👧 <code>отн в семью @username</code> · <code>отн принять в семью</code> / <code>отказаться от семьи</code> / <code>выйти из семьи</code>",
             "🏡 <code>отн дом</code> · <code>отн дом купить домик</code> · <code>отн дом улучшить вилла</code>",
@@ -837,7 +866,7 @@ def _accept_proposal(message, user_id, user_name):
             "names": {str(from_id): str(pending.get("from_name") or _user_name(from_id)), str(user_id): user_name},
             "started_at": time.time(), "petals": 0, "earned_total": 0, "level": 1,
             "cooldowns": {}, "children": [], "house": None, "last_house_income_at": time.time(),
-            "gifts": [], "daily_task": None, "gif_mode": "preview", "protection_until": 0,
+            "gifts": [], "daily_task": None, "gif_mode": "media", "protection_until": 0,
             "family_plan": None,
         }
         root["pairs"][pair_id] = pair
@@ -1020,6 +1049,26 @@ def _valid_media_url(value):
         return False
 
 
+def _resolve_tenor_media_url(page_url):
+    # Resolve a https://tenor.com/view/... page to its direct media1.tenor.com .gif URL and cache it.
+    if not _valid_media_url(page_url):
+        return None
+    if page_url in _TENOR_MEDIA_CACHE:
+        return _TENOR_MEDIA_CACHE[page_url]
+    try:
+        req = Request(page_url, headers={"User-Agent": "Mozilla/5.0 (compatible; NyaBot/1.1)"})
+        with urlopen(req, timeout=6) as resp:
+            body = resp.read(200_000).decode("utf-8", errors="ignore")
+        m = re.search(r"https://media1?\.tenor\.com/m/[^\"'\s<>]+\.gif", body)
+        if m and _valid_media_url(m.group(0)):
+            resolved = m.group(0)
+            _TENOR_MEDIA_CACHE[page_url] = resolved
+            return resolved
+    except Exception:
+        return None
+    return None
+
+
 def _send_action_media(message, asset, caption):
     """Send an animation file_id/direct media URL or a clickable page preview."""
     if isinstance(asset, dict):
@@ -1037,10 +1086,20 @@ def _send_action_media(message, asset, caption):
         if not _valid_media_url(url):
             raise ValueError("GIF catalog entry must contain a valid http(s) url or Telegram file_id")
         asset = url.strip()
+        if mode == "media" and asset_data.get("resolve_tenor"):
+            resolved = _resolve_tenor_media_url(asset)
+            if resolved:
+                bot.send_animation(
+                    message.chat.id, resolved, caption=caption, parse_mode="HTML",
+                    reply_to_message_id=message.message_id,
+                )
+                return
+            # Fallback to hidden-link preview if Tenor resolution fails temporarily
+            mode = "preview"
         if mode == "preview":
             try:
                 bot.send_message(
-                    message.chat.id, f"{caption}\n{html.escape(asset)}",
+                    message.chat.id, f'{caption}<a href="{html.escape(asset)}">&#8203;</a>',
                     parse_mode="HTML", disable_web_page_preview=False,
                     reply_to_message_id=message.message_id,
                 )
@@ -1497,6 +1556,124 @@ def _protection_command(message, pair, command):
         _reply(message, f"Защита не активна. Купить игровую защиту на 48 часов можно за {PROTECTION_COST} лепестков: <code>отн защита купить</code>.")
 
 
+def _is_pair_protected(pair, now=None):
+    now = time.time() if now is None else now
+    return bool(pair.get("condom_enabled", False)) or (_safe_timestamp(pair.get("protection_until"), 0) > now)
+
+
+def _condom_command(message, pair, user_id, mode=""):
+    mode = str(mode or "").strip().lower()
+    current = bool(pair.get("condom_enabled", False))
+    if mode in {"вкл", "включить", "on", "да"}:
+        new_state = True
+    elif mode in {"выкл", "выключить", "снять", "off", "нет"}:
+        new_state = False
+    else:
+        new_state = not current
+    pair["condom_enabled"] = new_state
+    mark_dirty()
+    btn_label = "🔥 Выключить презик" if new_state else "🛡 Включить презик"
+    markup = _make_inline_markup([[(btn_label, f"rel:condom:toggle:{user_id}")]])
+    if new_state:
+        text = card(
+            "🛡 <b>Презик включён</b>",
+            body="Теперь при <code>отн секс</code> шанса на появление ребёнка не будет — только +15 лепестков и хорошее настроение 😏",
+            footer="Выключить: <code>отн презик выкл</code> или кнопкой ниже.",
+        )
+    else:
+        text = card(
+            "🔥 <b>Презик выключен</b>",
+            body="Теперь при <code>отн секс</code> есть <b>40% шанс</b> запустить 40-часовой таймер появления ребёнка!",
+            footer="Включить обратно: <code>отн презик вкл</code> или кнопкой ниже.",
+        )
+    _reply_with_markup(message, text, markup)
+
+
+def _resolve_sex_action(message, pair, accepter_id):
+    now = time.time()
+    cd_until = float(pair.setdefault("cooldowns", {}).get("sex", 0) or 0)
+    if cd_until > now:
+        return f"⏳ Перезарядка ещё <b>{_format_wait(cd_until - now)}</b>."
+    pair["cooldowns"]["sex"] = now + 3600
+    pair["sex_invite"] = None
+    _credit(pair, 15)
+    _progress_task(pair, "actions", 1)
+    streak_days, streak_bonus = _update_pair_streak(pair)
+    ids, names = _pair_names(pair)
+    n1 = html.escape(str(names.get(ids[0]) or f"ID:{ids[0]}"))
+    n2 = html.escape(str(names.get(ids[1]) or f"ID:{ids[1]}"))
+
+    protected = _is_pair_protected(pair, now)
+    body = [f"🔥 <b>{n1}</b> и <b>{n2}</b> отлично провели время вместе!", "🌸 Пара получает <b>+15 лепестков</b>."]
+    if streak_bonus:
+        body.append(f"🔥 Стрик пары {streak_days} дн.: <b>+{streak_bonus} лепестков</b>!")
+
+    if protected:
+        body.append("🛡 Презик на месте — никаких сюрпризов, всё под контролем 😏")
+    else:
+        has_active_plan = isinstance(pair.get("family_plan"), dict) and pair["family_plan"].get("status") == "active"
+        has_room = len(pair.get("children", [])) < MAX_CHILDREN_PER_PAIR
+        if has_room and not has_active_plan and random.random() < 0.40:
+            pair["family_plan"] = {
+                "status": "active",
+                "started_at": now,
+                "due_at": now + PREGNANCY_DURATION_SECONDS,
+                "child_name": "",
+            }
+            body.append("🍼 <b>Сюрприз!</b> Презик был выключен — пара ждёт пополнение! Запущен таймер <b>40 недель (40 ч.)</b>.")
+            body.append("Проверить срок: <code>отн беременность</code> · Задать имя: <code>отн ребёнок имя Мира</code>")
+        else:
+            body.append("😏 Презик был выключен, но на этот раз без пополнения.")
+    mark_dirty()
+    return card("🔥 <b>Близость пары</b>", body=body, footer="Переключить защиту: <code>отн презик</code>")
+
+
+def _sex_command(message, pair, user_id, subcmd=""):
+    now = time.time()
+    sub = str(subcmd or "").strip().lower()
+    inv = pair.get("sex_invite")
+
+    if sub in {"принять", "да", "давай"}:
+        if not isinstance(inv, dict) or _safe_timestamp(inv.get("expires_at"), 0) <= now:
+            pair["sex_invite"] = None
+            _reply(message, "Активного предложения нет. Напиши <code>отн секс</code>.")
+            return
+        if _safe_int(inv.get("by"), 0) == int(user_id):
+            _reply(message, "Подтвердить должен второй партнёр 😏")
+            return
+        _reply(message, _resolve_sex_action(message, pair, user_id))
+        return
+
+    if sub in {"отказать", "нет", "отмена"}:
+        pair["sex_invite"] = None
+        mark_dirty()
+        _reply(message, "🙅 Не в этот раз — предложение отменено.")
+        return
+
+    cd_until = float(pair.setdefault("cooldowns", {}).get("sex", 0) or 0)
+    if cd_until > now:
+        _reply(message, f"⏳ Перезарядка ещё <b>{_format_wait(cd_until - now)}</b>.")
+        return
+
+    partner_id = _partner_id(pair, user_id)
+    ids, names = _pair_names(pair)
+    actor_name = html.escape(str(names.get(int(user_id)) or _user_name(user_id)))
+    partner_name = html.escape(str(names.get(partner_id) or _user_name(partner_id)))
+    pair["sex_invite"] = {"by": int(user_id), "expires_at": now + 300}
+    mark_dirty()
+    prot_note = "🛡 Презик: <b>включён</b> (без шанса на ребёнка)" if _is_pair_protected(pair, now) else "🔥 Презик: <b>выключен</b> (шанс 40% на ребёнка)"
+    markup = _make_inline_markup([[("🔥 Давай", f"rel:sex:acc:{partner_id}"), ("🙅 Не сейчас", f"rel:sex:rej:{partner_id}")]])
+    _reply_with_markup(
+        message,
+        card(
+            "🔥 <b>Приглашение уединиться</b>",
+            body=[f"<b>{actor_name}</b> зовёт <b>{partner_name}</b> уединиться 😏", prot_note],
+            footer="Партнёр может нажать кнопку ниже или написать <code>отн секс принять</code> (5 минут).",
+        ),
+        markup,
+    )
+
+
 def _leave_family(message, user_id):
     root = _store()
     key = str(int(user_id))
@@ -1839,6 +2016,31 @@ def handle_relationship_commands(message):
         _reply(message, f"✅ Пол сохранён как {label}. Для пары будут подбираться соответствующие GIF, когда они добавлены в каталог.")
         return
 
+    if command.startswith("гиф сохранить"):
+        is_owner = (int(user_id) == _safe_int(globals().get("ADMIN_ID"), 0))
+        if not is_owner:
+            _reply(message, "❌ Сохранять свои GIF в каталог может только владелец бота.")
+            return
+        reply_msg = getattr(message, "reply_to_message", None)
+        anim = getattr(reply_msg, "animation", None) if reply_msg else None
+        if not anim or not getattr(anim, "file_id", None):
+            _reply(message, "Ответь этой командой на нужную GIF-анимацию: <code>отн гиф сохранить жж kiss</code> (категории: <code>мж</code>, <code>жж</code>, <code>мм</code>, <code>все</code>).")
+            return
+        parts = command[len("гиф сохранить"):].strip().split()
+        cat_map = {"мж": "male_female", "жж": "female_female", "мм": "male_male", "все": "generic"}
+        if len(parts) < 2 or parts[0] not in cat_map:
+            _reply(message, "Формат: <code>отн гиф сохранить &lt;мж|жж|мм|все&gt; &lt;действие&gt;</code> (например: <code>kiss</code>, <code>hug</code>, <code>cuddle</code>, <code>bite</code>, <code>pat</code>, <code>sex</code>).")
+            return
+        cat_key = cat_map[parts[0]]
+        act_key = parts[1].strip().lower()[:32]
+        with _relationship_transaction():
+            root = _store()
+            cgifs = root.setdefault("custom_gifs", {})
+            cgifs.setdefault(cat_key, {}).setdefault(act_key, []).append({"file_id": str(anim.file_id)})
+            mark_dirty()
+        _reply(message, f"✅ GIF сохранена в каталог <b>{cat_key} → {html.escape(act_key)}</b>! Теперь она отправляется мгновенно без ссылок.")
+        return
+
     if command in {"гиф", "гиф превью", "гиф медиа"}:
         with _relationship_transaction():
             pair = _pair_for(user_id)
@@ -1861,6 +2063,24 @@ def handle_relationship_commands(message):
                 _reply(message, "Для семейного планирования сначала нужны отношения.")
                 return
             _family_plan_command(message, pair, user_id, command)
+        return
+
+    if command == "презик" or command.startswith("презик "):
+        with _relationship_transaction():
+            pair = _pair_for(user_id)
+            if not pair:
+                _reply(message, "Для этой команды сначала нужны отношения: <code>отн предложить @username</code>.")
+                return
+            _condom_command(message, pair, user_id, command[len("презик"):].strip())
+        return
+
+    if command == "секс" or command.startswith("секс "):
+        with _relationship_transaction():
+            pair = _pair_for(user_id)
+            if not pair:
+                _reply(message, "Для этой команды сначала нужны отношения: <code>отн предложить @username</code>.")
+                return
+            _sex_command(message, pair, user_id, command[len("секс"):].strip())
         return
 
     if command == "защита" or command.startswith("защита ") or command == "контрацептив" or command.startswith("контрацептив "):
@@ -2054,6 +2274,50 @@ def handle_relationship_callbacks(call):
                         mark_dirty()
                 _edit_or_send_rel(call, "💗 Запрос на расставание отменён. Пара остаётся вместе!")
                 bot.answer_callback_query(call.id, "Отменено")
+            return
+
+        if len(parts) == 4 and parts[1] == "condom" and parts[2] == "toggle":
+            with _relationship_transaction():
+                pair = _pair_for(user_id)
+                if not pair:
+                    bot.answer_callback_query(call.id, "Эта кнопка только для участников пары.", show_alert=True)
+                    return
+                new_state = not bool(pair.get("condom_enabled", False))
+                pair["condom_enabled"] = new_state
+                mark_dirty()
+            btn_label = "🔥 Выключить презик" if new_state else "🛡 Включить презик"
+            markup = _make_inline_markup([[(btn_label, f"rel:condom:toggle:{user_id}")]])
+            text = card(
+                "🛡 <b>Презик включён</b>" if new_state else "🔥 <b>Презик выключен</b>",
+                body="При <code>отн секс</code> шанса на ребёнка нет 😏" if new_state else "При <code>отн секс</code> есть <b>40% шанс</b> на пополнение!",
+            )
+            _edit_or_send_rel(call, text, reply_markup=markup)
+            bot.answer_callback_query(call.id, "🛡 Включён" if new_state else "🔥 Выключен")
+            return
+
+        if len(parts) == 4 and parts[1] == "sex" and parts[2] in {"acc", "rej"}:
+            target_id = _safe_int(parts[3], 0, minimum=1)
+            if user_id != target_id:
+                bot.answer_callback_query(call.id, "Ответить может только твой партнёр!", show_alert=True)
+                return
+            with _relationship_transaction():
+                pair = _pair_for(user_id)
+                if not pair:
+                    bot.answer_callback_query(call.id, "Пара не найдена.", show_alert=True)
+                    return
+                if parts[2] == "rej":
+                    pair["sex_invite"] = None
+                    mark_dirty()
+                    res_text = "🙅 Не в этот раз — предложение отклонено."
+                else:
+                    inv = pair.get("sex_invite")
+                    if not isinstance(inv, dict) or _safe_timestamp(inv.get("expires_at"), 0) <= time.time():
+                        pair["sex_invite"] = None
+                        res_text = "⏳ Приглашение уже истекло."
+                    else:
+                        res_text = _resolve_sex_action(msg, pair, user_id)
+            _edit_or_send_rel(call, res_text)
+            bot.answer_callback_query(call.id)
             return
 
         if len(parts) == 4 and parts[1] == "tab":

@@ -25,6 +25,7 @@ HANDLER_NAMES = [
     "cmd_update",
     "cmd_help_menu",
     "cmd_daily_hub",
+    "cmd_boobs",
     "handle_v1_callbacks",
 ]
 
@@ -218,42 +219,43 @@ def _build_daily_hub_text(user_id, user_name, username=None):
     econ = get_user_econ(user_id, user_name, username=username)
     lines = []
 
-    # Daily bonus (24h)
-    last_bonus = float(econ.get("last_bonus", 0) or 0)
+    # Daily chest/bonus (24h — canonical key: last_streak_time, command: /chest)
+    last_bonus = float(econ.get("last_streak_time", 0) or 0)
     rem_bonus = last_bonus + 86400 - now
     lines.append(
-        f"{'✅' if rem_bonus <= 0 else '⏳'} <b>Ежедневный бонус</b> — "
-        + ("готов! (<code>/bonus</code>)" if rem_bonus <= 0 else f"через {format_duration(rem_bonus)}")
+        f"{'✅' if rem_bonus <= 0 else '⏳'} <b>Ежедневный сундук</b> — "
+        + ("готов! (<code>/chest</code>)" if rem_bonus <= 0 else f"через {format_duration(rem_bonus)}")
     )
 
-    # Work cooldown
-    last_work = float(econ.get("last_work", 0) or 0)
+    # Work cooldown (canonical key: last_work_time)
+    last_work = float(econ.get("last_work_time", 0) or 0)
     rem_work = last_work + 1800 - now
     lines.append(
         f"{'✅' if rem_work <= 0 else '⏳'} <b>Работа</b> — "
         + ("можно на смену (<code>работа</code>)" if rem_work <= 0 else f"через {format_duration(rem_work)}")
     )
 
-    # Businesses & miner
-    biz_list = econ.get("businesses", []) if isinstance(econ.get("businesses"), list) else []
-    miners = econ.get("miners", []) if isinstance(econ.get("miners"), list) else []
-    if biz_list or miners:
-        lines.append(f"🏢 <b>Пассивный доход</b> — бизнесов: {len(biz_list)}, майнеров: {len(miners)} (<code>собрать всё</code>)")
+    # Businesses & donor businesses (canonical dict structures)
+    biz_map = econ.get("businesses") if isinstance(econ.get("businesses"), dict) else {}
+    donor_biz = econ.get("donor_businesses") if isinstance(econ.get("donor_businesses"), dict) else {}
+    biz_count = len(biz_map) + len(donor_biz)
+    if biz_count:
+        lines.append(f"🏢 <b>Пассивный доход</b> — предприятий: <b>{biz_count}</b> (<code>собрать всё</code>)")
     else:
         lines.append("🏢 <b>Бизнесы</b> — пока нет (<code>бизнес</code>)")
 
-    # Pet walk
+    # Pet walk (canonical key: econ['last_pet_walk'])
     pet = econ.get("pet")
-    if isinstance(pet, dict) and pet.get("name"):
-        last_walk = float(pet.get("last_walk", 0) or 0)
+    if isinstance(pet, dict) and (pet.get("name") or pet.get("id")):
+        last_walk = float(econ.get("last_pet_walk", 0) or 0)
         rem_walk = last_walk + 3600 - now
         lines.append(
             f"{'✅' if rem_walk <= 0 else '⏳'} <b>Прогулка с питомцем</b> — "
             + ("готов гулять (<code>гулять</code>)" if rem_walk <= 0 else f"через {format_duration(rem_walk)}")
         )
 
-    # Wheel of fortune
-    last_wheel = float(econ.get("last_wheel", 0) or 0)
+    # Wheel of fortune (canonical key: last_wheel_time)
+    last_wheel = float(econ.get("last_wheel_time", 0) or 0)
     rem_wheel = last_wheel + 86400 - now
     lines.append(
         f"{'✅' if rem_wheel <= 0 else '⏳'} <b>Колесо фортуны</b> — "
@@ -305,37 +307,13 @@ def _perform_collect_all(user_id, user_name, username=None):
     with db_lock:
         econ = get_user_econ(user_id, user_name, username=username)
 
-        # Businesses
-        businesses = econ.get("businesses")
-        biz_catalog = globals().get("BUSINESSES") or {}
-        if isinstance(businesses, list):
-            for biz in businesses:
-                if not isinstance(biz, dict):
-                    continue
-                last_col = float(biz.get("last_collect", now) or now)
-                hours = max(0.0, min(24.0, (now - last_col) / 3600.0))
-                rate = float(biz.get("income", 0) or biz_catalog.get(biz.get("id"), {}).get("income", 0) or 0)
-                earned = int(hours * rate)
-                if earned > 0:
-                    biz_income += earned
-                    biz["last_collect"] = now
-                    changed = True
-
-        # Miners
-        miners = econ.get("miners")
-        miner_catalog = globals().get("MINERS") or {}
-        if isinstance(miners, list):
-            for miner in miners:
-                if not isinstance(miner, dict):
-                    continue
-                last_col = float(miner.get("last_collect", now) or now)
-                hours = max(0.0, min(24.0, (now - last_col) / 3600.0))
-                rate = float(miner.get("income", 0) or miner_catalog.get(miner.get("id"), {}).get("income", 0) or 0)
-                earned = int(hours * rate)
-                if earned > 0:
-                    miner_income += earned
-                    miner["last_collect"] = now
-                    changed = True
+        # Canonical business & crypto_farm collection via collect_business_base_profit
+        collector_fn = globals().get("collect_business_base_profit")
+        if callable(collector_fn) and (econ.get("businesses") or econ.get("donor_businesses")):
+            base_profit = int(collector_fn(econ, now) or 0)
+            if base_profit > 0:
+                biz_income += base_profit
+                changed = True
 
         total_coins = biz_income + miner_income
         if total_coins > 0:
@@ -431,6 +409,10 @@ def cmd_duel(message, args_text=""):
         return
 
     econ = get_user_econ(uid, uname, username=getattr(message.from_user, "username", None))
+    if float(econ.get("jail_until", 0) or 0) > time.time():
+        rem_j = float(econ.get("jail_until", 0)) - time.time()
+        bot.reply_to(message, f"🚓 Ты сейчас в тюрьме! До освобождения: <b>{format_duration(rem_j)}</b>.", parse_mode="HTML")
+        return
     if int(econ.get("balance", 0)) < bet:
         bot.reply_to(message, f"❌ Недостаточно Ня-коинов для ставки {bet:,} 🪙.")
         return
@@ -477,6 +459,10 @@ def cmd_heist(message):
     uname = _display_name(message.from_user)
     now = time.time()
 
+    leader_econ = get_user_econ(uid, uname, username=getattr(message.from_user, "username", None))
+    if float(leader_econ.get("jail_until", 0) or 0) > now:
+        bot.reply_to(message, f"🚓 Из тюрьмы банк не ограбишь! Осталось: <b>{format_duration(float(leader_econ['jail_until']) - now)}</b>.", parse_mode="HTML")
+        return
     with _V1_LOCK:
         cd_until = _HEIST_COOLDOWNS.get(chat_id, 0.0)
         if cd_until > now:
@@ -878,8 +864,18 @@ def _build_receipt_text(user_id, user_name, username=None):
     econ = get_user_econ(user_id, user_name, username=username)
     now = time.time()
     cutoff = now - 86400
-    log = econ.get("v1_money_log", []) if isinstance(econ.get("v1_money_log"), list) else []
-    recent = [x for x in log if isinstance(x, dict) and float(x.get("at", 0) or 0) >= cutoff]
+    raw_native = econ.get("money_history", []) if isinstance(econ.get("money_history"), list) else []
+    raw_v1 = econ.get("v1_money_log", []) if isinstance(econ.get("v1_money_log"), list) else []
+    recent = []
+    for x in raw_native:
+        if isinstance(x, dict):
+            ts = float(x.get("ts") or x.get("at") or x.get("time") or 0)
+            if ts >= cutoff:
+                recent.append({"at": ts, "delta": int(x.get("delta", 0) or 0), "label": str(x.get("reason") or x.get("label") or "Операция")})
+    if not recent:
+        for x in raw_v1:
+            if isinstance(x, dict) and float(x.get("at", 0) or 0) >= cutoff:
+                recent.append(x)
     income = sum(int(x["delta"]) for x in recent if int(x.get("delta", 0)) > 0)
     expense = sum(-int(x["delta"]) for x in recent if int(x.get("delta", 0)) < 0)
     net = income - expense
@@ -939,6 +935,49 @@ def cmd_notifications(message, mode=""):
     )
 
 
+def check_and_send_dm_notifications():
+    """Send one-shot DM reminders to opted-in users when timers complete."""
+    now = time.time()
+    econ_map = db.get("economy", {}) if isinstance(globals().get("db"), dict) else {}
+    rel_root = db.get("relationships", {}) if isinstance(globals().get("db"), dict) else {}
+    pairs = rel_root.get("pairs", {}) if isinstance(rel_root, dict) else {}
+    users_map = rel_root.get("users", {}) if isinstance(rel_root, dict) else {}
+    sent = 0
+    for uid_str, econ in list(econ_map.items()):
+        if not isinstance(econ, dict) or not econ.get("dm_notifications"):
+            continue
+        try:
+            uid = int(str(uid_str).split("_")[-1])
+        except (TypeError, ValueError):
+            continue
+        # 1. Jail release notification
+        jail_until = float(econ.get("jail_until", 0) or 0)
+        if 0 < jail_until <= now and not econ.get("_notified_jail_done"):
+            econ["_notified_jail_done"] = True
+            try:
+                bot.send_message(uid, "🔓 <b>Ты вышел(а) из тюрьмы!</b> Можно снова играть и участвовать в делах.", parse_mode="HTML")
+                sent += 1
+            except Exception:
+                pass
+        elif jail_until > now and econ.get("_notified_jail_done"):
+            econ["_notified_jail_done"] = False
+        # 2. 40-hour relationship timer ready
+        pair_id = users_map.get(str(uid))
+        pair = pairs.get(str(pair_id)) if pair_id else None
+        if isinstance(pair, dict):
+            fp = pair.get("family_plan")
+            if isinstance(fp, dict) and fp.get("status") == "active":
+                due_at = float(fp.get("due_at", 0) or 0)
+                if 0 < due_at <= now and not fp.get(f"_notified_{uid}"):
+                    fp[f"_notified_{uid}"] = True
+                    try:
+                        bot.send_message(uid, "🍼 <b>Игровой таймер 40 недель завершён!</b> Напиши в чате <code>отн родить</code>.", parse_mode="HTML")
+                        sent += 1
+                    except Exception:
+                        pass
+    return sent
+
+
 # ---------------------------------------------------------------------------
 # 13. Live Market Helper (sparkline + daily news)
 # ---------------------------------------------------------------------------
@@ -981,8 +1020,99 @@ def cmd_chat_toggle(message, setting_key, title, enable):
 # ---------------------------------------------------------------------------
 # 15. Text Command Dispatcher (called from handlers/moderation.py)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 14b. Boobs Biometry (сиськи / /boobs / топ сисек)
+# ---------------------------------------------------------------------------
+def cmd_boobs(message):
+    if not can_process_user_message(message):
+        return
+    uid = int(message.from_user.id)
+    uname = _display_name(message.from_user)
+    chat_id = message.chat.id
+    econ = get_user_econ(uid, uname, username=getattr(message.from_user, "username", None))
+
+    now = time.time()
+    last_time = float(econ.get("last_boobs_time", 0) or 0)
+    cooldown = 1200  # 20 минут, как у замера писюна
+    rem = last_time + cooldown - now
+    if rem > 0:
+        bot.reply_to(
+            message,
+            f"⏳ Замер сисек доступен раз в 20 минут! 😿\nПодождите: <b>{format_duration(rem)}</b>.",
+            parse_mode="HTML",
+        )
+        return
+
+    change_pool = [-2, -1, -1, 0, 1, 1, 2]
+    change = random.choice([-3, 3]) if random.random() < 0.08 else random.choice(change_pool)
+    cur_size = int(econ.get("boobs_size", 2) if econ.get("boobs_size") is not None else 2)
+    new_size = max(0, min(15, cur_size + change))
+
+    econ["boobs_size"] = new_size
+    econ["last_boobs_time"] = now
+    mark_dirty()
+
+    sign = "+" if change >= 0 else ""
+    u_link = make_link(chat_id, uname, uid, ping=True)
+    if new_size >= 10:
+        comment = "🌌 Легендарные габариты аниме-богини! Физика чата официально сдалась! 🙀"
+    elif new_size >= 7:
+        comment = "👑 Максимальная гравитация — весь чат обернулся! 😻"
+    elif new_size >= 5:
+        comment = "🔥 Внушительный и роскошный размер! 😸"
+    elif new_size >= 3:
+        comment = "👌 Классический гармоничный размер! 😺"
+    elif new_size >= 1:
+        comment = "🌸 Аккуратненько и миленько — плоскость тоже в моде! 😽"
+    else:
+        comment = "📏 Абсолютная аэродинамика! Зато спина не болит 😹"
+
+    bot.reply_to(
+        message,
+        card(
+            "🍒 <b>Замер сисек</b>",
+            body=[
+                f"👤 {u_link}",
+                f"📏 Размер: <b>{new_size} размер</b> ({sign}{change})",
+                f"💬 <i>{comment}</i>",
+            ],
+            footer="Топ чата: <code>топ сисек</code> · Вся статистика: <code>/biometry</code>",
+        ),
+        parse_mode="HTML",
+    )
+
+
+def cmd_top_boobs(message):
+    if not can_process_user_message(message):
+        return
+    econ_map = db.get("economy", {}) if isinstance(db, dict) else {}
+    rows = []
+    for key, rec in econ_map.items():
+        if not isinstance(rec, dict) or rec.get("boobs_size") is None:
+            continue
+        size = int(rec.get("boobs_size", 0) or 0)
+        name = str(rec.get("display_name") or rec.get("name") or key)
+        rows.append((size, name))
+    rows.sort(key=lambda x: -x[0])
+    if not rows:
+        bot.reply_to(message, card("🍒 <b>Топ по размеру сисек</b>", body="Пока никто не делал замер! Напиши <code>сиськи</code>."), parse_mode="HTML")
+        return
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [
+        f"{medals[i] if i < 3 else f'{i+1}.'} <b>{html.escape(name)}</b> — 🍒 {size} размер"
+        for i, (size, name) in enumerate(rows[:10])
+    ]
+    bot.reply_to(message, card("🍒 <b>Топ по размеру сисек</b>", body=lines), parse_mode="HTML")
+
+
 def try_handle_v1_text(message, text_lower):
     """Handle plain-text Russian aliases for v1.0 features. Returns True if handled."""
+    if text_lower in {"сиськи", "грудь", "размер груди", ".сиськи"}:
+        cmd_boobs(message)
+        return True
+    if text_lower in {"топ сисек", "топ сиськи", "топ груди"}:
+        cmd_top_boobs(message)
+        return True
     if text_lower in {"обнова", "обновления", "апдейт", "changelog"}:
         cmd_update(message)
         return True
@@ -1007,7 +1137,7 @@ def try_handle_v1_text(message, text_lower):
     if text_lower in {"бейдж", "бейджи", "значок"}:
         cmd_badges(message)
         return True
-    if text_lower in {"+реп", "+rep", "спасибо", "спс"} and getattr(message, "reply_to_message", None):
+    if text_lower in {"+реп", "+rep", "спасибо"} and getattr(message, "reply_to_message", None):
         cmd_rep(message)
         return True
     if text_lower in {"топ реп", "топ репутации"}:
@@ -1314,10 +1444,10 @@ def handle_v1_callbacks(call):
             bought_list.append(item["id"])
             outcome = ""
             if item["id"] == "xp_boost":
-                add_account_exp(econ, 250, source="night_merchant_boost")
+                add_account_exp(uid, uname, 250, username=getattr(user, "username", None), source="night_merchant_boost")
                 outcome = "⚡ Начислено +250 EXP!"
             elif item["id"] == "work_reset":
-                econ["last_work"] = 0
+                econ["last_work_time"] = 0
                 outcome = "⏳ Кулдаун работы полностью сброшен!"
             elif item["id"] == "lucky_box":
                 prize = random.randint(1000, 6000)
@@ -1411,6 +1541,12 @@ def register(ctx, only=None):
         ctx["cmd_daily_hub"] = h
         globals()["cmd_daily_hub"] = h
         registered.append("cmd_daily_hub")
+    if "cmd_boobs" in wanted:
+        h = serialize_user_action(cmd_boobs)
+        bot.message_handler(commands=["boobs", "сиськи"])(h)
+        ctx["cmd_boobs"] = h
+        globals()["cmd_boobs"] = h
+        registered.append("cmd_boobs")
     if "handle_v1_callbacks" in wanted:
         cb = serialize_user_action(handle_v1_callbacks)
         bot.callback_query_handler(

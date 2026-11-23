@@ -757,6 +757,7 @@ def cmd_coinflip(message):
                 if balance < bet:
                     bot.reply_to(message,f'❌ Недостаточно средств. Баланс: {balance:,} 🪙'); return
                 _adjust_balance(econ, -bet, reason='Ставка в орлянке')
+                mark_dirty()
         process_casino_bet(bet,message.chat.id)
         result=random.choice(('орёл','решка'))
         if result==side:

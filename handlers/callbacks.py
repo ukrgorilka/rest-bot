@@ -3619,16 +3619,6 @@ def callback_inline(call):
             _answer_callback_query(call.id, f"🛡 Антифлуд {'включён' if sett['flood_protection'] else 'выключен'}!")
             render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
 
-        elif action_data == 'toggle_flood_admins':
-            if not is_chat_owner(chat_id, user_id):
-                _answer_callback_query(call.id, "❌ Эту настройку может менять только владелец чата!", show_alert=True)
-                return
-            sett = get_chat_settings(chat_id)
-            sett['flood_admins'] = not sett.get('flood_admins', False)
-            mark_dirty()
-            _answer_callback_query(call.id, f"👮 Антифлуд для админов {'включён' if sett['flood_admins'] else 'выключен'}!")
-            render_settings_view(chat_id, user_id=user_id, message_id=call.message.message_id)
-
         elif action_data == 'toggle_reactions':
             if not can_admin_action(chat_id, user_id, 'settings'):
                 _answer_callback_query(call.id, '❌ Настройки доступны владельцу и администраторам с нужными правами.', show_alert=True); return

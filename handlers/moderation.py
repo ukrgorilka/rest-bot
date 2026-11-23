@@ -230,7 +230,7 @@ def cmd_admins(message):
             rows.append((level, uid, name, m.user.username))
     for uid_raw in db.setdefault('chat_admins', {}).get(str(cid), {}):
         try: uid=int(uid_raw)
-        except: continue
+        except Exception: continue
         if uid in seen: continue
         level=get_admin_level(cid, uid)
         if level > 0:
@@ -1501,7 +1501,7 @@ def handle_messages(message):
                 bot.reply_to(message, '❌ Указанная дата уже прошла. Рест с прошедшей датой не создаётся.', parse_mode='HTML')
                 return
             user_link = make_link(chat_id, target_name, target_id, ping=True)
-            bot.reply_to(message, f'✅ Рест для {user_link} добавлен на {duration_text} (Причина: {reason})! 😺', parse_mode='HTML')
+            bot.reply_to(message, f'✅ Рест для {user_link} добавлен на {duration_text} (Причина: {html.escape(str(reason))})! 😺', parse_mode='HTML')
 
     elif text_lower.startswith('-рест'):
         if not is_admin(chat_id, user_id): return
