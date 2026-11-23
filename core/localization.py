@@ -505,7 +505,7 @@ def _localize_bot_text(text, lang):
         return f"\\x00PROT{len(protected)-1}\\x00"
 
     out = re.sub(
-        r"<code>.*?</code>|<pre>.*?</pre>|https?://\\S+|tg://\\S+|@[A-Za-z0-9_]{3,}|(?<![A-Za-z0-9_])/[A-Za-z0-9_]+",
+        r"<code>.*?</code>|<pre>.*?</pre>|https?://\S+|tg://\S+|@[A-Za-z0-9_]{3,}|(?<![A-Za-z0-9_])/[A-Za-z0-9_]+",
         protect,
         out,
         flags=re.DOTALL,
@@ -569,7 +569,7 @@ def format_large_numbers(text):
         return text
 
     parts = re.split(r"(<[^>]+>)", text)
-    number_re = re.compile(r"(?<![\\d,.])\\d{4,}(?![\\d,.])")
+    number_re = re.compile(r"(?<![\d,.])\d{4,}(?![\d,.])")
 
     def repl(match):
         raw = match.group(0)
@@ -601,7 +601,7 @@ def apply_global_premium_emojis(text):
         return f"\\x00TGEMOJI{len(protected)-1}\\x00"
 
     text = re.sub(
-        r"<tg-emoji\\b[^>]*>.*?</tg-emoji>",
+        r"<tg-emoji\b[^>]*>.*?</tg-emoji>",
         protect,
         text,
         flags=re.DOTALL,
@@ -794,8 +794,8 @@ def install_telegram_localization(bot):
             if _is_premium_markup_error(exc) and kwargs.get("caption"):
                 kwargs["caption"] = _localize_bot_text(kwargs["caption"], lang)
                 kwargs["caption"] = re.sub(
-                    r"<tg-emoji\\b[^>]*>.*?</tg-emoji>",
-                    "",
+                    r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
+                    r"\1",
                     kwargs["caption"],
                     flags=re.DOTALL,
                 )
@@ -839,8 +839,8 @@ def install_telegram_localization(bot):
             if _is_premium_markup_error(exc) and getattr(localized_media, "caption", None):
                 plain_media = copy.deepcopy(localized_media)
                 plain_media.caption = re.sub(
-                    r"<tg-emoji\\b[^>]*>.*?</tg-emoji>",
-                    "",
+                    r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
+                    r"\1",
                     plain_media.caption,
                     flags=re.DOTALL,
                 )
