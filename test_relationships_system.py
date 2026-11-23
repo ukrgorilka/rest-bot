@@ -601,5 +601,155 @@ class RelationshipFamilyPlanningTests(unittest.TestCase):
         self.assertIsNone(pair["family_plan"])
 
 
+
+
+class RelationshipImprovementsAndBotFixesTests(unittest.TestCase):
+    def test_daily_task_is_initialized_automatically_on_action_progress(self):
+        pair = {
+            "id": "101:202", "users": [101, 202], "names": {"101": "One", "202": "Two"},
+            "started_at": 1_900_000_000, "petals": 0, "earned_total": 0, "level": 1,
+            "cooldowns": {}, "children": [], "house": None, "last_house_income_at": 1_900_000_000,
+            "gifts": [], "daily_task": None,
+        }
+        with patch.object(relationships, "mark_dirty", lambda: None, create=True), patch.object(
+            relationships.random, "choice", side_effect=lambda items: items[1]  # "actions" task
+        ):
+            relationships._progress_task(pair, "actions", 1)
+        self.assertIsNotNone(pair["daily_task"])
+        self.assertEqual(pair["daily_task"]["kind"], "actions")
+        self.assertEqual(pair["daily_task"]["progress"], 1)
+
+    def test_house_upgrade_charges_difference_and_rejects_downgrade(self):
+        now = 1_900_000_000.0
+        pair = {
+            "users": [101, 202], "petals": 500, "earned_total": 500,
+            "house": "комната", "last_house_income_at": now,
+        }
+        replies = []
+        with patch.object(relationships.time, "time", return_value=now), patch.object(
+            relationships, "mark_dirty", lambda: None, create=True
+        ), patch.object(relationships, "_reply", lambda _m, text: replies.append(text)):
+            relationships._house_command(SimpleNamespace(), pair, "улучшить домик")
+            self.assertEqual(pair["house"], "домик")
+            # домик (500) - комната (150) = 350 difference -> 500 - 350 = 150 petals left
+            self.assertEqual(pair["petals"], 150)
+            relationships._house_command(SimpleNamespace(), pair, "купить комната")
+            self.assertEqual(pair["house"], "домик")
+            self.assertIn("ниже", replies[-1].lower().replace("низкого", "ниже"))
+
+    def test_reject_without_pending_proposal_does_not_mark_dirty(self):
+        state = {"relationships": {"pairs": {}, "users": {}, "pending": {}, "history": [], "family_invites": {}, "family_members": {}}}
+        dirty = []
+        replies = []
+        msg = SimpleNamespace(
+            text="отн отказать", message_id=1,
+            from_user=SimpleNamespace(id=101, first_name="One", last_name="", username="one"),
+            chat=SimpleNamespace(id=-100),
+        )
+        with patch.object(relationships, "db", state, create=True), patch.object(
+            relationships, "mark_dirty", lambda: dirty.append(True), create=True
+        ), patch.object(relationships, "can_process_user_message", return_value=True, create=True), patch.object(
+            relationships, "_reply", lambda _m, text: replies.append(text)
+        ):
+            relationships.handle_relationship_commands(msg)
+        self.assertFalse(dirty)
+        self.assertIn("нет входящего", replies[-1].lower())
+
+    def test_breakup_can_be_cancelled(self):
+        pair_id = "101:202"
+        pair = {
+            "id": pair_id, "users": [101, 202], "names": {"101": "One", "202": "Two"},
+            "started_at": 1_900_000_000, "petals": 0, "earned_total": 0, "level": 1,
+            "cooldowns": {}, "children": [], "house": None, "last_house_income_at": 1_900_000_000,
+            "gifts": [], "breakup_confirmation": {"by": 101, "at": 1_900_000_100},
+        }
+        state = {"relationships": {"pairs": {pair_id: pair}, "users": {"101": pair_id, "202": pair_id}, "pending": {}, "history": []}}
+        replies = []
+        msg = SimpleNamespace(
+            text="отн расстаться отменить", message_id=1,
+            from_user=SimpleNamespace(id=101, first_name="One", last_name="", username="one"),
+            chat=SimpleNamespace(id=-100),
+        )
+        with patch.object(relationships, "db", state, create=True), patch.object(
+            relationships, "mark_dirty", lambda: None, create=True
+        ), patch.object(relationships, "can_process_user_message", return_value=True, create=True), patch.object(
+            relationships, "_reply", lambda _m, text: replies.append(text)
+        ):
+            relationships.handle_relationship_commands(msg)
+        self.assertIsNone(pair["breakup_confirmation"])
+        self.assertIn("отменён", replies[-1].lower())
+
+    def test_child_care_by_name_and_rename(self):
+        now = 1_900_000_000.0
+        pair = {
+            "users": [101, 202], "children": [
+                {"id": 1, "name": "Алиса", "born_at": now - 86400, "happiness": 50, "last_care_at": 0, "kind": "virtual"},
+                {"id": 2, "name": "Мира", "born_at": now - 86400, "happiness": 50, "last_care_at": 0, "kind": "virtual"},
+            ],
+            "daily_task": None,
+        }
+        replies = []
+        with patch.object(relationships.time, "time", return_value=now), patch.object(
+            relationships, "mark_dirty", lambda: None, create=True
+        ), patch.object(relationships, "_reply", lambda _m, text: replies.append(text)):
+            relationships._children_command(SimpleNamespace(), pair, 101, "забота Мира")
+            self.assertEqual(pair["children"][1]["happiness"], 65)
+            self.assertEqual(pair["children"][0]["happiness"], 50)
+            relationships._children_command(SimpleNamespace(), pair, 101, "переименовать 1 Луна")
+            self.assertEqual(pair["children"][0]["name"], "Луна")
+
+    def test_top_pairs_sorts_by_earned_total(self):
+        now = 1_900_000_000.0
+        state = {"relationships": {
+            "pairs": {
+                "1:2": {"id": "1:2", "users": [1, 2], "names": {"1": "A", "2": "B"}, "started_at": now, "earned_total": 100, "petals": 10},
+                "3:4": {"id": "3:4", "users": [3, 4], "names": {"3": "C", "4": "D"}, "started_at": now, "earned_total": 500, "petals": 20},
+            },
+            "users": {"1": "1:2", "2": "1:2", "3": "3:4", "4": "3:4"},
+            "pending": {}, "history": [],
+        }}
+        replies = []
+        with patch.object(relationships, "db", state, create=True), patch.object(
+            relationships, "mark_dirty", lambda: None, create=True
+        ), patch.object(relationships, "_reply", lambda _m, text: replies.append(text)):
+            relationships._top_pairs(SimpleNamespace(), -100)
+        text = replies[-1]
+        self.assertLess(text.index("C"), text.index("A"))
+
+    def test_moderation_bank_regex_matches_text_commands(self):
+        import re
+        mod_src = Path("handlers/moderation.py").read_text(encoding="utf-8")
+        self.assertIn(r"r'^(?:банк|депозит|сч[её]т)\s+(положить|внести|пополнить|снять|вывести)\s+(\d+)$'", mod_src)
+        pat = re.compile(r"^(?:банк|депозит|сч[её]т)\s+(положить|внести|пополнить|снять|вывести)\s+(\d+)$")
+        m = pat.match("банк положить 5000")
+        self.assertIsNotNone(m)
+        self.assertEqual(m.groups(), ("положить", "5000"))
+        self.assertIsNotNone(pat.match("депозит снять 1200"))
+
+    def test_localization_format_large_numbers_and_tg_emoji_regex(self):
+        from core import localization
+        self.assertEqual(localization.format_large_numbers("Баланс: 10000 🪙"), "Баланс: 10,000 🪙")
+        self.assertEqual(localization.format_large_numbers("Год 2026 и сумма 250000"), "Год 2026 и сумма 250,000")
+
+    def test_always_active_patterns_expanded_and_safe(self):
+        import re
+        nf_src = Path("newfile.py").read_text(encoding="utf-8")
+        tree = ast.parse(nf_src)
+        node = next(
+            n for n in tree.body
+            if isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "ALWAYS_ACTIVE_PATTERNS" for t in n.targets)
+        )
+        patterns = ast.literal_eval(node.value)
+        self.assertGreaterEqual(len(patterns), 20)
+        for pat, resps in patterns.items():
+            re.compile(pat, re.IGNORECASE)
+            self.assertTrue(resps)
+        # Ensure "передать 300" does not trigger the "300" pattern
+        pat_300 = next(p for p in patterns if "300" in p)
+        self.assertIsNone(re.search(pat_300, "передать 300", re.IGNORECASE))
+        self.assertIsNotNone(re.search(pat_300, "300?", re.IGNORECASE))
+
+
 if __name__ == "__main__":
     unittest.main()
