@@ -1911,6 +1911,28 @@ active_pet_fights = {}
 active_memes = {}
 active_quizzes = {}
 
+
+def prune_stale_games(max_age_seconds=7200):
+    """Prune abandoned in-memory game sessions so RAM stays bounded."""
+    now = time.time()
+    for store in (
+        active_bj_games, active_rps_games, active_mines,
+        active_crash, active_brick, active_c_mines, active_durak,
+    ):
+        if not isinstance(store, dict):
+            continue
+        stale = []
+        for k, v in list(store.items()):
+            if isinstance(v, dict):
+                ts = float(v.get('created_at') or v.get('started_at') or v.get('ts') or 0)
+                if ts > 0 and now - ts > max_age_seconds:
+                    stale.append(k)
+        for k in stale:
+            store.pop(k, None)
+        if len(store) > 500:
+            for k in list(store.keys())[:-300]:
+                store.pop(k, None)
+
 gold_rush_event = {'active': False, 'until': 0}
 current_quiz = {}
 
@@ -3670,6 +3692,8 @@ def get_donor_title_buffs(econ):
 
 def get_title_work_bonus(econ):
     return economy_service.get_title_work_bonus(econ)
+def get_vehicle_work_bonus(econ):
+    return economy_service.get_vehicle_work_bonus(econ)
 
 def get_title_bonus_multiplier(econ):
     return economy_service.get_title_bonus_multiplier(econ)
@@ -7514,7 +7538,9 @@ def _send_user_profile_impl(chat_id, user_tag, user_id, message_to_reply=None, m
     theme_key = econ.get('profile_theme', 'default')
     theme_info = THEMES.get(theme_key, THEMES['default'])
     border = theme_info.get('border', '━━━━━━━━━━━━━━━━━━━━')
-    header = theme_info.get('header', '👤 <b>КАРТОЧКА ИГРОКА</b>')
+    from core.ui import badge_prefix as _ui_badge_prefix
+    _bp = _ui_badge_prefix(econ, globals().get('ACHIEVEMENTS'))
+    header = (_bp + theme_info.get('header', '👤 <b>КАРТОЧКА ИГРОКА</b>')) if _bp else theme_info.get('header', '👤 <b>КАРТОЧКА ИГРОКА</b>')
     icon = theme_info.get('icon', '🔹')
 
     lvl, cur_exp, next_exp, bar = get_account_level(econ.get('account_exp', 0))

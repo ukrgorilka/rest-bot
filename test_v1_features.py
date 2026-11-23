@@ -40,7 +40,8 @@ class CoreUIAndChangelogTests(unittest.TestCase):
     def test_changelog_starts_at_v1_0_and_supports_pagination(self):
         self.assertEqual(changelog.CHANGELOG[0]["version"], "1.0")
         text, idx, prev_ver, next_ver = changelog.render_changelog_message(None)
-        self.assertIn("v1.0", text)
+        self.assertIn("v1.1", text)
+        self.assertEqual(prev_ver, "1.0")
         self.assertEqual(idx, len(changelog.CHANGELOG) - 1)
         self.assertIsNone(next_ver)
 
@@ -112,7 +113,7 @@ class FeaturesV1RuntimeTests(unittest.TestCase):
             ACHIEVEMENTS={"first_step": {"title": "🌟 Первый шаг", "desc": "Начать путь", "reward": 100}},
             get_chat_settings=lambda cid: self.state["settings"].setdefault(str(cid), {}),
             can_admin_action=lambda _c, _u, _a: True,
-            add_account_exp=lambda econ, amt, source="": econ.__setitem__("exp", econ.get("exp", 0) + amt),
+            add_account_exp=lambda uid, name, amt, username=None, source="": self.econs[int(uid)].__setitem__("exp", self.econs[int(uid)].get("exp", 0) + amt),
             create=True,
         )
 
@@ -231,6 +232,60 @@ class FeaturesV1RuntimeTests(unittest.TestCase):
         self.assertEqual(streak, 3)
         self.assertEqual(bonus, 10)
         self.assertEqual(pair["petals"], 10)
+
+
+
+    def test_dot_otn_condom_toggle_and_sex_chance(self):
+        now = 1_900_000_000.0
+        pair_id = "101:202"
+        pair = {
+            "id": pair_id, "users": [101, 202], "names": {"101": "Alice", "202": "Bob"},
+            "started_at": now, "petals": 0, "earned_total": 0, "level": 1,
+            "cooldowns": {}, "children": [], "house": None, "last_house_income_at": now,
+            "gifts": [], "condom_enabled": False, "family_plan": None,
+        }
+        state = {"relationships": {"pairs": {pair_id: pair}, "users": {"101": pair_id, "202": pair_id}, "pending": {}, "history": [], "family_invites": {}, "family_members": {}}}
+        replies = []
+        msg_condom = SimpleNamespace(
+            text=".отн презик", message_id=1,
+            from_user=SimpleNamespace(id=101, first_name="Alice", last_name="", username="alice"),
+            chat=SimpleNamespace(id=-100),
+        )
+        with patch.object(relationships, "db", state, create=True), patch.object(
+            relationships.time, "time", return_value=now
+        ), patch.object(relationships, "mark_dirty", lambda: None, create=True), patch.object(
+            relationships, "can_process_user_message", return_value=True, create=True
+        ), patch.object(relationships, "_reply", lambda _m, text, **kw: replies.append(text)):
+            # Dot-prefix .отн must be ignored (no conflict with Celestiana)
+            relationships.handle_relationship_commands(msg_condom)
+            self.assertFalse(pair["condom_enabled"])
+            # Plain отн презик toggles ON and OFF
+            msg_condom.text = "отн презик"
+            relationships.handle_relationship_commands(msg_condom)
+            self.assertTrue(pair["condom_enabled"])
+            relationships.handle_relationship_commands(msg_condom)
+            self.assertFalse(pair["condom_enabled"])
+            # Resolve sex with condom OFF and forced 40% trigger (<0.40)
+            with patch.object(relationships.random, "random", return_value=0.10):
+                res = relationships._resolve_sex_action(msg_condom, pair, 202)
+            self.assertIn("таймер", res.lower())
+            self.assertIsNotNone(pair["family_plan"])
+            self.assertEqual(pair["family_plan"]["status"], "active")
+            self.assertEqual(pair["petals"], 15)
+
+    def test_boobs_biometry_and_cooldown(self):
+        msg = SimpleNamespace(
+            chat=SimpleNamespace(id=-100, type="supergroup"),
+            from_user=SimpleNamespace(id=101, first_name="Alice", last_name="", username="alice"),
+        )
+        with self._patch_ctx():
+            features_v1.cmd_boobs(msg)
+            self.assertIn("boobs_size", self.econs[101])
+            first_size = self.econs[101]["boobs_size"]
+            # Immediate second call hits 20-minute cooldown
+            features_v1.cmd_boobs(msg)
+            self.assertEqual(self.econs[101]["boobs_size"], first_size)
+            self.assertIn("раз в 20 минут", self.bot.reply_to.call_args.args[1].lower())
 
 
 if __name__ == "__main__":
