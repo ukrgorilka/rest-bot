@@ -59,7 +59,16 @@ def welcome_new_members(message):
             f"💡 Введи <code>меню</code> или <code>/help</code>, чтобы открыть интерактивный путеводитель. 😸"
         )
         try:
-            bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
+            sent_welcome = bot.send_message(message.chat.id, welcome_text, parse_mode='HTML')
+            if sent_welcome and get_chat_settings(message.chat.id).get('auto_delete_welcome', False):
+                def _del_welcome(cid=message.chat.id, mid=sent_welcome.message_id):
+                    try:
+                        bot.delete_message(cid, mid)
+                    except Exception:
+                        pass
+                t = threading.Timer(150.0, _del_welcome)
+                t.daemon = True
+                t.start()
         except Exception:
             pass
 
@@ -976,7 +985,15 @@ def handle_messages(message):
             bot.reply_to(message, f"✅ Пользователь {user_link} сейчас не находится в ресте! 😸", parse_mode='HTML')
         return
 
-    if not text_lower.startswith('/'):
+    try:
+        from handlers import features_v1 as _fv1
+        _fv1.record_chat_activity_and_events(message)
+        if _fv1.try_handle_v1_text(message, text_lower):
+            return
+    except Exception:
+        pass
+
+    if not text_lower.startswith('/') and get_chat_settings(chat_id).get('auto_replies_enabled', True):
         _now_pat = time.time()
         _pat_cache = globals().setdefault('_PATTERN_COOLDOWNS', {})
         if len(_pat_cache) > 500:

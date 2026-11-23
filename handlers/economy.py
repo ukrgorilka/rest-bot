@@ -94,23 +94,25 @@ def cmd_cook(message):
 def cmd_market(message):
     if not can_process_user_message(message):
         return
+    from core.ui import card
+    from handlers.features_v1 import format_market_sparkline, get_daily_market_news
     market = get_market_data()
-    lines = [
-        "📈 <b>НЯ-БИРЖА КРИПТОВАЛЮТ И АКЦИЙ</b> 😺",
-        "━━━━━━━━━━━━━━━━━━━━",
-        "<i>Курсы обновляются автоматически каждые 30 минут:</i>\n"
-    ]
+    news_text, _news_mood = get_daily_market_news()
+    asset_lines = [f"📰 <i>{news_text}</i>", ""]
     for ticker, info in market.items():
         price = info['price']
         old_price = info.get('old_price', price)
         diff = price - old_price
         pct = (diff / old_price * 100) if old_price > 0 else 0
-        trend = "🟢 📈 +" if diff >= 0 else "🔴 📉 "
-        lines.append(f"• <b>{info['name']}</b> [{ticker}]\n  Курс: <b>{price:.2f} 🪙</b> ({trend}{pct:.1f}%)\n")
-
-    lines.append("━━━━━━━━━━━━━━━━━━━━\n💡 <b>Как торговать:</b> 😸")
-    lines.append("• <code>купить крипту NYA 5</code>\n• <code>продать крипту NYA 5</code>\n• <code>портфель</code> — посмотреть свои активы")
-    bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
+        trend = "🟢 +" if diff >= 0 else "🔴 "
+        graph = format_market_sparkline(info)
+        asset_lines.append(f"• <b>{info['name']}</b> [<code>{ticker}</code>] · <code>{graph}</code>\n  Курс: <b>{price:.2f} 🪙</b> ({trend}{pct:.1f}%)")
+    text = card(
+        "📈 <b>Ня-биржа криптовалют и акций</b>",
+        body=asset_lines,
+        footer="💡 Торговля: <code>купить крипту NYA 5</code> · <code>продать крипту NYA 5</code> · <code>портфель</code>",
+    )
+    bot.reply_to(message, text, parse_mode='HTML')
 
 def cmd_portfolio(message):
     if not can_process_user_message(message):

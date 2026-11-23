@@ -7,6 +7,8 @@ unchanged.
 
 from __future__ import annotations
 
+from core.ui import badge_prefix, card, progress_bar
+
 
 def _inject(ctx):
     for _name, _value in ctx.items():
@@ -26,30 +28,33 @@ def send_welcome(message):
         pass
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📚 ЧИТАТЬ ПОЛНЫЙ ГАЙД В TELETYPE 🌐", url="https://teletype.in/@ukrgorilka/Nya")
+        InlineKeyboardButton("📚 Полный гайд в Teletype", url="https://teletype.in/@ukrgorilka/Nya")
     )
-    
-    welcome_text = (
-        "🤖 <b>ГЛАВНЫЙ НАВИГАТОР НЯ-БОТА</b> 😺\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Добро пожаловать! Все команды, механики экономики, рестов, бизнесов и игр собраны в официальном руководстве: 😻\n\n"
-        "📖 <b>Официальный Teletype гайд:</b>\n"
-        "👉 https://teletype.in/@ukrgorilka/Nya\n\n"
-        "🎁 <b>Активируйте промокод:</b> <code>/promo FIX</code> на <b>5,000 🪙</b>!\n"
-        "\n💰 <b>БЫСТРЫЕ РУССКИЕ КОМАНДЫ</b>\n"
-        "• <code>баланс</code> / <code>профиль</code> / <code>магазин</code>\n"
-        "• <code>передать 10000</code> — ответом на сообщение\n"
-        "• <code>передать @username 10000</code> — перевод игроку\n"
-        "• <code>банк</code> / <code>банк положить 5000</code> / <code>банк снять 5000</code>\n"
-        "• <code>кредит 5000</code> / <code>погасить</code> / <code>кейс</code> / <code>задания</code>\n"
-        "• <code>работа</code> / <code>бизнес</code> / <code>прибыль</code> / <code>сад</code>\n"
-        "• <code>топ</code> / <code>ачивки</code> / <code>инвентарь</code>\n"
-        "\n💡 <i>Есть крутые идеи или нашли баг? Напишите создателю:</i> @ukrgorilka ✨\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 <i>Нажмите кнопку ниже, чтобы открыть статью:</i> 😸"
+    markup.row(
+        InlineKeyboardButton("📖 Меню команд", callback_data="v1:help:econ"),
+        InlineKeyboardButton("🚀 Обновление v1.0", callback_data="v1:upd:latest"),
+    )
+
+    welcome_text = card(
+        "🤖 <b>Добро пожаловать в NyaBot!</b> 😺",
+        body=[
+            "Все механики экономики, рестов, бизнесов, игр и отношений собраны здесь.",
+            "🎁 Стартовый промокод: <code>/promo FIX</code> → <b>+5,000 🪙</b>",
+            "📖 Гайд: https://teletype.in/@ukrgorilka/Nya",
+        ],
+        expandable=[
+            "💰 <b>Быстрые русские команды (нажми, чтобы раскрыть):</b>",
+            "• <code>баланс</code> · <code>профиль</code> · <code>дейли</code> · <code>собрать всё</code>",
+            "• <code>передать 10000</code> (ответом) или <code>передать @username 10000</code>",
+            "• <code>банк</code> · <code>банк положить 5000</code> · <code>банк снять 5000</code>",
+            "• <code>работа</code> · <code>бизнес</code> · <code>биржа</code> · <code>торговец</code> · <code>сад</code>",
+            "• <code>отн</code> · <code>дуэль @user 500</code> · <code>ограбление</code> · <code>+реп</code>",
+            "• <code>/help</code> · <code>/update</code> · <code>чек</code> · <code>бейдж</code>",
+        ],
+        footer="💡 Идеи или баги — @ukrgorilka · Открой меню кнопками ниже 👇",
     )
     try:
-        bot.reply_to(message, welcome_text, parse_mode='HTML')
+        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup, disable_web_page_preview=True)
     except Exception:
         pass
 
@@ -73,14 +78,15 @@ def cmd_profile_settings(message):
 def cmd_biometry(message):
     if not can_process_user_message(message): return
     econ=get_user_econ(message.from_user.id, clean_tag(message.from_user.first_name or message.from_user.username), username=message.from_user.username)
-    text=(
-        "📊 <b>БИОМЕТРИЯ И ЗАМЕРЫ</b>\n━━━━━━━━━━━━━━━━━━━━\n"
-        f"🍆 Писюн: <b>{econ.get('dick_size',15)} см</b> | 💦 Фап: <b>{econ.get('fap_count',0)}</b>\n"
-        f"🧬 Хромосомы: <b>{econ.get('chromosomes',46)}</b> | 🧠 IQ: <b>{econ.get('iq',100)}</b>\n"
-        f"🥩 Жир: <b>{econ.get('fat',20)}%</b> | 🦶 Пятка: <b>{econ.get('foot_size',25)} см</b>\n"
-        f"😎 Могнул: <b>{econ.get('mog_count',0)}</b> раз(а)\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Здесь собраны биометрия и симулятор Могера. Основной профиль теперь компактный."
+    text = card(
+        "📊 <b>Биометрия и замеры</b>",
+        body=[
+            f"🍆 Писюн: <b>{econ.get('dick_size',15)} см</b> · 💦 Фап: <b>{econ.get('fap_count',0)}</b>",
+            f"🧬 Хромосомы: <b>{econ.get('chromosomes',46)}</b> · 🧠 IQ: <b>{econ.get('iq',100)}</b>",
+            f"🥩 Жир: <b>{econ.get('fat',20)}%</b> · 🦶 Пятка: <b>{econ.get('foot_size',25)} см</b>",
+            f"😎 Могнул: <b>{econ.get('mog_count',0)}</b> раз(а)",
+        ],
+        footer="<i>Здесь собраны биометрия и симулятор Могера.</i>",
     )
     bot.reply_to(message,text,parse_mode='HTML')
 
@@ -98,21 +104,57 @@ def cmd_achievements(message):
     econ = get_user_econ(user_id, user_name, username=message.from_user.username)
     unlocked = econ.get('achievements', [])
 
-    lines = [f"🏆 <b>ДОСТИЖЕНИЯ: {make_link(message.chat.id, user_name, user_id, ping=False)}</b> 😺", "━━━━━━━━━━━━━━━━━━━━"]
+    unlocked_lines = []
+    locked_lines = []
     for ach_id, ach in ACHIEVEMENTS.items():
-        if ach_id in unlocked: lines.append(f"✅ <b>{ach['title']}</b> — {ach['desc']} (+{ach['reward']} 🪙)")
-        else: lines.append(f"🔒 <b>{ach['title']}</b> — {ach['desc']} (<b>+{ach['reward']} 🪙</b>)")
-    lines.append("━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"Прогресс: <b>{len(unlocked)}/{len(ACHIEVEMENTS)}</b> открыто. 😸")
-    bot.reply_to(message, "\n".join(lines), parse_mode='HTML')
+        if ach_id in unlocked:
+            unlocked_lines.append(f"✅ <b>{ach['title']}</b> — {ach['desc']} (+{ach['reward']} 🪙)")
+        else:
+            locked_lines.append(f"🔒 <b>{ach['title']}</b> — {ach['desc']} (+{ach['reward']} 🪙)")
+    bar = progress_bar(len(unlocked), max(1, len(ACHIEVEMENTS)), width=10)
+    body = [f"Прогресс: <b>{len(unlocked)}/{len(ACHIEVEMENTS)}</b> · {bar}"]
+    if unlocked_lines:
+        body.append("")
+        body.extend(unlocked_lines)
+    else:
+        body.append("Пока нет открытых достижений — всё впереди!")
+    exp = ["🔒 <b>Закрытые достижения (нажми, чтобы раскрыть):</b>", *locked_lines] if locked_lines else None
+    text = card(
+        f"🏆 <b>Достижения: {make_link(message.chat.id, user_name, user_id, ping=False)}</b>",
+        body=body,
+        expandable=exp,
+        footer="🏅 Выбрать значок для профиля: <code>бейдж</code>",
+    )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🏅 Выбрать бейдж", callback_data=f"v1:badge:menu:{user_id}"))
+    bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
 
 def cmd_balance(message):
     if not can_process_user_message(message):
         return
     user_name = (f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}").strip() or message.from_user.username
     econ = get_user_econ(message.from_user.id, user_name, username=message.from_user.username)
-    streak_info = f"\n🔥 <b>Ежедневный стрик:</b> {econ.get('bonus_streak', 0)} дн."
-    bot.reply_to(message, f"💵 <b>Ваш кошелек:</b> <b>{econ['balance']} Ня-коинов 💸</b>\n🏦 <b>В банке:</b> <b>{econ.get('bank_deposit', 0)} 🪙</b>{streak_info} 😺", parse_mode='HTML')
+    badge = badge_prefix(econ, globals().get('ACHIEVEMENTS'))
+    rep = int(econ.get('reputation', 0) or 0)
+    bal_text = card(
+        f"💳 <b>{badge}Кошелёк и банк</b>",
+        body=[
+            f"💵 На руках: <b>{int(econ.get('balance', 0)):,} 🪙</b>",
+            f"🏦 В банке: <b>{int(econ.get('bank_deposit', 0)):,} 🪙</b>",
+            f"🔥 Стрик бонуса: <b>{int(econ.get('bonus_streak', 0))} дн.</b> · ⭐ Репутация: <b>{rep}</b>",
+        ],
+        footer="💡 Быстро: <code>банк положить 5000</code> · <code>банк снять 5000</code>",
+    )
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("📥 В банк", callback_data=f"v1:bal:dep:{message.from_user.id}"),
+        InlineKeyboardButton("📤 Снять", callback_data=f"v1:bal:wd:{message.from_user.id}"),
+    )
+    markup.row(
+        InlineKeyboardButton("📋 Дейли", callback_data=f"v1:daily:open:{message.from_user.id}"),
+        InlineKeyboardButton("🧾 Чек 24ч", callback_data=f"v1:check:open:{message.from_user.id}"),
+    )
+    bot.reply_to(message, bal_text, parse_mode='HTML', reply_markup=markup)
 
 def cmd_top_daily(message):
     if can_process_user_message(message): render_activity_leaderboard(message.chat.id,'day')
@@ -143,7 +185,7 @@ def register(ctx, only=None):
     if "send_welcome" in wanted:
         _handler = send_welcome
         _handler = serialize_user_action(_handler)
-        bot.message_handler(commands=['start', 'help', 'menu', 'info'])(_handler)
+        bot.message_handler(commands=['start', 'menu', 'info'])(_handler)
         ctx["send_welcome"] = _handler
         globals()["send_welcome"] = _handler
         registered.append("send_welcome")

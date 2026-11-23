@@ -17,10 +17,11 @@ import re
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from core.locks import serialize_user_action
+from core.ui import card, format_duration, progress_bar
 
 
 RELATIONSHIPS_LOCK = threading.RLock()
@@ -97,9 +98,16 @@ def _relationship_transaction():
         if outermost:
             messages = list(getattr(RELATIONSHIP_OUTBOX, "messages", []))
             RELATIONSHIP_OUTBOX.messages = []
-            for message, text in messages:
+            for item in messages:
+                if len(item) == 3:
+                    message, text, markup = item
+                else:
+                    message, text, markup = item[0], item[1], None
                 try:
-                    bot.reply_to(message, text, parse_mode="HTML", disable_web_page_preview=False)
+                    kwargs = {"parse_mode": "HTML", "disable_web_page_preview": False}
+                    if markup is not None:
+                        kwargs["reply_markup"] = markup
+                    bot.reply_to(message, text, **kwargs)
                 except Exception as exc:
                     print(f"[RELATIONSHIP REPLY ERROR] {exc}")
 
@@ -364,6 +372,10 @@ def _normalize_pair(pair_id, pair):
     elif breakup is not None:
         set_value("breakup_confirmation", None)
 
+    set_value("streak", _safe_int(pair.get("streak"), 0, minimum=0))
+    last_streak = str(pair.get("last_streak_date") or "")[:10]
+    set_value("last_streak_date", last_streak)
+
     if changed:
         mark_dirty()
     return pair
@@ -557,6 +569,27 @@ def _credit(pair, amount):
     return amount, old_level
 
 
+def _update_pair_streak(pair):
+    # Increment daily activity streak and return (streak, bonus_petals) if a new day started.
+    today = _today()
+    last_date = str(pair.get("last_streak_date") or "")[:10]
+    if last_date == today:
+        return _safe_int(pair.get("streak"), 0, minimum=0), 0
+    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    current = _safe_int(pair.get("streak"), 0, minimum=0)
+    new_streak = (current + 1) if last_date == yesterday else 1
+    pair["streak"] = new_streak
+    pair["last_streak_date"] = today
+    bonus = 0
+    if new_streak == 3:
+        bonus = 10
+    elif new_streak >= 7 and new_streak % 7 == 0:
+        bonus = 25
+    if bonus:
+        _credit(pair, bonus)
+    return new_streak, bonus
+
+
 def _calculate_house_income(pair):
     house_data = HOUSES.get(pair.get("house"))
     if not house_data:
@@ -622,63 +655,100 @@ def _pair_profile_text(pair, user_id, chat_id):
     if protection > now:
         extra_lines.append(f"🛡 Защита активна: <b>ещё {max(1, math.ceil((protection - now) / 3600))} ч.</b>")
     extra_block = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
-    return (
-        "💞 <b>ПРОФИЛЬ ОТНОШЕНИЙ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 Вы: {html.escape(str(names.get(int(user_id)) or _user_name(user_id)))} · {my_gender}\n"
-        f"💗 Партнёр: {make_link(chat_id, names.get(partner_id) or _user_name(partner_id), partner_id, ping=False)} · {partner_gender}\n"
-        f"📅 Вместе с: <b>{started}</b> · <b>{days} дн.</b>\n"
-        f"⭐ Уровень пары: <b>{level}</b> ({level_note})\n"
-        f"🌸 Баланс: <b>{int(pair.get('petals', 0) or 0)} лепестков</b>\n"
-        f"🌺 Всего заработано: <b>{earned} лепестков</b>\n"
-        f"🏡 Дом: <b>{house}</b>\n"
-        f"👶 Детей: <b>{len(children)}/{MAX_CHILDREN_PER_PAIR}</b>\n"
-        f"🖼 GIF: <b>{'превью-ссылка' if pair.get('gif_mode', 'preview') == 'preview' else 'медиа'}</b>"
-        f"{extra_block}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Команды: <code>отн действия</code>, <code>отн задания</code>, <code>отн топ</code>, "
-        "<code>отн дети</code>, <code>отн планирование</code>, <code>отн дом</code>, <code>отн магазин</code>"
+    if level >= len(LEVEL_THRESHOLDS):
+        lvl_bar = progress_bar(1, 1, width=8)
+    else:
+        prev_thr = LEVEL_THRESHOLDS[level - 1]
+        next_thr = LEVEL_THRESHOLDS[level]
+        lvl_bar = progress_bar(max(0, earned - prev_thr), max(1, next_thr - prev_thr), width=8)
+    streak = _safe_int(pair.get("streak"), 0, minimum=0)
+    body_lines = [
+        f"👤 Вы: {html.escape(str(names.get(int(user_id)) or _user_name(user_id)))} · {my_gender}",
+        f"💗 Партнёр: {make_link(chat_id, names.get(partner_id) or _user_name(partner_id), partner_id, ping=False)} · {partner_gender}",
+        f"📅 Вместе с <b>{started}</b> · <b>{days} дн.</b>" + (f" · 🔥 Стрик: <b>{streak} дн.</b>" if streak else ""),
+        f"⭐ Уровень <b>{level}</b> ({level_note})",
+        f"📊 {lvl_bar}",
+        f"🌸 Баланс: <b>{int(pair.get('petals', 0) or 0)}</b> · Всего: <b>{earned}</b> лепестков",
+        f"🏡 Дом: <b>{house}</b> · 👶 Детей: <b>{len(children)}/{MAX_CHILDREN_PER_PAIR}</b>",
+        f"🖼 GIF: <b>{'превью-ссылка' if pair.get('gif_mode', 'preview') == 'preview' else 'медиа'}</b>",
+    ]
+    if extra_lines:
+        body_lines.extend(extra_lines)
+    return card(
+        "💞 <b>Профиль отношений</b>",
+        body=body_lines,
+        footer="Команды: <code>отн действия</code> · <code>отн задания</code> · <code>отн топ</code> · <code>отн дом</code> · <code>отн магазин</code>",
     )
 
 
 def _help_text():
-    return (
-        "💞 <b>СИСТЕМА ОТНОШЕНИЙ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "💌 <code>отн предложить @username</code> — предложить отношения\n"
-        "💗 <code>отн принять</code> / <code>отн отказать</code> — ответить на предложение\n"
-        "✉️ <code>отн отменить</code> — отменить своё исходящее предложение\n"
-        "👤 <code>отн профиль</code> — профиль вашей пары\n"
-        "🏆 <code>отн топ</code> — рейтинг лучших пар\n"
-        "⚧ <code>отн пол мужчина</code> / <code>женщина</code> / <code>сбросить</code> — пол для подбора GIF\n"
-        "🎭 <code>отн действия</code> — список RP-действий и их перезарядка\n"
-        "🖼 <code>отн гиф</code> / <code>отн гиф превью</code> / <code>отн гиф медиа</code> — режим GIF\n"
-        "🌷 <code>отн сделать комплимент</code> — +15 лепестков раз в час\n"
-        "🌸 <code>отн задания</code> / <code>отн забрать награду</code> — ежедневное задание\n"
-        "👶 <code>отн планировать ребёнка</code> — предложить совместное семейное планирование\n"
-        "🤝 <code>отн планирование принять</code> / <code>отказать</code> / <code>отменить</code> — ответ на предложение\n"
-        "🕒 <code>отн беременность</code> / <code>отн родить</code> — статус и завершение игрового семейного таймера (40 часов)\n"
-        "🧸 <code>отн дети</code> / <code>отн ребёнок имя Мира</code> / <code>отн ребёнок забота [№/имя]</code> / <code>отн ребёнок переименовать 1 НовоеИмя</code>\n"
-        "🛡 <code>отн защита купить</code> / <code>отн защита снять</code> — игровой предмет защиты на 48 часов\n"
-        "👨‍👩‍👧 <code>отн в семью @username</code> или ответом на сообщение — приглашение в семью; <code>отн родить @username</code> — тот же запрос\n"
-        "✅ <code>отн принять в семью</code> / <code>отн отказаться от семьи</code> / <code>отн выйти из семьи</code> — управление участием\n"
-        "🏡 <code>отн дом</code> / <code>отн дом купить домик</code> / <code>отн дом улучшить вилла</code> — общий дом и улучшение\n"
-        "🎁 <code>отн магазин</code> / <code>отн подарок розы</code> — магазин подарков\n"
-        "📜 <code>отн подарки</code> — история подарков пары\n"
-        "📖 <code>отн история</code> — архив завершённых отношений\n"
-        "💔 <code>отн расстаться</code> / <code>отн расстаться подтвердить</code> / <code>отн расстаться отменить</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Уровень растёт от общего количества заработанных лепестков. Потраченные лепестки не отнимают уровень."
+    return card(
+        "💞 <b>Система отношений</b>",
+        body=[
+            "💌 <code>отн предложить @username</code> — предложить отношения",
+            "💗 <code>отн принять</code> / <code>отн отказать</code> / <code>отн отменить</code>",
+            "👤 <code>отн профиль</code> · 🏆 <code>отн топ</code> · 🎭 <code>отн действия</code>",
+            "🌷 <code>отн сделать комплимент</code> · 🌸 <code>отн задания</code>",
+        ],
+        expandable=[
+            "<b>Все команды отношений (нажми, чтобы раскрыть):</b>",
+            "⚧ <code>отн пол мужчина</code> / <code>женщина</code> / <code>сбросить</code>",
+            "🖼 <code>отн гиф</code> / <code>отн гиф превью</code> / <code>отн гиф медиа</code>",
+            "👶 <code>отн планировать ребёнка</code> · <code>отн планирование принять</code> / <code>отказать</code> / <code>отменить</code>",
+            "🕒 <code>отн беременность</code> · <code>отн родить</code>",
+            "🧸 <code>отн дети</code> · <code>отн ребёнок имя Мира</code> · <code>отн ребёнок забота [№/имя]</code> · <code>отн ребёнок переименовать 1 Имя</code>",
+            "🛡 <code>отн защита купить</code> / <code>отн защита снять</code>",
+            "👨‍👩‍👧 <code>отн в семью @username</code> · <code>отн принять в семью</code> / <code>отказаться от семьи</code> / <code>выйти из семьи</code>",
+            "🏡 <code>отн дом</code> · <code>отн дом купить домик</code> · <code>отн дом улучшить вилла</code>",
+            "🎁 <code>отн магазин</code> · <code>отн подарок розы</code> · 📜 <code>отн подарки</code>",
+            "📖 <code>отн история</code> · 💔 <code>отн расстаться</code> / <code>подтвердить</code> / <code>отменить</code>",
+        ],
+        footer="<i>Уровень растёт от всех заработанных лепестков. Покупки не понижают уровень.</i>",
     )
 
 
-def _reply(message, text):
+def _make_inline_markup(rows):
+    markup_cls = globals().get("InlineKeyboardMarkup")
+    btn_cls = globals().get("InlineKeyboardButton")
+    if markup_cls is None or btn_cls is None:
+        return None
+    markup = markup_cls()
+    for row in rows:
+        buttons = [btn_cls(label, callback_data=cb) for label, cb in row]
+        if buttons:
+            markup.row(*buttons)
+    return markup
+
+
+def _profile_markup(user_id):
+    uid = int(user_id)
+    return _make_inline_markup([
+        [("🎭 Действия", f"rel:tab:actions:{uid}"), ("🌸 Задание", f"rel:tab:task:{uid}")],
+        [("🏡 Дом", f"rel:tab:house:{uid}"), ("🎁 Магазин", f"rel:tab:shop:{uid}"), ("👶 Дети", f"rel:tab:children:{uid}")],
+        [("🔄 Обновить", f"rel:tab:profile:{uid}")],
+    ])
+
+
+def _reply_with_markup(message, text, reply_markup=None):
+    if reply_markup is not None:
+        _reply(message, text, reply_markup=reply_markup)
+    else:
+        _reply(message, text)
+
+
+def _reply(message, text, reply_markup=None):
     # Many commands reply from inside a shared-state transaction. Queue those
     # messages so a slow Telegram API call never holds db_lock/RELATIONSHIPS_LOCK.
     if getattr(RELATIONSHIP_OUTBOX, "depth", 0) > 0:
-        RELATIONSHIP_OUTBOX.messages.append((message, text))
+        if reply_markup is not None:
+            RELATIONSHIP_OUTBOX.messages.append((message, text, reply_markup))
+        else:
+            RELATIONSHIP_OUTBOX.messages.append((message, text))
         return
-    bot.reply_to(message, text, parse_mode="HTML", disable_web_page_preview=False)
+    kwargs = {"parse_mode": "HTML", "disable_web_page_preview": False}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
+    bot.reply_to(message, text, **kwargs)
 
 
 def _handle_proposal(message, args, user_id, user_name):
@@ -726,7 +796,16 @@ def _handle_proposal(message, args, user_id, user_name):
             "chat_id": int(message.chat.id), "created_at": time.time(),
         }
         mark_dirty()
-    _reply(message, f"💌 {make_link(message.chat.id, user_name, user_id, ping=True)} предложил(а) отношения {make_link(message.chat.id, target_name, target_id, ping=True)}!\n\nЧтобы принять предложение, напиши <code>отн принять</code>. Для отказа — <code>отн отказать</code>. Предложение действует 24 часа.")
+    prop_markup = _make_inline_markup([[("💗 Принять", f"rel:acc:{target_id}"), ("❌ Отказать", f"rel:rej:{target_id}")]])
+    _reply_with_markup(
+        message,
+        card(
+            "💌 <b>Предложение отношений</b>",
+            body=f"{make_link(message.chat.id, user_name, user_id, ping=True)} предлагает отношения {make_link(message.chat.id, target_name, target_id, ping=True)}!",
+            footer="Нажми кнопку ниже или напиши <code>отн принять</code> / <code>отн отказать</code>. Действует 24 часа.",
+        ),
+        reply_markup=prop_markup,
+    )
 
 
 def _accept_proposal(message, user_id, user_name):
@@ -796,12 +875,15 @@ def _end_relationship(message, user_id, confirm=False):
         if not confirm:
             pair["breakup_confirmation"] = {"by": user_id, "at": now}
             mark_dirty()
-            _reply(
+            brk_markup = _make_inline_markup([[("⚠️ Подтвердить", f"rel:brk:yes:{user_id}"), ("💗 Отмена", f"rel:brk:no:{user_id}")]])
+            _reply_with_markup(
                 message,
-                "⚠️ <b>Подтверди расставание</b>\n"
-                "Это завершит активные отношения. Дом, дети, баланс и подарки будут сохранены в истории пары, "
-                "но использовать их дальше будет нельзя.\n\n"
-                "Для подтверждения в течение 2 минут напиши: <code>отн расстаться подтвердить</code>.",
+                card(
+                    "⚠️ <b>Подтверди расставание</b>",
+                    body="Это завершит активные отношения. Дом, дети, баланс и подарки сохранятся в архиве пары, но использовать их дальше будет нельзя.",
+                    footer="Подтверди кнопкой ниже или напиши <code>отн расстаться подтвердить</code> (действует 2 минуты).",
+                ),
+                reply_markup=brk_markup,
             )
             return
 
@@ -1021,6 +1103,7 @@ def _do_action(message, action_name, user_id, user_name):
         if reward:
             _credit(pair, reward)
         _progress_task(pair, "actions", 1)
+        streak_days, streak_bonus = _update_pair_streak(pair)
         partner_id = _partner_id(pair, user_id)
         partner_name = _user_name(partner_id)
         mark_dirty()
@@ -1038,6 +1121,8 @@ def _do_action(message, action_name, user_id, user_name):
         _reply(message, caption)
     if reward:
         _reply(message, f"🌸 +<b>{reward} лепестков</b> на общий счёт пары. Баланс: <b>{new_balance}</b>.")
+    if streak_bonus:
+        _reply(message, f"🔥 <b>Стрик пары {streak_days} дн.!</b> Бонус: +<b>{streak_bonus} лепестков</b> на общий счёт.")
     if new_level > old_level:
         _reply(message, f"🎉 <b>Новый уровень пары: {new_level}!</b> Открылись новые действия. Напишите <code>отн действия</code>.")
 
@@ -1821,7 +1906,7 @@ def handle_relationship_commands(message):
         if not pair_snapshot:
             _reply(message, f"💔 У тебя пока нет отношений. Начать можно командой <code>отн предложить @username</code>.{family_note}")
             return
-        _reply(message, _pair_profile_text(pair_snapshot, user_id, message.chat.id))
+        _reply_with_markup(message, _pair_profile_text(pair_snapshot, user_id, message.chat.id), reply_markup=_profile_markup(user_id))
         return
 
     if command in {"действия", "список"}:
@@ -1906,10 +1991,145 @@ def handle_relationship_commands(message):
 
     _reply(message, "Не понял команду. Посмотри список: <code>отн</code>.")
 
+def _edit_or_send_rel(call, text, reply_markup=None):
+    msg = getattr(call, "message", None)
+    if not msg:
+        return
+    kwargs = {"parse_mode": "HTML", "disable_web_page_preview": True}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
+    try:
+        bot.edit_message_text(text, chat_id=msg.chat.id, message_id=msg.message_id, **kwargs)
+    except Exception:
+        pass
+
+
+def handle_relationship_callbacks(call):
+    data = str(getattr(call, "data", "") or "")
+    if not data.startswith("rel:"):
+        return
+    user = getattr(call, "from_user", None)
+    msg = getattr(call, "message", None)
+    if not user or not msg:
+        return
+    user_id = _safe_int(getattr(user, "id", 0), 0, minimum=1)
+    user_name = (
+        f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}"
+    ).strip() or getattr(user, "username", None) or f"ID:{user_id}"
+    user_name = str(user_name)[:80]
+    parts = data.split(":")
+
+    try:
+        if len(parts) == 3 and parts[1] in {"acc", "rej"}:
+            target_id = _safe_int(parts[2], 0, minimum=1)
+            if user_id != target_id:
+                bot.answer_callback_query(call.id, "Эта кнопка предназначена только получателю предложения.", show_alert=True)
+                return
+            if parts[1] == "acc":
+                _accept_proposal(msg, user_id, user_name)
+                bot.answer_callback_query(call.id, "💞 Предложение принято!")
+            else:
+                removed = False
+                with _relationship_transaction():
+                    if _store()["pending"].pop(str(user_id), None) is not None:
+                        removed = True
+                        mark_dirty()
+                _edit_or_send_rel(call, "💔 Предложение отношений отклонено." if removed else "💌 Предложение уже недействительно.")
+                bot.answer_callback_query(call.id, "Отклонено" if removed else "Уже неактуально")
+            return
+
+        if len(parts) == 4 and parts[1] == "brk":
+            owner_id = _safe_int(parts[3], 0, minimum=1)
+            if user_id != owner_id and parts[2] == "yes":
+                bot.answer_callback_query(call.id, "Подтвердить может только инициатор.", show_alert=True)
+                return
+            if parts[2] == "yes":
+                _end_relationship(msg, user_id, confirm=True)
+                bot.answer_callback_query(call.id, "💔 Отношения завершены")
+            else:
+                with _relationship_transaction():
+                    pair = _pair_for(user_id)
+                    if pair and isinstance(pair.get("breakup_confirmation"), dict):
+                        pair["breakup_confirmation"] = None
+                        mark_dirty()
+                _edit_or_send_rel(call, "💗 Запрос на расставание отменён. Пара остаётся вместе!")
+                bot.answer_callback_query(call.id, "Отменено")
+            return
+
+        if len(parts) == 4 and parts[1] == "tab":
+            tab = parts[2]
+            owner_id = _safe_int(parts[3], 0, minimum=1)
+            with _relationship_transaction():
+                pair = _pair_for(user_id)
+                if not pair or (owner_id and owner_id not in [int(x) for x in pair.get("users", [])]):
+                    bot.answer_callback_query(call.id, "Эта панель относится к другой паре.", show_alert=True)
+                    return
+                _calculate_house_income(pair)
+                _ensure_daily_task(pair)
+                pair_snapshot = copy.deepcopy(pair)
+            if tab == "profile":
+                text = _pair_profile_text(pair_snapshot, user_id, msg.chat.id)
+            elif tab == "actions":
+                text = _actions_list(pair_snapshot, user_id)
+            elif tab == "task":
+                task = pair_snapshot.get("daily_task") or {}
+                prog = int(task.get("progress", 0))
+                targ = max(1, int(task.get("target", 1)))
+                status = "✅ получено" if task.get("claimed") else f"{prog}/{targ} · {progress_bar(prog, targ, width=8)}"
+                text = card(
+                    "🌸 <b>Ежедневное задание пары</b>",
+                    body=[
+                        html.escape(str(task.get("title", "Задание"))),
+                        f"Прогресс: <b>{status}</b>",
+                        f"Награда: <b>{int(task.get('reward', 0))} лепестков</b>",
+                    ],
+                    footer="После выполнения напиши: <code>отн забрать награду</code>",
+                )
+            elif tab == "house":
+                house_id = pair_snapshot.get("house")
+                if house_id in HOUSES:
+                    h = HOUSES[house_id]
+                    body = [f"{h['name']}", f"Доход: <b>{h['income']} леп./ч</b>", f"Баланс: <b>{int(pair_snapshot.get('petals', 0))} леп.</b>"]
+                else:
+                    body = ["У пары пока нет дома.", "Купить: <code>отн дом купить комната</code> (150 леп.)"]
+                text = card("🏡 <b>Дом пары</b>", body=body, footer="Подробнее: <code>отн дом</code>")
+            elif tab == "shop":
+                text = card(
+                    "🎁 <b>Магазин подарков</b>",
+                    body=[
+                        f"🌸 Баланс пары: <b>{int(pair_snapshot.get('petals', 0))} лепестков</b>",
+                        "• <code>отн подарок шоколад</code> (15) · <code>розы</code> (20)",
+                        "• <code>торт</code> (30) · <code>мишку</code> (45) · <code>духи</code> (65)",
+                        "• <code>украшение</code> (90) · <code>кольцо</code> (150) · <code>звезда</code> (250)",
+                    ],
+                    footer="История подарков: <code>отн подарки</code>",
+                )
+            elif tab == "children":
+                children = pair_snapshot.get("children", [])
+                if not children:
+                    body = ["Пока детей нет. Начните с <code>отн планировать ребёнка</code>."]
+                else:
+                    body = [
+                        f"{idx}. <b>{html.escape(str(c.get('name', 'Ребёнок')))}</b> · счастье {_safe_int(c.get('happiness'), 50, minimum=0, maximum=100)}/100"
+                        for idx, c in enumerate(children, start=1) if isinstance(c, dict)
+                    ]
+                text = card("👶 <b>Дети вашей пары</b>", body=body, footer="Забота: <code>отн ребёнок забота 1</code>")
+            else:
+                text = _pair_profile_text(pair_snapshot, user_id, msg.chat.id)
+            _edit_or_send_rel(call, text, reply_markup=_profile_markup(user_id))
+            bot.answer_callback_query(call.id)
+    except Exception as exc:
+        print(f"[RELATIONSHIP CALLBACK ERROR] {exc}")
+        try:
+            bot.answer_callback_query(call.id, "Ошибка обработки кнопки.")
+        except Exception:
+            pass
+
+
 def register(ctx, only=None):
     _inject(ctx)
     bot = ctx["bot"]
-    wanted = set(only) if only is not None else {"handle_relationship_commands"}
+    wanted = set(only) if only is not None else {"handle_relationship_commands", "handle_relationship_callbacks"}
     registered = []
     if "handle_relationship_commands" in wanted:
         handler = serialize_user_action(handle_relationship_commands)
@@ -1921,4 +2141,12 @@ def register(ctx, only=None):
         ctx["handle_relationship_commands"] = handler
         globals()["handle_relationship_commands"] = handler
         registered.append("handle_relationship_commands")
+    if "handle_relationship_callbacks" in wanted:
+        cb_handler = serialize_user_action(handle_relationship_callbacks)
+        bot.callback_query_handler(
+            func=lambda call: str(getattr(call, "data", "") or "").startswith("rel:")
+        )(cb_handler)
+        ctx["handle_relationship_callbacks"] = cb_handler
+        globals()["handle_relationship_callbacks"] = cb_handler
+        registered.append("handle_relationship_callbacks")
     return registered
